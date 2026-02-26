@@ -814,7 +814,7 @@ qt_tm_widget_rep::update_visibility () {
   bool old_titleVisibility = windowAgent->titleBar ()->isVisible ();
 
   bool new_mainVisibility  = visibility[1] && visibility[0];
-  bool new_menuVisibility  = visibility[0];
+  bool new_menuVisibility  = visibility[0] && !use_native_menubar;
   bool new_modeVisibility  = visibility[2] && visibility[0];
   bool new_focusVisibility = visibility[3] && visibility[0];
   bool new_userVisibility  = visibility[4] && visibility[0];
@@ -1205,21 +1205,7 @@ qt_tm_widget_rep::install_main_menu () {
   main_menu_widget    = waiting_main_menu_widget;
   QList<QAction*>* src= main_menu_widget->get_qactionlist ();
   if (!src) return;
-  QMenuBar* dest  = new QMenuBar ();
-  QScreen*  screen= QGuiApplication::primaryScreen ();
-#ifdef Q_OS_WIN
-  // 设置与 menuToolBar 匹配的固定高度
-  // 使用 devicePixelRatio() 获取正确的屏幕缩放比
-  // 获取屏幕DPI缩放比例
-  double dpi  = screen ? screen->logicalDotsPerInch () : 96.0;
-  double scale= dpi / 96.0;
-
-  int h= (int) floor (72 * scale + 0.5);
-#else
-  double scale= screen ? screen->devicePixelRatio () : 1.0; // 正确的屏幕缩放比
-  int    h    = (int) floor (108 * scale + 0.5);
-#endif
-  dest->setFixedHeight (h);
+  QMenuBar* dest= new QMenuBar ();
 
   if (tm_style_sheet == "") dest->setStyle (qtmstyle ());
   if (!use_native_menubar) {
@@ -1249,8 +1235,8 @@ qt_tm_widget_rep::install_main_menu () {
   for (QWidget* w : widgets) {
     w->setParent (nullptr);
   }
-  // 确保 menuToolBar 可见
-  if (!menuToolBar->isVisible ()) {
+  // 确保 menuToolBar 可见 (only when not using native menu bar)
+  if (!use_native_menubar && !menuToolBar->isVisible ()) {
     menuToolBar->setVisible (true);
   }
 
