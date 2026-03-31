@@ -332,6 +332,7 @@ namespace QWK {
         // System title bar
         void setSystemTitleBarVisible(const bool visible) {
             auto nswindow = [nsview window];
+            [nswindow setCollectionBehavior:[nswindow collectionBehavior] | NSWindowCollectionBehaviorFullScreenPrimary];
             if (!nswindow) {
                 return;
             }
@@ -348,8 +349,6 @@ namespace QWK {
             nswindow.hasShadow = YES;
             // nswindow.showsToolbarButton = NO;
             nswindow.movableByWindowBackground = NO;
-            nswindow.movable = NO; // This line causes the window in the wrong position when
-                                   // become fullscreen.
             [nswindow standardWindowButton:NSWindowCloseButton].hidden = NO;
             [nswindow standardWindowButton:NSWindowMiniaturizeButton].hidden = NO;
             [nswindow standardWindowButton:NSWindowZoomButton].hidden = NO;

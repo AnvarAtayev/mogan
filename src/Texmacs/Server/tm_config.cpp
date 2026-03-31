@@ -328,7 +328,8 @@ kbd_render (tree t) {
 static string
 kbd_system_prevails (string s) {
   string laf= get_preference ("look and feel");
-  bool   mac= os_macos () && (laf == "default" || laf == "macos");
+  bool   mac= os_macos () && (laf == "default" || laf == "macos") &&
+            !use_macos_fonts ();
   if (mac && starts (s, "A-")) {
     string ss= s (2, N (s));
     string r = "escape " * ss;

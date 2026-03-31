@@ -430,6 +430,9 @@ kill_tabpage (url win_u, url u) {
   // 在关闭文档，或标签页时都将调用此方法。
   tm_view vw= concrete_view (u);
   if (vw == NULL) return;
+  if (vw->buf != NULL && vw->buf->buf->name == url ("tmfs://startup-tab")) {
+    return;
+  }
   tm_window win        = vw->win;
   tm_window win_tabpage= vw->win_tabpage;
   if (win_tabpage == NULL) return;
@@ -538,10 +541,13 @@ attach_view (url win_u, url u) {
   set_scrollable (wid, vw->ed);
   vw->ed->cvw= wid.rep;
   ASSERT (is_attached (wid), "widget should be attached");
+  // 先通知 view 被设置，确保 view_history 更新后再调用 resume
+  // 这样 resume() 中的菜单刷新能获取到正确的 view 列表
+  notify_set_view (u);
   vw->ed->resume ();
   win->set_window_name (vw->buf->buf->title);
-  win->set_window_url (vw->buf->buf->name);
-  notify_set_view (u);
+  // set_window_url 移到 window_set_view 中，在 set_current_view 之后调用
+  // win->set_window_url (vw->buf->buf->name);
   // cout << "View attached\n";
 }
 
@@ -580,6 +586,9 @@ window_set_view (url win_u, url new_u, bool focus) {
   if (!is_none (old_u)) detach_view (old_u);
   attach_view (win_u, new_u);
   if (focus || get_current_view () == old_u) set_current_view (new_u);
+  // 在 set_current_view 之后调用 set_window_url，确保 SLOT_FILE 处理时 current
+  // view 已更新
+  win->set_window_url (new_vw->buf->buf->name);
   exec_delayed (scheme_cmd ("(make-cursor-visible '" *
                             scm_quote (as_string (new_u)) * ")"));
   exec_delayed (scheme_cmd ("(when (defined? 'refresh-auxiliary-widget) "

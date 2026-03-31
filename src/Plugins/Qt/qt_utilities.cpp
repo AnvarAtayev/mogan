@@ -11,6 +11,7 @@
 
 #include "qt_utilities.hpp"
 #include "QTMStyle.hpp"
+#include "url.hpp"
 #include <time.h>
 
 #include <QCoreApplication>
@@ -549,9 +550,35 @@ qt_supports (url u) {
 }
 
 bool
+qt_load_image_from_ramdisc (url u, QImage& im) {
+  // ramdisc URL 结构：concat(root("ramdisc", data), filename)
+  // 在访问树节点子元素前进行边界检查
+  if (N (u->t) < 2) {
+    im= QImage ();
+    return false;
+  }
+  url root_part= u[1];
+  if (N (root_part->t) < 3) {
+    im= QImage ();
+    return false;
+  }
+  url    data_url= root_part[2];
+  string img_data= data_url->t->label;
+  im             = QImage ();
+  return im.loadFromData ((const uchar*) img_data.begin (), N (img_data));
+}
+
+bool
 qt_image_size (url image, int& w, int& h) { // w, h in points
   if (DEBUG_CONVERT) debug_convert << "qt_image_size :" << LF;
-  QImage im= QImage (utf8_to_qstring (concretize (image)));
+  QImage im;
+  if (is_ramdisc (image)) {
+    qt_load_image_from_ramdisc (image, im);
+  }
+  else {
+    string concrete= concretize (image);
+    im             = QImage (utf8_to_qstring (concrete));
+  }
   if (im.isNull ()) {
     convert_error << "Cannot read image file '" << image << "'"
                   << " in qt_image_size" << LF;
@@ -573,7 +600,13 @@ qt_image_size (url image, int& w, int& h) { // w, h in points
 bool
 qt_native_image_size (url image, int& w, int& h) {
   if (DEBUG_CONVERT) debug_convert << "qt_image_size :" << LF;
-  QImage im= QImage (utf8_to_qstring (concretize (image)));
+  QImage im;
+  if (is_ramdisc (image)) {
+    qt_load_image_from_ramdisc (image, im);
+  }
+  else {
+    im= QImage (utf8_to_qstring (concretize (image)));
+  }
   if (im.isNull ()) return false;
   else {
     w= im.width ();
@@ -618,7 +651,13 @@ void
 qt_convert_image (url image, url dest, int w, int h) { // w, h in pixels
   if (DEBUG_CONVERT)
     debug_convert << "qt_convert_image " << image << " -> " << dest << LF;
-  QImage im (utf8_to_qstring (concretize (image)));
+  QImage im;
+  if (is_ramdisc (image)) {
+    qt_load_image_from_ramdisc (image, im);
+  }
+  else {
+    im= QImage (utf8_to_qstring (concretize (image)));
+  }
   if (im.isNull ())
     convert_error << "Cannot read image file '" << image << "'"
                   << " in qt_convert_image" << LF;

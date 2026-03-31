@@ -49,6 +49,9 @@ QTMTextToolbar::QTMTextToolbar (QWidget* parent, qt_simple_widget_rep* owner)
   setAttribute (Qt::WA_ShowWithoutActivating);
   setMouseTracking (true);
   setFocusPolicy (Qt::NoFocus);
+#if defined(Q_OS_MAC)
+  setProperty ("platform", "mac");
+#endif
   layout= new QHBoxLayout (this);
   layout->setContentsMargins (0, 0, 0, 0);
   layout->setSizeConstraint (QLayout::SetMinimumSize);
@@ -85,10 +88,54 @@ QTMTextToolbar::clearButtons () {
 
 void
 QTMTextToolbar::rebuildButtonsFromScheme () {
+  eval ("(use-modules (generic text-toolbar))");
+  object menu= eval ("'(horizontal (link text-toolbar-icons))");
+  object obj = call ("make-menu-widget", menu, 0);
+  if (!is_widget (obj)) return;
+
+  text_toolbar_widget  = concrete (as_widget (obj));
+  QList<QAction*>* list= text_toolbar_widget->get_qactionlist ();
+  if (!list) return;
+
   clearButtons ();
-  QLabel* placeholder= new QLabel ("文本工具栏", this);
-  placeholder->setAlignment (Qt::AlignCenter);
-  layout->addWidget (placeholder);
+
+  for (int i= 0; i < list->count (); ++i) {
+    QAction* action= list->at (i);
+    if (!action) continue;
+
+    if (action->isSeparator ()) {
+      QFrame* sep= new QFrame (this);
+      sep->setFrameShape (QFrame::VLine);
+      sep->setFrameShadow (QFrame::Plain);
+      sep->setFixedWidth (1);
+      sep->setSizePolicy (QSizePolicy::Fixed, QSizePolicy::Expanding);
+      layout->addWidget (sep);
+      continue;
+    }
+
+    if (action->text ().isNull () && action->icon ().isNull ()) {
+      layout->addSpacing (8);
+      continue;
+    }
+
+    if (QWidgetAction* wa= qobject_cast<QWidgetAction*> (action)) {
+      QWidget* w= wa->requestWidget (this);
+      if (w) layout->addWidget (w);
+      continue;
+    }
+
+    QToolButton* button= new QToolButton (this);
+    button->setObjectName ("text-toolbar-button");
+    button->setAutoRaise (true);
+    button->setDefaultAction (action);
+    button->setPopupMode (QToolButton::InstantPopup);
+#if defined(Q_OS_MAC)
+    button->setProperty ("platform", "mac");
+#endif
+    if (tm_style_sheet == "") button->setStyle (qtmstyle ());
+    layout->addWidget (button);
+  }
+
   autoSize ();
 }
 
@@ -245,11 +292,7 @@ QTMTextToolbar::autoSize () {
       Scale * cached_magf * 12.0; // 原始3.0倍，扩大4倍后为12.0倍
   int btn_size;
 
-#if defined(Q_OS_MAC)
-  btn_size= int (50 * totalScale);
-#else
   btn_size= int (40 * totalScale);
-#endif
 
   if (cached_magf <= 0.16) {
     btn_size= 25;

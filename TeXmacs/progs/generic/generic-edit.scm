@@ -166,6 +166,105 @@
         (set-message `(concat "Use " ,sh " in order to insert a tab")
                      "tab"))))
 
+;; 辅助函数：定义 enumerate-tag-list
+(define (enumerate-tag-list)
+  '(enumerate enumerate-1 enumerate-2 enumerate-3 enumerate-4))
+
+;; 辅助函数：定义 itemize-tag-list
+(define (itemize-tag-list)
+  '(itemize itemize-dot itemize-minus itemize-arrow))
+
+;; 辅助函数：定义 description-tag-list
+(define (description-tag-list)
+  '(description description-compact description-aligned description-dash description-long description-paragraphs))
+
+;; 辅助函数：检查是否在有序列表环境中
+(define (in-enumerate-context?)
+  (not (not (tree-search-upwards (focus-tree) (lambda (node) (tree-in? node (enumerate-tag-list)))))))
+
+;; 辅助函数：检查是否在无序列表环境中
+(define (in-itemize-context?)
+  (not (not (tree-search-upwards (focus-tree) (lambda (node) (tree-in? node (itemize-tag-list)))))))
+
+;; 辅助函数：检查是否在描述列表环境中
+(define (in-description-context?)
+  (not (not (tree-search-upwards (focus-tree) (lambda (node) (tree-in? node (description-tag-list)))))))
+
+;; 辅助函数：获取当前列表的类型
+(define (get-list-type)
+  (cond
+    ((in-description-context?) 'description)
+    ((in-itemize-context?) 'itemize)
+    ((in-enumerate-context?) 'enumerate)
+    (else #f)))
+
+;; 辅助函数：查找包含 item 的 concat 包装和真正的 item list
+(define (find-item-wrapper-and-list item)
+  (let ((wrapper #f)
+        (item-list #f))
+    (let loop ((current (tree-outer item)))
+      (if (tree-is? current 'concat)
+          (begin
+            (set! wrapper current)
+            (loop (tree-outer current)))
+          (set! item-list current)))
+    (values wrapper item-list)))
+
+;; 辅助函数：提取 item 内容（处理 concat 包装）
+(define (extract-item-content wrapper)
+  (if (and wrapper (> (tree-arity wrapper) 1))
+      (tree-copy (tree-ref wrapper 1))
+      #f))
+
+;; 辅助函数：在列表中移除 item（处理 concat 包装）
+(define (remove-item-from-list item wrapper item-list)
+  (if wrapper
+      ;; 如果有 wrapper，移除整个 wrapper
+      (let ((wrapper-index (tree-index wrapper)))
+        (tree-remove! item-list wrapper-index 1))
+      ;; 否则移除单个 item
+      (let ((item-index (tree-index item)))
+        (tree-remove! item-list item-index 1))))
+
+;; 在有序和无序列表中实现缩进功能
+(tm-define (kbd-variant t forwards?)
+  (:require 
+    (or
+      ;; 有序列表或者无序列表
+      (and (or in-enumerate-context? in-itemize-context?) (tree-is? (focus-tree) 'item))
+      ;; 描述列表
+      (and in-description-context? (tree-is? (focus-tree) 'item*))))
+
+  (let ((item (focus-tree)))
+    ;; 步骤 1: 查找包装和列表
+    (call-with-values (lambda () (find-item-wrapper-and-list item))
+      (lambda (wrapper item-list)
+        (if (and item item-list)
+            (let ((item-index (if wrapper (tree-index wrapper) (tree-index item))))
+              (if (> item-index 0)
+                  (let ((prev-item (tree-ref item-list (- item-index 1))))
+                    ;; 步骤 2: 提取内容
+                    (let ((item-content (extract-item-content wrapper)))
+                      ;; 步骤 3: 创建子列表并移动内容
+                      (tree-go-to prev-item :end)
+                      (insert-return)
+                      (let ((list-type (get-list-type)))
+                        (if list-type
+                            (make-tmlist list-type)
+                            (make-tmlist 'enumerate))) ; 默认使用有序列表
+                      ;; 步骤4：拷贝内容
+                      (if item-content
+                          (let ((new-item (focus-tree))
+                                (list-type (get-list-type)))
+                            
+                            (let ((content-stree (tree->stree item-content)))
+                              (if (eq? list-type 'description)
+                                  (tree-set! new-item `(concat (item*), content-stree))
+                                  (tree-set! new-item `(concat (item), content-stree)))
+                              (tree-go-to new-item))))
+                      ;; 步骤 5: 从原列表中移除
+                      (remove-item-from-list item wrapper item-list))))))))))
+
 (tm-define (kbd-variant t forwards?)
   (:require (and (tree-in? t '(label reference pageref eqref smart-ref))
                  (cursor-inside? t)))
