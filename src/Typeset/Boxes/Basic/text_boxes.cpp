@@ -127,7 +127,10 @@ text_box_rep::adjust_kerning (int mode, double factor) {
 
 box
 text_box_rep::right_contract_kerning (double factor) {
-  SI       pad= (SI) tm_round (factor * fn->wfn);
+  SI pad  = (SI) tm_round (factor * fn->wfn);
+  SI blank= max ((SI) 0, x2 - x4);
+  pad     = min (pad, blank);
+  if (pad <= 0) return this;
   xkerning nxk (0, 0, 0);
   if (!is_nil_or_zero (xk)) {
     nxk->left   = xk->left;
@@ -142,7 +145,10 @@ text_box_rep::right_contract_kerning (double factor) {
 
 box
 text_box_rep::left_contract_kerning (double factor) {
-  SI       pad= (SI) tm_round (factor * fn->wfn);
+  SI pad  = (SI) tm_round (factor * fn->wfn);
+  SI blank= max ((SI) 0, x3 - x1);
+  pad     = min (pad, blank);
+  if (pad <= 0) return this;
   xkerning nxk (0, 0, 0);
   if (!is_nil_or_zero (xk)) {
     nxk->left   = xk->left;
