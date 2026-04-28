@@ -18,7 +18,7 @@
 
 (define (ignore var val) (noop))
 (define-preferences
-  ("texmacs->markdown:flavour" "vanilla" ignore)
+  ("texmacs->markdown:flavour" "hugo" ignore)
   ("texmacs->markdown:paragraph-width" 79 ignore)
   ("texmacs->markdown:show-menu" "off" ignore)
   ("texmacs->markdown:numbered-sections" "on" ignore)

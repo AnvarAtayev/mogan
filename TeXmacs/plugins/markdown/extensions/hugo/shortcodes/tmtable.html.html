@@ -1,0 +1,31 @@
+{{/* Scientific data table shortcode.
+
+Uses standard GFM table syntax as inner content. Hugo's goldmark renderer
+handles the table parsing; this shortcode injects CSS classes and wraps in
+a <figure>.
+
+Usage:
+
+{{% tmtable colsep="1" caption="Optional caption" %}}
+| $n$ | $\ell\,[m]$ | $T\,[s]$ | $g\,[ms^{-2}]$ |
+|---|---|---|---|
+| 1 | 0.6 | 1.55 | 9.86 |
+| 2 | 0.6 | 1.57 | 9.60 |
+| 3 | 0.6 | 1.52 | 10.12 |
+{{% /tmtable %}}
+
+Parameters:
+  colsep:   column index (1-based) after which to draw a vertical separator
+  caption:  optional caption rendered below the table
+  class:    additional CSS classes for the table element
+*/}}
+{{- $tableClass := "tm-table" -}}
+{{- with .Get "colsep" }}{{- $tableClass = printf "%s tm-table-colsep-%s" $tableClass . -}}{{- end -}}
+{{- with .Get "class" }}{{- $tableClass = printf "%s %s" $tableClass . -}}{{- end -}}
+{{- $inner := replace .Inner "<table>" (printf "<table class=\"%s\">" $tableClass) -}}
+<figure class="tm-table-wrapper">
+  {{- $inner | safeHTML -}}
+  {{- with .Get "caption" -}}
+    <figcaption class="tm-table-caption">{{- . | markdownify -}}</figcaption>
+  {{- end -}}
+</figure>

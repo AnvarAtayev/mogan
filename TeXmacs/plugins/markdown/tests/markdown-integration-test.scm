@@ -94,12 +94,32 @@
    ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Hugo tests (paragraph-width 79, flavour hugo)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (regtest-markdown-hugo)
+  (set-preference "texmacs->markdown:flavour" "hugo")
+  (set-preference "texmacs->markdown:paragraph-width" 79)
+  (regression-test-group
+   "markdown hugo" "hugo"
+   :none :none
+   (test "abstract.tm"        (run-one-test "hugo" "abstract")        #t)
+   (test "algorithms.tm"      (run-one-test "hugo" "algorithms")      #t)
+   (test "doc-data.tm"        (run-one-test "hugo" "doc-data")        #t)
+   (test "frontmatter.tm"     (run-one-test "hugo" "frontmatter")     #t)
+   (test "marginal-figure.tm" (run-one-test "hugo" "marginal-figure") #t)
+   (test "marginal-note.tm"   (run-one-test "hugo" "marginal-note")   #t)
+   (test "tm-figures.tm"      (run-one-test "hugo" "tm-figures")      #t)
+   (test "wide-figure.tm"     (run-one-test "hugo" "wide-figure")     #t)
+   ))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Test suite entry point
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (tm-define (regtest-markdown-integration)
   ; Ensure texmacs->latex is available for math conversion tests
   (module-load '(convert latex tmtex))
-  (let ((n (+ (regtest-markdown-vanilla))))
+  (let ((n (+ (regtest-markdown-vanilla) (regtest-markdown-hugo))))
     (display* "Total: " (object->string n) " integration tests.\n")
     (display "Integration test suite of markdown: ok\n")))

@@ -19,5 +19,3 @@ summary: "Recent interest in essentially Riemannian, Gauß–Milnor subrings has
 title: "On the properties of $L^{\infty}$-Gauß-Milnor knots"
 ---
 
-
-

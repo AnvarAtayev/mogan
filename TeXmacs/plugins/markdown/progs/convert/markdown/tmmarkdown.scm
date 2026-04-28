@@ -25,6 +25,9 @@
       (string-append (string (char-upcase (string-ref s 0)))
                      (substring s 1))))
 
+(define (hugo-extensions?)
+  (== (get-preference "texmacs->markdown:flavour") "hugo"))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Counters
 ;; A custom counter system is necessary because we operate on strees, not a
@@ -196,20 +199,89 @@ first empty label"
     ,(string-drop-right (string-capitalize (symbol->string (first x))) 1)
     ,(texmacs->markdown* (second x))))
 
+(define (find-dueto-in-concat elems)
+  "Find a dueto node in a list of concat elements. Returns (index . dueto-node) or #f."
+  (let loop ((rest elems) (i 0))
+    (cond ((null? rest) #f)
+          ((func? (car rest) 'dueto) (cons i (car rest)))
+          (else (loop (cdr rest) (+ i 1))))))
+
+(define (extract-dueto body)
+  "Extract dueto from converted body. Returns (title . cleaned-body) where title may be #f."
+  (if (not (func? body 'document))
+      (cons #f body)
+      (let ((children (cdr body)))
+        (cond
+          ((and (nnull? children) (func? (car children) 'dueto))
+           (cons (cadr (car children))
+                 (if (null? (cdr children))
+                     '(document "")
+                     `(document ,@(cdr children)))))
+          ((and (nnull? children)
+                (func? (car children) 'concat)
+                (find-dueto-in-concat (cdar children)))
+           (let* ((found (find-dueto-in-concat (cdar children)))
+                  (concat-elems (cdr (car children)))
+                  (dueto-idx (car found))
+                  (dueto-node (cdr found))
+                  (title (cadr dueto-node))
+                  (before (list-head concat-elems dueto-idx))
+                  (after (list-tail concat-elems (+ dueto-idx 1)))
+                  (remaining (append before after))
+                  (new-first (cond
+                               ((null? remaining) "")
+                               ((null? (cdr remaining)) (car remaining))
+                               (else `(concat ,@remaining))))
+                  (rest-doc (cdr children))
+                  (new-body (cond
+                              ((and (equal? new-first "") (null? rest-doc)) '(document ""))
+                              ((equal? new-first "") `(document ,@rest-doc))
+                              (else `(document ,new-first ,@rest-doc)))))
+             (cons title new-body)))
+          (else (cons #f body))))))
+
+(define (make-hugo-env x type)
+  "Numbered environments for Hugo shortcode output."
+  (let* ((env-name (symbol->string (first x)))
+         (number (counter->string current-counter))
+         (style (symbol->string type))
+         (converted (texmacs->markdown* (second x)))
+         (extracted (extract-dueto converted))
+         (title (car extracted))
+         (body (cdr extracted)))
+    `(tm-env ,env-name ,number ,title ,style ,body)))
+
+(define (make-hugo-env* x type)
+  "Unnumbered environments for Hugo shortcode output."
+  (let* ((raw-name (symbol->string (first x)))
+         (env-name (string-drop-right raw-name 1))
+         (style (symbol->string type))
+         (converted (texmacs->markdown* (second x)))
+         (extracted (extract-dueto converted))
+         (title (car extracted))
+         (body (cdr extracted)))
+    `(tm-env ,env-name #f ,title ,style ,body)))
+
 (define (parse-env x)
-  (make-env x 'std))
+  (if (hugo-extensions?) (make-hugo-env x 'std) (make-env x 'std)))
 
 (define (parse-env* x)
-  (make-env* x 'std))
+  (if (hugo-extensions?) (make-hugo-env* x 'std) (make-env* x 'std)))
 
 (define (parse-plain-env x)
-  (make-env x 'plain))
+  (if (hugo-extensions?) (make-hugo-env x 'plain) (make-env x 'plain)))
 
 (define (parse-plain-env* x)
-  (make-env* x 'plain))
+  (if (hugo-extensions?) (make-hugo-env* x 'plain) (make-env* x 'plain)))
 
 (define (parse-proof x)
-  `(std-env* "Proof" ,(texmacs->markdown* (second x))))
+  (if (hugo-extensions?)
+      (let* ((converted (texmacs->markdown* (second x)))
+             (extracted (extract-dueto converted))
+             (title (car extracted))
+             (body (cdr extracted)))
+        `(tm-env "proof" #f ,title "std" ,body))
+      `(std-env* "Proof" ,(texmacs->markdown* (second x)))))
 
 (define (make-alg x extra)
   (when (nnull? extra)
@@ -233,6 +305,110 @@ first empty label"
 
 (define (parse-specified-alg* x)
   (make-alg `(dummy (document ,@(append (cdr (second x)) (cdr (third x))))) '()))
+
+(define (make-hugo-alg body number title)
+  `(tm-algorithm ,number ,title ,body))
+
+(define (parse-hugo-alg x)
+  (make-hugo-alg (texmacs->markdown* (second x))
+                 (counter->string current-counter) #f))
+
+(define (parse-hugo-alg* x)
+  (make-hugo-alg (texmacs->markdown* (second x)) #f #f))
+
+(define (parse-hugo-named-alg x)
+  (make-hugo-alg (texmacs->markdown* (third x))
+                 (counter->string current-counter)
+                 (texmacs->markdown* (second x))))
+
+(define (parse-hugo-specified-alg x)
+  (make-hugo-alg (texmacs->markdown*
+                  `(document ,@(append (cdr (second x)) (cdr (third x)))))
+                 (counter->string current-counter) #f))
+
+(define (parse-hugo-specified-alg* x)
+  (make-hugo-alg (texmacs->markdown*
+                  `(document ,@(append (cdr (second x)) (cdr (third x)))))
+                 #f #f))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Algorithm pseudo-code constructs
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (parse-algo-if x)
+  (let ((cond-md (texmacs->markdown* (second x)))
+        (body (texmacs->markdown* (third x))))
+    `(algo-block
+      (concat (strong "if") " " ,cond-md " " (strong "then"))
+      #f ,body)))
+
+(define (parse-algo-else-if x)
+  (let ((cond-md (texmacs->markdown* (second x)))
+        (body (texmacs->markdown* (third x))))
+    `(algo-block
+      (concat (strong "else if") " " ,cond-md " " (strong "then"))
+      #f ,body)))
+
+(define (parse-algo-else x)
+  (let ((body (texmacs->markdown* (second x))))
+    `(algo-block (strong "else") #f ,body)))
+
+(define (parse-algo-if-else-if x)
+  (let ((children (md-map texmacs->markdown* (cdr x))))
+    `(document ,@children (algo-line (strong "end if")))))
+
+(define (make-algo-loop-handler keyword-before keyword-after)
+  (lambda (x)
+    (let ((cond-md (texmacs->markdown* (second x)))
+          (body (texmacs->markdown* (third x))))
+      `(algo-block
+        (concat (strong ,keyword-before) " " ,cond-md " " (strong "do"))
+        (strong ,keyword-after)
+        ,body))))
+
+(define (make-algo-simple-block keyword-before keyword-after)
+  (lambda (x)
+    (let ((body (texmacs->markdown* (second x))))
+      `(algo-block (strong ,keyword-before)
+                   ,(if keyword-after `(strong ,keyword-after) #f)
+                   ,body))))
+
+(define (parse-algo-repeat x)
+  (let ((cond-md (texmacs->markdown* (second x)))
+        (body (texmacs->markdown* (third x))))
+    `(algo-block
+      (strong "repeat")
+      (concat (strong "until") " " ,cond-md)
+      ,body)))
+
+(define (make-algo-callable keyword)
+  (lambda (x)
+    (let ((name (texmacs->markdown* (second x)))
+          (args (texmacs->markdown* (third x)))
+          (body (texmacs->markdown* (fourth x))))
+      `(algo-block
+        (concat (strong ,keyword) " " ,name "(" ,args ")")
+        (strong ,(string-append "end " keyword))
+        ,body))))
+
+(define (parse-algo-inline keyword)
+  (lambda (x)
+    `(algo-line (concat (strong ,keyword) " " ,(texmacs->markdown* (second x))))))
+
+(define (parse-algo-keyword keyword)
+  (lambda (x) `(strong ,keyword)))
+
+(define (parse-algo-call x)
+  (let ((name (texmacs->markdown* (second x)))
+        (args (texmacs->markdown* (third x))))
+    `(concat ,name "(" ,args ")")))
+
+(define (parse-algo-comment x)
+  (let ((body (texmacs->markdown* (second x))))
+    `(concat "{" (em ,body) "}")))
+
+(define (parse-algo-indent x)
+  `(algo-indent ,(texmacs->markdown* (second x))))
 
 (define (parse-image x)
   (if (func? x 'md-alt-image)
@@ -367,14 +543,19 @@ first empty label"
           ; leave the label to create anchors later
           `(!concat (label ,label) (tag ,latex-tag))))))
 
+(define md-math*-common-rules
+  `((mathbbm . mathbb)
+    ("*" . "\\*")
+    (({) . (lbrace))
+    ((}) . (rbrace))
+    ((left\{) . (left\lbrace))
+    ((right\}) . (right\rbrace))
+    (,(cut func? <> 'ensuremath) . ,cadr)
+    (,(cut func? <> 'label) . ,append-latex-tag)))
+
 (define (md-math* t)
   (replace-fun-list t
-   `((mathbbm . mathbb)
-     ("*" . "\\*")
-     (({) . (lbrace))
-     ((}) . (rbrace))
-     ((left\{) . (left\lbrace))
-     ((right\}) . (right\rbrace))
+   `(,@md-math*-common-rules
      ; plugin extension: eqnarray-lab* and eqnarray-lab are used in equation
      ; arrays to add right-aligned labels. The prefix eq: is automatically added
      ; (see the style file markdown.ts)
@@ -387,12 +568,13 @@ first empty label"
                (tag (cadadr x)))
            (ahash-set! labels label tag)
            `(!concat (label ,label) (tag ,tag)))))
-     (,(cut func? <> 'ensuremath) . ,cadr)
-     (,(cut func? <> '!sub) .
-       ,(lambda (x) (cons "\\_" (md-math* (cdr x)))))
-     (,(cut func? <> 'label) . ,append-latex-tag )
      ; CAREFUL: this needs to happen before append-latex-tag, so it must go after
      (,(cut func? <> '!table) . ,md-fix-math-table))))
+
+(define (md-math-no-table* t)
+  "Like md-math* but without md-fix-math-table: serialize-latex provides row
+separators for array environments inside \\[ ... \\]."
+  (replace-fun-list t md-math*-common-rules))
 
 (define (parse-math x)
   ; HACK: use special labels to indicate numbered equations
@@ -418,9 +600,40 @@ first empty label"
 (define (parse-string s)
   (string-replace (string-replace s "_" "\\_") "*" "\\*"))
 
+(define (latex-has-table? t)
+  (cond ((not (pair? t)) #f)
+        ((func? t '!table) #t)
+        (else (list-any latex-has-table? (cdr t)))))
+
+(define (parse-tabular-cell c)
+  (if (func? c 'cell)
+      `(cell ,@(md-map texmacs->markdown* (cdr c)))
+      c))
+
+(define (parse-tabular-row r)
+  (if (func? r 'row)
+      `(row ,@(map parse-tabular-cell (cdr r)))
+      r))
+
+(define (parse-tabular-body tf)
+  (cond ((func? tf 'tformat)
+         (rcons (cDr tf) (parse-tabular-body (cAr tf))))
+        ((func? tf 'table)
+         `(table ,@(map parse-tabular-row (cdr tf))))
+        (else tf)))
+
 (define (parse-tabular x)
-  ; TODO: handle different types tabular, tabular*, block*, etc.
-  (cons 'tabular (tmtable-normalize (cons 'tformat (cdr x)))))
+  (let ((normalized (tmtable-normalize (cons 'tformat (cdr x)))))
+    (cons 'tabular (if (hugo-extensions?)
+                       (parse-tabular-body normalized)
+                       normalized))))
+
+(define (parse-equation* x)
+  (let* ((newx (replace-fun-list x '(((eq-number) . (label "TMINCREMENT")))))
+         (latex (math->latex newx)))
+    (if (latex-has-table? latex)
+        `(equation*-table ,(md-math-no-table* latex))
+        `(,(car x) ,(md-math* latex)))))
 
 (define (parse-verbatim x)
   (cons 'tt (cdr x)))
@@ -440,6 +653,120 @@ first empty label"
   `(hugo-short ,(string->symbol (tm->string (second x)))
                ,(md-map texmacs->markdown* (cddr x))))
 
+(define (description-item-start? x)
+  "Is @x a paragraph starting with (item* ...)?"
+  (or (func? x 'item*)
+      (and (func? x 'concat) (>= (length x) 2)
+           (func? (second x) 'item*))))
+
+(define (group-description-items children)
+  "Groups document children into (item-start continuation ...) lists."
+  (if (null? children) '()
+      (let loop ((rest (cdr children))
+                 (current (list (car children)))
+                 (result '()))
+        (cond
+          ((null? rest)
+           (reverse (cons (reverse current) result)))
+          ((description-item-start? (car rest))
+           (loop (cdr rest)
+                 (list (car rest))
+                 (cons (reverse current) result)))
+          (else
+           (loop (cdr rest)
+                 (cons (car rest) current)
+                 result))))))
+
+(define (parse-description-group group)
+  "Converts a group (item-start continuation ...) into a tm-description-item."
+  (let* ((first (car group))
+         (continuations (cdr group)))
+    (cond
+      ;; (concat (item* label) content ...) — item* with inline body text
+      ((and (func? first 'concat) (>= (length first) 2)
+            (func? (second first) 'item*))
+       (let* ((label (texmacs->markdown* (second (second first))))
+              (rest (cddr first))
+              (first-body (if (null? rest) '()
+                              (if (== (length rest) 1)
+                                  (list (texmacs->markdown* (car rest)))
+                                  (list (texmacs->markdown* (cons 'concat rest))))))
+              (cont-bodies (map texmacs->markdown* continuations))
+              (all-bodies (append first-body cont-bodies))
+              (body (cond ((null? all-bodies) "")
+                          ((== (length all-bodies) 1) (car all-bodies))
+                          (else `(document ,@all-bodies)))))
+         `(tm-description-item ,label ,body)))
+      ;; standalone (item* label) with optional continuation paragraphs
+      ((func? first 'item*)
+       (let* ((label (texmacs->markdown* (second first)))
+              (cont-bodies (map texmacs->markdown* continuations))
+              (body (cond ((null? cont-bodies) "")
+                          ((== (length cont-bodies) 1) (car cont-bodies))
+                          (else `(document ,@cont-bodies)))))
+         `(tm-description-item ,label ,body)))
+      ;; orphan content (no item* prefix)
+      (else
+       (if (null? continuations)
+           (texmacs->markdown* first)
+           `(document ,@(map texmacs->markdown* (cons first continuations))))))))
+
+(define (parse-description x)
+  "Converts description environment to intermediate form for serialization."
+  (let* ((children (cdr (second x)))
+         (groups (group-description-items children))
+         (converted (map parse-description-group groups)))
+    `(tm-description (document ,@converted))))
+
+(define (parse-item* x)
+  "Standalone item* outside a description: renders as bold label."
+  `(strong ,(texmacs->markdown* (second x))))
+
+(define (parse-folded-env x)
+  (if (hugo-extensions?)
+      `(folded ,(texmacs->markdown* (tm-ref x 0))
+               ,(texmacs->markdown* (tm-ref x 1)))
+      (texmacs->markdown* (tm-ref x 0))))
+
+(define (session-prompt-str item)
+  (let ((p (tm-ref item 0)))
+    (cond ((string? p) p)
+          ((func? p 'prompt) (or (tm->string (cadr p)) ""))
+          (else (or (tm->string p) "")))))
+
+(define (verbatim-text t)
+  "Extract raw text from a session stree without any markdown escaping."
+  (cond ((string? t) t)
+        ((func? t 'document)
+         (string-recompose (map verbatim-text (cdr t)) "\n"))
+        ((func? t 'concat)
+         (string-concatenate (map verbatim-text (cdr t))))
+        ((list? t)
+         (string-concatenate (map verbatim-text (cdr t))))
+        (else "")))
+
+(define (parse-session-item item)
+  "Convert one session item to (session-in prompt code) or (session-io prompt code output)"
+  (let ((prompt (session-prompt-str item)))
+    (cond
+      ((func? item 'input)
+       `(session-in ,prompt ,(verbatim-text (tm-ref item 1))))
+      ((func? item 'unfolded-io)
+       `(session-io ,prompt ,(verbatim-text (tm-ref item 1))
+                    ,(verbatim-text (tm-ref item 2))))
+      ((func? item 'folded-io)
+       `(session-in ,prompt ,(verbatim-text (tm-ref item 1))))
+      (else #f))))
+
+(define (parse-session x)
+  "Convert (session lang name body) to (tm-session lang items...)"
+  (let* ((lang (cadr x))
+         (body (tm-ref x 2))
+         (items (if (func? body 'document) (cdr body) (list body)))
+         (converted (list-filter (map parse-session-item items)
+                                 (lambda (i) i))))
+    `(tm-session ,lang ,@converted)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Dispatch
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -450,8 +777,8 @@ first empty label"
       (list 'abstract keep)
       (list 'acknowledgments (count parse-plain-env 'env))
       (list 'acknowledgments* parse-plain-env*)
-      (list 'algorithm (count parse-alg 'alg))
-      (list 'algorithm* parse-alg*)
+      (list 'algorithm (count (lambda (x) (if (hugo-extensions?) (parse-hugo-alg x) (parse-alg x))) 'alg))
+      (list 'algorithm* (lambda (x) (if (hugo-extensions?) (parse-hugo-alg* x) (parse-alg* x))))
       (list 'answer (count parse-plain-env 'env))
       (list 'answer* parse-plain-env*)
       (list 'assign drop)
@@ -481,6 +808,11 @@ first empty label"
       (list 'corollary* parse-env*)
       (list 'cpp-code (code-block "c++"))
       (list 'cpp parse-verbatim)
+      (list 'description parse-description)
+      (list 'description-aligned (change-to 'description))
+      (list 'description-compact (change-to 'description))
+      (list 'description-dash (change-to 'description))
+      (list 'description-long (change-to 'description))
       (list 'definition (count parse-env 'env))
       (list 'definition* parse-env*)
       (list 'dfn (change-to 'strong))
@@ -501,7 +833,7 @@ first empty label"
       (list 'eqnarray* (with-counter parse-math 'equation))
       (list 'eqnarray (with-counter parse-math 'equation)) ; does this exist?
       (list 'eqref parse-reference)
-      (list 'equation* parse-math)
+      (list 'equation* parse-equation*)
       (list 'equation (with-counter parse-math 'equation))
       (list 'example (count parse-plain-env 'env))
       (list 'example* parse-plain-env*)
@@ -522,6 +854,7 @@ first empty label"
       (list 'itemize keep)
       (list 'itemize-minus (change-to 'itemize))
       (list 'item keep)
+      (list 'item* parse-item*)
       (list 'label parse-label)
       (list 'LaTeX (change-to "LaTeX"))
       (list 'LaTeX* (change-to "(La)TeX"))
@@ -540,7 +873,7 @@ first empty label"
       (list 'menu (parse-menu 0))
       (list 'mmx-code (code-block "mmx"))
       (list 'mmx parse-verbatim)
-      (list 'named-algorithm (count parse-named-alg 'alg))
+      (list 'named-algorithm (count (lambda (x) (if (hugo-extensions?) (parse-hugo-named-alg x) (parse-named-alg x))) 'alg))
       (list 'name keep)  ; TODO: html extension
       (list 'nbsp (change-to "&nbsp;"))
       (list 'no-break-here drop)
@@ -573,6 +906,7 @@ first empty label"
       (list 'scilab parse-verbatim)
       (list 'scm-code (code-block "scheme"))
       (list 'scm parse-verbatim)
+      (list 'session parse-session)
       (list 'section (count (make-header 'h1) 'h1))
       (list 'section* (count-not (change-to 'h1) 'h1))
       (list 'shell-code (code-block "shell"))
@@ -585,8 +919,8 @@ first empty label"
       (list 'solution (count parse-plain-env 'env))
       (list 'solution* parse-plain-env*)
       (list 'specific parse-specific)
-      (list 'specified-algorithm (count parse-specified-alg 'alg))
-      (list 'specified-algorithm* parse-specified-alg*)
+      (list 'specified-algorithm (count (lambda (x) (if (hugo-extensions?) (parse-hugo-specified-alg x) (parse-specified-alg x))) 'alg))
+      (list 'specified-algorithm* (lambda (x) (if (hugo-extensions?) (parse-hugo-specified-alg* x) (parse-specified-alg* x))))
       (list 'src-var (skip-to))
       (list 'strike-through (change-to 'strike)) ; non-standard extension
       (list 'strong keep)
@@ -622,6 +956,40 @@ first empty label"
       (list 'wide-figure* parse-figure*)
       (list 'wide-tabular parse-tabular)
       (list 'with parse-with)
+      (list 'algo-and (parse-algo-keyword "and"))
+      (list 'algo-begin (make-algo-simple-block "begin" #f))
+      (list 'algo-body (make-algo-simple-block "do" #f))
+      (list 'algo-call parse-algo-call)
+      (list 'algo-comment parse-algo-comment)
+      (list 'algo-data (parse-algo-inline "Data:"))
+      (list 'algo-else parse-algo-else)
+      (list 'algo-else-if parse-algo-else-if)
+      (list 'algo-ensure (parse-algo-inline "Ensure:"))
+      (list 'algo-false (parse-algo-keyword "false"))
+      (list 'algo-for (make-algo-loop-handler "for" "end for"))
+      (list 'algo-for-all (make-algo-loop-handler "for all" "end for"))
+      (list 'algo-for-each (make-algo-loop-handler "for each" "end for"))
+      (list 'algo-function (make-algo-callable "function"))
+      (list 'algo-if parse-algo-if)
+      (list 'algo-if-else-if parse-algo-if-else-if)
+      (list 'algo-inputs (make-algo-simple-block "inputs" #f))
+      (list 'algo-loop (make-algo-simple-block "loop" "end loop"))
+      (list 'algo-not (parse-algo-keyword "not"))
+      (list 'algo-or (parse-algo-keyword "or"))
+      (list 'algo-outputs (make-algo-simple-block "outputs" #f))
+      (list 'algo-print (parse-algo-inline "print"))
+      (list 'algo-procedure (make-algo-callable "procedure"))
+      (list 'algo-repeat parse-algo-repeat)
+      (list 'algo-require (parse-algo-inline "Require:"))
+      (list 'algo-result (parse-algo-inline "Result:"))
+      (list 'algo-return (parse-algo-inline "return"))
+      (list 'algo-state (skip-to))
+      (list 'algo-to (parse-algo-keyword "to"))
+      (list 'algo-true (parse-algo-keyword "true"))
+      (list 'algo-while (make-algo-loop-handler "while" "end while"))
+      (list 'algo-xor (parse-algo-keyword "xor"))
+      (list 'folded-env parse-folded-env)
+      (list 'indent parse-algo-indent)
     ))
 
 ;; Copy from smart ref table

@@ -28,11 +28,12 @@
   "Output Hugo frontmatter"
   (if (hugo-extensions?)
       (with front (md-get 'frontmatter)
+        (ahash-set! front "math" "true")
         (when (nnull? (md-get 'doc-authors))
-          (ahash-set! front "authors" 
+          (ahash-set! front "authors"
                       `(tuple ,@(reverse (md-get 'doc-authors)))))
         (when (nnull? (md-get 'refs))
-          (ahash-set! front "refs" 
+          (ahash-set! front "refs"
                       `(tuple ,@(list-remove-duplicates (md-get 'refs)))))
         (string-append
          "---"
@@ -262,6 +263,21 @@
 (define (md-numbered-equation x)
   (md-equation x))
 
+(define (md-equation-table x)
+  "Renders equation*-table (equation* containing a tabular) as \\\\[ \\\\begin{array}...\\\\end{array} \\\\].
+serialize-latex provides \\\\ row separators; we double them to \\\\\\\\ before
+applying the \\\\[ and \\\\] escaping."
+  (let* ((s1 (md-math x (md-get 'paragraph-width)))
+         (s2 (string-replace s1 "\\\\" "\\\\\\\\"))
+         (s3 (string-replace s2 "\\[" "\\\\["))
+         (s4 (string-replace s3 "\\]" "\\\\]"))
+         (s5 (string-split s4 #\newline))
+         (s6 (map escape-md-symbols s5))
+         (anchors (string-concatenate (map create-equation-link s6)))
+         (lines (if (string-null? anchors) s6 (cons anchors s6))))
+    (with-md-globals 'num-line-breaks 1
+      (serialize-markdown* `(document ,@lines)))))
+
 (define (md-labels x)
   (md-set 'labels (list->ahash-table (cadr x)))
   "")
@@ -297,6 +313,123 @@
            (adjust-width (serialize-markdown* content) (md-get 'paragraph-width) indent indent))
           (else
            (string-append indent (serialize-markdown* content))))))
+
+(define (md-tm-description-item x)
+  "Renders '(tm-description-item label body)"
+  (let* ((title (serialize-markdown* (second x)))
+         (body-str (serialize-markdown* (third x))))
+    (if (hugo-extensions?)
+        (string-append "{{% description-item title="
+                       (string-quote title) " %}}\n"
+                       body-str "\n"
+                       "{{% /description-item %}}")
+        (string-append "**" title "** " body-str))))
+
+(define (md-tm-description x)
+  "Renders '(tm-description (document item1 item2 ...))"
+  (let ((content (serialize-markdown* (second x))))
+    (if (hugo-extensions?)
+        (string-append "{{% description %}}\n"
+                       content "\n"
+                       "{{% /description %}}")
+        content)))
+
+(define (md-folded x)
+  "Hugo extension: collapsible block. Intermediate form: (folded summary body)"
+  (if (hugo-extensions?)
+      (let ((summary (serialize-markdown* (second x)))
+            (body (serialize-markdown* (third x))))
+        (string-append "{{% details %}}\n"
+                       summary "\n"
+                       "<!-- split -->\n"
+                       body "\n"
+                       "{{% /details %}}"))
+      (serialize-markdown* (second x))))
+
+(define (md-tm-env x)
+  "Hugo extension: theorem-like environment as {{% env %}} shortcode.
+   Intermediate form: (tm-env type number-or-#f title-or-#f style body)"
+  (let* ((env-type (second x))
+         (number (third x))
+         (title (fourth x))
+         (style (list-ref x 4))
+         (body (list-ref x 5)))
+    (if (hugo-extensions?)
+        (let* ((title-str (if (and title (string? title)) title
+                              (if title (serialize-markdown* title) #f)))
+               (params (string-append
+                        "type=" (string-quote env-type)
+                        (if number
+                            (string-append " number=" (string-quote number))
+                            "")
+                        (if (and title-str (not (string-null? title-str)))
+                            (string-append " title=" (string-quote title-str))
+                            "")
+                        (if (string=? style "plain") " style=\"plain\"" "")))
+               (content (serialize-markdown* body)))
+          (string-append "{{% env " params " %}}\n"
+                         content "\n"
+                         "{{% /env %}}"))
+        (serialize-markdown* body))))
+
+(define (md-algo-block x)
+  "Serializes (algo-block header closing body)."
+  (let* ((header (serialize-markdown* (second x)))
+         (closing (third x))
+         (body (fourth x))
+         (closing-str (if closing (serialize-markdown* closing) #f)))
+    (if (hugo-extensions?)
+        (let ((body-str (serialize-markdown* body)))
+          (string-append header "\n"
+                         "{{% indent %}}\n"
+                         body-str "\n"
+                         "{{% /indent %}}"
+                         (if closing-str (string-append "\n" closing-str) "")))
+        (let ((body-str (with-md-globals 'indent (indent-increment 2)
+                          (with-md-globals 'first-indent (md-get 'indent)
+                            (serialize-markdown* body)))))
+          (string-append header "\n"
+                         body-str
+                         (if closing-str (string-append "\n" closing-str) ""))))))
+
+(define (md-algo-line x)
+  "Serializes (algo-line content)."
+  (serialize-markdown* (second x)))
+
+(define (md-algo-indent x)
+  "Serializes (algo-indent body). Hugo: {{% indent %}} shortcode. Vanilla: 2-space indent."
+  (let ((body (second x)))
+    (if (hugo-extensions?)
+        (let ((body-str (serialize-markdown* body)))
+          (string-append "{{% indent %}}\n"
+                         body-str "\n"
+                         "{{% /indent %}}"))
+        (with-md-globals 'indent (indent-increment 2)
+          (with-md-globals 'first-indent (md-get 'indent)
+            (serialize-markdown* body))))))
+
+(define (md-tm-algorithm x)
+  "Hugo extension: algorithm environment as {{% algorithm %}} shortcode.
+   Intermediate form: (tm-algorithm number-or-#f title-or-#f body)"
+  (let* ((number (second x))
+         (title (third x))
+         (body (fourth x))
+         (title-str (if (and title (string? title)) title
+                        (if title (serialize-markdown* title) #f)))
+         (params (string-append
+                  (if number (string-append "number=" (string-quote number)) "")
+                  (if (and title-str (not (string-null? title-str)))
+                      (string-append (if number " " "")
+                                     "title=" (string-quote title-str))
+                      "")))
+         (content (serialize-markdown* body)))
+    (if (hugo-extensions?)
+        (string-append "{{% algorithm"
+                       (if (string-null? params) "" (string-append " " params))
+                       " %}}\n"
+                       content "\n"
+                       "{{% /algorithm %}}")
+        (serialize-markdown* body))))
 
 (define (is-item? x)
   (nnull? (select x '(:%0 item))))
@@ -365,7 +498,9 @@
 (define md-style-tag-list '(em strong tt strike underline))
 (define md-style-drop-tag-list
   '(marginal-note marginal-note* footnote footnote* label item
-    equation equation* eqnarray eqnarray* math))
+    equation equation* equation*-table eqnarray eqnarray* math
+    folded tm-env tm-algorithm algo-block algo-indent algo-line
+    tm-description tm-description-item))
 (define md-stylable-tag-list '(document itemize enumerate quotation))
 ; Tags NOT included here by design:
 ;   theorem/lemma/etc. never appear (tmmarkdown converts them to std-env/plain-env)
@@ -540,14 +675,102 @@
 
 (define (md-hrule x) "---")
 
+(define (md-session x)
+  "Serialize (tm-session lang items...) as a REPL-style fenced code block."
+  (let* ((lang (second x))
+         (items (cddr x))
+         (backquotes (md-encoding->tm-encoding "```" (md-get 'file?))))
+    (with-md-globals 'num-line-breaks 1
+      (with-md-globals 'paragraph-width #f
+        (let* ((lines
+                (apply append
+                       (map (lambda (item)
+                              (cond
+                                ((func? item 'session-in)
+                                 (list (string-append (second item) (third item))))
+                                ((func? item 'session-io)
+                                 (let* ((code (string-append (second item) (third item)))
+                                        (out (cadddr item)))
+                                   (if (string-nnull? out)
+                                       (list code out)
+                                       (list code))))
+                                (else '())))
+                            items)))
+               (content (string-recompose lines "\n")))
+          (string-concatenate
+           `(,backquotes ,lang "\n" ,content "\n" ,backquotes)))))))
+
+(define (md-cwith-list tformat)
+  (if (func? tformat 'tformat)
+      (filter (cut func? <> 'cwith 6) (cDr tformat))
+      '()))
+
+(define (md-detect-colsep tformat)
+  "Return 1-based column index with cell-rborder 1ln, or #f"
+  (let loop ((specs (md-cwith-list tformat)))
+    (cond ((null? specs) #f)
+          ((let* ((s (car specs))
+                  (c1 (list-ref s 3)) (c2 (list-ref s 4))
+                  (prop (list-ref s 5)) (val (list-ref s 6)))
+             (and (== prop "cell-rborder") (== val "1ln") (== c1 c2)))
+           (string->number (list-ref (car specs) 3)))
+          (else (loop (cdr specs))))))
+
+(define (md-detect-header tformat)
+  "Return #t if row 1 has cell-bborder 1ln"
+  (let loop ((specs (md-cwith-list tformat)))
+    (cond ((null? specs) #f)
+          ((let* ((s (car specs))
+                  (r1 (list-ref s 1)) (r2 (list-ref s 2))
+                  (prop (list-ref s 5)) (val (list-ref s 6)))
+             (and (== prop "cell-bborder") (== val "1ln") (== r1 "1") (== r2 "1")))
+           #t)
+          (else (loop (cdr specs))))))
+
+(define (md-cell->string c)
+  (if (func? c 'cell)
+      (string-trim-spaces
+       (string-concatenate (md-map serialize-markdown* (cdr c))))
+      ""))
+
+(define (md-row->gfm row)
+  (if (func? row 'row)
+      (string-append "| "
+                     (string-recompose (map md-cell->string (cdr row)) " | ")
+                     " |")
+      ""))
+
+(define (md-tabular-hugo x)
+  (let* ((tformat (cdr x))
+         (table   (if (func? tformat 'tformat) (cAr tformat) tformat))
+         (rows    (if (func? table 'table) (cdr table) '()))
+         (ncols   (if (null? rows) 0 (length (cdr (car rows)))))
+         (sep     (apply string-append (cons "|" (make-list ncols "---|"))))
+         (colsep  (md-detect-colsep tformat))
+         (open    (string-append "{{% tmtable"
+                                 (if colsep
+                                     (string-append " colsep=\""
+                                                    (number->string colsep) "\"")
+                                     "")
+                                 " %}}\n")))
+    (if (null? rows) ""
+        (string-append
+         open
+         (md-row->gfm (car rows)) "\n"
+         sep "\n"
+         (string-recompose (map md-row->gfm (cdr rows)) "\n")
+         "\n{{% /tmtable %}}"))))
+
 (define (md-tabular x)
-  (if (== "html" (get-preference "texmacs->markdown:table-format"))
-      (let ((opts '(("texmacs->html:css" . "on")
-                    ("texmacs->html:mathjax" . "on")
-                    ("texmacs->html:mathml" . "off")
-                    ("texmacs->html:images" . "on"))))
-        (serialize-html (texmacs->html (maybe-rewrap-html-class (cdr x)) opts)))
-      (serialize-markdown* `(document "Tables not implemented for raw markdown"))))
+  (if (hugo-extensions?)
+      (md-tabular-hugo x)
+      (if (== "html" (get-preference "texmacs->markdown:table-format"))
+          (let ((opts '(("texmacs->html:css" . "on")
+                        ("texmacs->html:mathjax" . "on")
+                        ("texmacs->html:mathml" . "off")
+                        ("texmacs->html:images" . "on"))))
+            (serialize-html (texmacs->html (maybe-rewrap-html-class (cdr x)) opts)))
+          (serialize-markdown* `(document "Tables not implemented for raw markdown")))))
 
 (define (md-html-class x)
   (with-md-globals 'html-class (second x)
@@ -608,6 +831,8 @@
       (list 'doc-subtitle md-doc-subtitle)
       (list 'doc-title md-doc-title)
       (list 'document md-document)
+      (list 'tm-description md-tm-description)
+      (list 'tm-description-item md-tm-description-item)
       (list 'dueto md-dueto)
       (list 'em md-style)
       (list 'enumerate md-list)
@@ -615,6 +840,7 @@
       (list 'eqnarray md-numbered-equation)
       (list 'eqref md-eqref)
       (list 'equation* md-equation)
+      (list 'equation*-table md-equation-table)
       (list 'equation md-numbered-equation)
       (list 'explain-macro md-explain-macro)
       (list 'footnote md-footnote)
@@ -659,6 +885,13 @@
       (list 'tt md-style)
       (list 'underline md-style)
       (list 'wide-figure (md-figure 'tmfigure '(class . "wide-figure")))
+      (list 'algo-block md-algo-block)
+      (list 'algo-indent md-algo-indent)
+      (list 'algo-line md-algo-line)
+      (list 'folded md-folded)
+      (list 'tm-algorithm md-tm-algorithm)
+      (list 'tm-env md-tm-env)
+      (list 'tm-session md-session)
     ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -695,7 +928,16 @@
   (md-init-globals!)
   (md-string (serialize-markdown* x)))
 
+(define (strip-leading-newlines s)
+  (let loop ((i 0))
+    (cond ((>= i (string-length s)) "")
+          ((char=? (string-ref s i) #\newline) (loop (+ i 1)))
+          (else (substring s i)))))
+
 (tm-define (serialize-markdown-document x)
   (md-init-globals!)
   (with body (serialize-markdown* x)
-    (md-string (string-append (prelude) body (postlude)))))
+    ; Strip leading newlines from the body: in Hugo mode, doc-title/author/date
+    ; serialize to "" (they go into YAML frontmatter) but still produce "\n\n"
+    ; separators in md-document, creating unwanted blank lines after the --- block.
+    (md-string (string-append (prelude) (strip-leading-newlines body) (postlude)))))
