@@ -3,6 +3,7 @@
  * MODULE     : QTMTabPage.cpp
  * DESCRIPTION: QT Texmacs tab page classes
  * COPYRIGHT  : (C) 2024 Zhenjun Guo
+ *                  2026 Yifan Lu
  *******************************************************************************
  * This software falls under the GNU general public license version 3 or later.
  * It comes WITHOUT ANY WARRANTY WHATSOEVER. For details, see the file LICENSE
@@ -17,9 +18,13 @@
 #include <QSize>
 
 // Base tab widths
-constexpr int MAX_TAB_PAGE_WIDTH_BASE   = 150;
-constexpr int MIN_TAB_PAGE_WIDTH_BASE   = 25;
-constexpr int STARTUP_TAB_MAX_WIDTH_BASE= 100;
+constexpr int MAX_TAB_PAGE_WIDTH_BASE= 150;
+constexpr int MIN_TAB_PAGE_WIDTH_BASE= 25;
+#ifdef IS_COMMUNITY
+constexpr int STARTUP_TAB_MAX_WIDTH_BASE= 120;
+#else
+constexpr int STARTUP_TAB_MAX_WIDTH_BASE= 90;
+#endif
 
 // The horizontal padding for tab container (in pixels).
 #ifdef Q_OS_MAC
@@ -28,15 +33,11 @@ const int TAB_CONTAINER_PADDING= 75;
 const int TAB_CONTAINER_PADDING= 0;
 #endif
 
-#ifdef Q_OS_MAC
-constexpr int TAB_CONTENT_VERTICAL_OFFSET   = 4.5;
-constexpr int ADD_TAB_BUTTON_VERTICAL_OFFSET= 4;
-constexpr int TAB_RIGHT_EXTRA_GAP           = 0;
-#else
 constexpr int TAB_CONTENT_VERTICAL_OFFSET   = 0;
 constexpr int ADD_TAB_BUTTON_VERTICAL_OFFSET= 0;
 constexpr int TAB_RIGHT_EXTRA_GAP           = 66;
-#endif
+constexpr int ADD_BUTTON_SIZE               = 20;
+constexpr int CLOSE_BUTTON_SIZE             = 18;
 
 // DPI scaling utility functions (使用 DpiUtils)
 static double
@@ -60,34 +61,13 @@ getScaledStartupTabMaxWidth () {
 }
 
 static int
-getScaledSystemBarHeight () {
-#ifdef Q_OS_MAC
-  constexpr int baseHeight= 22;
-#else
-  constexpr int baseHeight= 36;
-#endif
-  return int (baseHeight * getDPIScaleFactor ());
+getScaledAddButtonHeight () {
+  return DpiUtils::scaled (ADD_BUTTON_SIZE);
 }
 
 static int
-getScaledSystemButtonHeight () {
-#ifdef Q_OS_MAC
-  constexpr int baseHeight= 15;
-#else
-  constexpr int baseHeight= 24;
-#endif
-  return int (baseHeight * getDPIScaleFactor ());
-}
-
-static QSize
-getScaledTabCloseButtonSize () {
-#ifdef Q_OS_MAC
-  constexpr int baseSize= 12;
-#else
-  constexpr int baseSize= 20;
-#endif
-  int side= qMax (baseSize, int (baseSize * getDPIScaleFactor ()));
-  return QSize (side, side);
+getScaledCloseButtonHeight () {
+  return DpiUtils::scaled (CLOSE_BUTTON_SIZE);
 }
 
 /**
@@ -106,7 +86,6 @@ getScaledTabCloseButtonSize () {
  */
 int                  g_tabWidth              = -1;
 int                  g_pointingIndex         = -1;
-int                  g_hiddentTabIndex       = -1;
 url                  g_mostRecentlyClosedTab = url_none ();
 url                  g_mostRecentlyDraggedTab= url_none ();
 QTMTabPageContainer* g_mostRecentlyDraggedBar= nullptr;
@@ -142,29 +121,43 @@ QTMTabPage::QTMTabPage (url p_url, QAction* p_title, QAction* p_closeBtn,
   p_title->setChecked (p_isActive);
   setDefaultAction (p_title);
   setFocusPolicy (Qt::NoFocus);
-  initializeCloseButton ();
-  m_closeBtn->setDefaultAction (p_closeBtn);
-  connect (m_closeBtn, &QToolButton::clicked, this,
-           [=] () { g_mostRecentlyClosedTab= m_viewUrl; });
+  initializeCloseButton (p_closeBtn);
+  int pad   = DpiUtils::scaled (8);
+  int radius= DpiUtils::scaled (10);
+  setStyleSheet (
+      QString ("padding: %1px; border-radius: %2px;").arg (pad).arg (radius));
+  DpiUtils::applyScaledFont (this, 14);
 }
 
 QTMTabPage::QTMTabPage () : m_viewUrl (url_none ()) {
   setFocusPolicy (Qt::NoFocus);
-  initializeCloseButton ();
+  int pad   = DpiUtils::scaled (8);
+  int radius= DpiUtils::scaled (10);
+  setStyleSheet (
+      QString ("padding: %1px; border-radius: %2px;").arg (pad).arg (radius));
+  DpiUtils::applyScaledFont (this, 14);
 }
 
 void
-QTMTabPage::initializeCloseButton () {
-  m_closeBtn= new QToolButton (this);
+QTMTabPage::initializeCloseButton (QAction* closeAction) {
+  m_closeBtn= new QWK::WindowButton (this);
   m_closeBtn->setObjectName ("tabpage-close-button");
   m_closeBtn->setFocusPolicy (Qt::NoFocus);
-#ifdef Q_OS_MAC
-  m_closeBtn->setProperty ("platform", "mac");
-#endif
-  const QSize closeBtnSize= getScaledTabCloseButtonSize ();
-  m_closeBtn->setFixedSize (closeBtnSize);
-  const int closeIconSide= qMax (closeBtnSize.width () - 4, 8);
-  m_closeBtn->setIconSize (QSize (closeIconSide, closeIconSide));
+  int closeBtnSize= getScaledCloseButtonHeight ();
+  m_closeBtn->setMinimumSize (closeBtnSize, closeBtnSize);
+  m_closeBtn->setFixedSize (closeBtnSize, closeBtnSize);
+  m_closeBtn->setSizePolicy (QSizePolicy::Fixed, QSizePolicy::Fixed);
+  int closeBtnRadius= DpiUtils::scaled (6);
+  m_closeBtn->setStyleSheet (
+      QString ("border-radius: %1px; padding: 0px;").arg (closeBtnRadius));
+  if (closeAction) {
+    QPointer<QAction> safeAction (closeAction);
+    connect (m_closeBtn, &QPushButton::clicked, this, [=] () {
+      if (!safeAction) return;
+      g_mostRecentlyClosedTab= m_viewUrl;
+      safeAction->trigger ();
+    });
+  }
   updateCloseButtonVisibility ();
 }
 
@@ -183,7 +176,7 @@ QTMTabPage::paintEvent (QPaintEvent*) {
 
   // 计算可用的文字绘制区域，需要排除关闭按钮的空间
   int leftPadding   = 10;
-  int rightPadding  = m_closeBtn->isVisible ()
+  int rightPadding  = (m_closeBtn && m_closeBtn->isVisible ())
                           ? m_closeBtn->width () + 12
                           : 12; // 如果关闭按钮可见，留出更多空间
   int availableWidth= width () - leftPadding - rightPadding;
@@ -194,32 +187,28 @@ QTMTabPage::paintEvent (QPaintEvent*) {
     rightPadding  = width () - leftPadding - availableWidth;
   }
 
-  int fontBoxH   = fm.height ();
-  int centeredTop= (getScaledSystemBarHeight () - fontBoxH) / 2;
-  centeredTop+= TAB_CONTENT_VERTICAL_OFFSET;
-#ifdef Q_OS_WIN
-  // Windows 上字体度量与控件背景的边距叠加，通常需要轻微上移 1px 以达到光学居中
-  const int opticalAdjust= -1;
-#else
-  const int opticalAdjust= 0;
-#endif
-  centeredTop+= opticalAdjust;
-
-  QRect textRect (leftPadding, qMax (0, centeredTop), availableWidth, fontBoxH);
-
   // 使用省略号来处理过长的文字
   QString elidedText= fm.elidedText (text (), Qt::ElideRight, availableWidth);
 
-  p.drawItemText (textRect, Qt::AlignLeft | Qt::AlignVCenter, palette (),
+  bool isStartup= is_startup_tab_view (m_viewUrl);
+  int  textAlign= isStartup ? Qt::AlignCenter : Qt::AlignLeft;
+
+  QRect textRect (leftPadding, 0, availableWidth, height ());
+  if (isStartup) {
+    textRect= QRect (0, 0, width (), height ());
+  }
+
+  p.drawItemText (textRect, textAlign | Qt::AlignVCenter, palette (),
                   isEnabled (), elidedText, QPalette::ButtonText);
 }
 
 void
 QTMTabPage::resizeEvent (QResizeEvent* e) {
+  if (!m_closeBtn) return;
   int w= m_closeBtn->width ();
   int h= m_closeBtn->height ();
   int x= e->size ().width () - w - 12;
-  int y= (getScaledSystemBarHeight () - h) / 2;
+  int y= (height () - h) / 2;
   y+= TAB_CONTENT_VERTICAL_OFFSET;
 
   m_closeBtn->setGeometry (x, y, w, h);
@@ -297,7 +286,9 @@ QTMTabPage::leaveEvent (QEvent* e) {
 
 void
 QTMTabPage::updateCloseButtonVisibility () {
-  bool shouldShow= !is_startup_tab_view (m_viewUrl);
+  if (!m_closeBtn) return;
+  bool shouldShow=
+      !is_startup_tab_view (m_viewUrl) && (underMouse () || isChecked ());
   bool wasVisible= m_closeBtn->isVisible ();
   m_closeBtn->setVisible (shouldShow);
 
@@ -328,17 +319,16 @@ QTMTabPageContainer::QTMTabPageContainer (QWidget* p_parent)
   dummyTabPage->hide ();
 
   // 创建新增标签页按钮
-  m_addTabButton= new QToolButton (this);
+  m_addTabButton= new QWK::WindowButton (this);
   m_addTabButton->setObjectName ("add-tab-button");
-  m_addTabButton->setText ("+");
-  int addButtonSide= getScaledSystemButtonHeight ();
+  int addButtonSide= getScaledAddButtonHeight ();
   m_addTabButton->setMinimumSize (addButtonSide, addButtonSide);
   m_addTabButton->setFixedSize (addButtonSide, addButtonSide);
   m_addTabButton->setSizePolicy (QSizePolicy::Fixed, QSizePolicy::Fixed);
-#ifdef Q_OS_MAC
-  m_addTabButton->setProperty ("platform", "mac");
-#endif
-  connect (m_addTabButton, &QToolButton::clicked, this,
+  int addBtnRadius= DpiUtils::scaled (6);
+  m_addTabButton->setStyleSheet (
+      QString ("border-radius: %1px; padding: 0px;").arg (addBtnRadius));
+  connect (m_addTabButton, &QPushButton::clicked, this,
            &QTMTabPageContainer::onAddTabClicked);
   m_addTabButton->hide ();
 
@@ -350,13 +340,7 @@ QTMTabPageContainer::QTMTabPageContainer (QWidget* p_parent)
   setSizePolicy (QSizePolicy::Expanding, QSizePolicy::Preferred);
 }
 
-QTMTabPageContainer::~QTMTabPageContainer () {
-  removeAllTabPages ();
-  if (m_addTabButton) {
-    delete m_addTabButton;
-    m_addTabButton= nullptr;
-  }
-}
+QTMTabPageContainer::~QTMTabPageContainer () { removeAllTabPages (); }
 
 void
 QTMTabPageContainer::replaceTabPages (QList<QAction*>* p_src) {
@@ -412,7 +396,7 @@ QTMTabPageContainer::arrangeTabPages () {
       parentWidget () ? parentWidget ()->width () : this->width ();
   // 动态计算右侧预留空间，防止标签页覆盖系统按钮
   double scale      = getDPIScaleFactor ();
-  int    buttonWidth= int (46 * scale); // 按钮宽度
+  int    buttonWidth= int (60 * scale); // 按钮宽度
   int    buttonCount= 5;                // pin, min, max, close,login
 #ifdef Q_OS_MAC
   buttonCount= 1; // macOS 仅保留 login
@@ -485,11 +469,11 @@ QTMTabPageContainer::arrangeTabPages () {
   // 设置新增标签页按钮的位置
   if (m_addTabButton) {
     // 将按钮放在最后一个标签页的后面
-    int addButtonWidth = m_addTabButton->height ();
+    int addButtonWidth = m_addTabButton->width ();
     int addButtonHeight= m_addTabButton->height ();
     int buttonX        = accumWidth;
     // 调整按钮垂直位置，与系统按钮对齐
-    int buttonY= (getScaledSystemBarHeight () - addButtonHeight) / 2;
+    int buttonY= (m_rowHeight - addButtonHeight) / 2;
     buttonY+= ADD_TAB_BUTTON_VERTICAL_OFFSET;
     m_addTabButton->setGeometry (buttonX, buttonY, addButtonWidth,
                                  addButtonHeight);
@@ -503,7 +487,7 @@ QTMTabPageContainer::arrangeTabPages () {
 void
 QTMTabPageContainer::adjustHeight (int p_rowCount) {
   int h= m_rowHeight * (p_rowCount + 1);
-  setFixedHeight (h - 2);
+  setFixedHeight (h);
 }
 
 void
@@ -704,7 +688,7 @@ QTMTabPageBar::resizeEvent (QResizeEvent* e) {
   // 确保容器使用全部可用宽度减去左边的留出的拖拽句柄空间
   int availableWidth= size.width () - 7;
   if (availableWidth > 0 && m_container) {
-    m_container->setGeometry (7, 0, availableWidth, size.height () - 2);
+    m_container->setGeometry (7, 0, availableWidth, size.height ());
   }
 }
 

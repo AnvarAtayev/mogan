@@ -354,14 +354,9 @@ QDockWidget::title {
 ****************************************************************************/
 /* Tab Page 基础样式 */
 QTMTabPage {
-  padding: 8px 12px;
   color: #FFFFFF;
   background-color: transparent;
   border: 1px solid transparent;
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
 }
 
 QTMTabPage:hover {
@@ -372,65 +367,35 @@ QTMTabPage:hover {
 QTMTabPage:checked {
   background-color: #333333;
   border: 1px solid #4c4c4c;
-  border-bottom: none;
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
   color: #FFFFFF;
 }
 
-QTMTabPage QToolButton#tabpage-close-button {
+QTMTabPage QPushButton#tabpage-close-button {
   background-color: transparent;
   border: none;
-  padding: 0;
-  margin-left: 6px;
-  border-radius: 4px;
-  min-width: 20px;
-  min-height: 20px;
-  max-width: 20px;
-  max-height: 20px;
-  color: #ffffff;
+  qproperty-iconNormal: url(":/tabpage/close-white.svg");
+  qproperty-iconHovered: url(":/tabpage/close-white.svg");
 }
 
-QTMTabPage QToolButton#tabpage-close-button[platform="mac"] {
-  min-width: 16px;
-  min-height: 16px;
-  max-width: 16px;
-  max-height: 16px;
-  font-size: 12pt;
-}
-
-QTMTabPage QToolButton#tabpage-close-button:hover {
+QTMTabPage QPushButton#tabpage-close-button:hover {
   background-color: #E81123;
-  color: #FFFFFF;
 }
 
-QTMTabPage QToolButton#tabpage-close-button:pressed {
+QTMTabPage QPushButton#tabpage-close-button:pressed {
   background-color: #C50F1F;
 }
 
-QTMTabPageContainer QToolButton#add-tab-button {
+QTMTabPageContainer QPushButton#add-tab-button {
   background-color: transparent;
   border: none;
-  color: #FFFFFF;
-  font-weight: bold;
-  border-radius: 6px;
-  padding: 0;
-  font-size: 12pt;
+  qproperty-iconNormal: url(":/tabpage/add-white.svg");
 }
 
-QTMTabPageContainer QToolButton#add-tab-button[platform="mac"] {
-  min-width: 20px;
-  min-height: 20px;
-  max-width: 20px;
-  max-height: 20px;
-  font-size: 11pt;
-}
-
-QTMTabPageContainer QToolButton#add-tab-button:hover {
+QTMTabPageContainer QPushButton#add-tab-button:hover {
   background-color: rgba(255, 255, 255, 0.06);
 }
 
-QTMTabPageContainer QToolButton#add-tab-button:pressed {
+QTMTabPageContainer QPushButton#add-tab-button:pressed {
   background-color: rgba(255, 255, 255, 0.10);
 }
 

@@ -226,18 +226,17 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   };
 
   double scale         = DpiUtils::scaleFactor ();
-  int    titleBarHeight= int (32 * scale);
-  int    buttonWidth   = int (46 * scale);
-  int    buttonHeight  = int (32 * scale);
-  int    iconBaseSize  = int (12 * scale);
-  int    macosiconSize = int (20 * scale);
+  int    titleBarHeight= int (42 * scale);
+  int    buttonWidth   = int (60 * scale);
+  int    buttonHeight  = int (42 * scale);
+  int    iconBaseSize  = int (16 * scale);
 
 #if defined(Q_OS_MAC)
   // 无边框布局（macOS）- 只显示登录按钮
   Q_INIT_RESOURCE (styles);
   QWK::WindowBar* windowBar= nullptr;
   windowAgent              = nullptr;
-  setupWindowBar (windowBar, windowAgent, /*minHeight*/ 20,
+  setupWindowBar (windowBar, windowAgent, /*minHeight*/ titleBarHeight,
                   /*setSafeArea*/ true);
 #elif defined(Q_OS_WIN) || defined(Q_OS_LINUX)
   // 无边框布局（Windows / Linux），并使用 /styles 资源中的图标
@@ -348,11 +347,7 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   loginButton->setFocusPolicy (Qt::NoFocus);
   loginButton->setSizePolicy (QSizePolicy::Fixed, QSizePolicy::Fixed);
   loginButton->setFixedSize (buttonWidth, buttonHeight);
-#if defined(Q_OS_MAC)
-  loginButton->setIconSize (QSize (macosiconSize, macosiconSize));
-#else
   loginButton->setIconSize (QSize (iconBaseSize, iconBaseSize));
-#endif
   loginButton->setIconNormal (QIcon (":/window-bar/login.svg"));
   loginButton->setObjectName ("login-button");
   loginButton->setProperty ("system-button", true);
@@ -590,12 +585,8 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   // NOTICE: setFixedHeight must be after setIconSize
   // TODO: the size of the toolbar should be calculated dynamically
   {
-    double scale       = retina_scale;
-    int    h           = (int) floor (36 * scale + 0.5);
-    int    tabRowHeight= h;
-#ifdef Q_OS_MAC
-    tabRowHeight= (int) floor (30 * scale + 0.5);
-#endif
+    int h           = DpiUtils::scaled (32);
+    int tabRowHeight= DpiUtils::scaled (38);
 
     // 工具栏高度相等
     mainToolBar->setFixedHeight (h);
@@ -2045,13 +2036,8 @@ qt_tm_widget_rep::setupLoginDialog (QWK::LoginDialog* loginDialog) {
   infoLayout->setSpacing (4);
 
   // 登出按钮 - 登录成功后显示（使用图标）
-  const double logoutScale= DpiUtils::scaleFactor ();
-#if defined(Q_OS_MAC)
-  const int logoutIconSize= int (30 * logoutScale);
-#else
-  const int logoutIconSize= int (20 * logoutScale);
-#endif
-  logoutButton= new QPushButton ();
+  const int logoutIconSize= DpiUtils::scaled (20);
+  logoutButton            = new QPushButton ();
   logoutButton->setObjectName ("logout-button");
   logoutButton->setIcon (QIcon (":/window-bar/logout.svg"));
   logoutButton->setToolTip (qt_translate ("Logout"));
@@ -2491,13 +2477,8 @@ qt_tm_widget_rep::updateLoginButtonState (bool           isLoggedIn,
   if (!isLoggedIn) {
     label= qt_translate ("Not logged in");
   }
-#if defined(Q_OS_MAC)
-  loginButton->setIconSize (
-      QSize (DpiUtils::scaled (20), DpiUtils::scaled (20)));
-#else
   loginButton->setIconSize (
       QSize (DpiUtils::scaled (12), DpiUtils::scaled (12)));
-#endif
   // 已登录时不设置文字，只显示图标
 
   QFontMetrics  metrics (loginButton->font ());

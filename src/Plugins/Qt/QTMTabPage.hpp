@@ -3,6 +3,7 @@
  * MODULE     : QTMTabPage.hpp
  * DESCRIPTION: QT Texmacs tab page classes
  * COPYRIGHT  : (C) 2024 Zhenjun Guo
+ *                  2026 Yifan Lu
  *******************************************************************************
  * This software falls under the GNU general public license version 3 or later.
  * It comes WITHOUT ANY WARRANTY WHATSOEVER. For details, see the file LICENSE
@@ -11,6 +12,7 @@
 #ifndef QTMTABPAGE_HPP
 #define QTMTABPAGE_HPP
 
+#include "windowbutton.hpp"
 #include <QDrag>
 #include <QDropEvent>
 #include <QFrame>
@@ -29,8 +31,8 @@
  */
 class QTMTabPage : public QToolButton {
   Q_OBJECT
-  QToolButton* m_closeBtn;
-  QPoint       m_dragStartPos;
+  QWK::WindowButton* m_closeBtn= nullptr;
+  QPoint             m_dragStartPos;
 
 public:
   const url m_viewUrl;
@@ -48,13 +50,12 @@ protected:
   virtual void resizeEvent (QResizeEvent* e) override;
   virtual void mousePressEvent (QMouseEvent* e) override;
   virtual void mouseMoveEvent (QMouseEvent* e) override;
-  virtual void
-  enterEvent (QEnterEvent* e); // 为了防止和QEvent冲突，不要override
+  virtual void enterEvent (QEnterEvent* e) override;
   virtual void leaveEvent (QEvent* e) override;
 
 private:
   void updateCloseButtonVisibility ();
-  void initializeCloseButton ();
+  void initializeCloseButton (QAction* closeAction= nullptr);
 };
 
 /*! QTMTabPageAction is used as a carrier of QTMTabPage widget.
@@ -86,7 +87,7 @@ class QTMTabPageContainer : public QWidget {
   int                m_width= 0;
   bool               dragging;
   QPoint             dragPosition;
-  QToolButton*       m_addTabButton;
+  QWK::WindowButton* m_addTabButton;
 
 public:
   QTMTabPage* dummyTabPage;
@@ -143,7 +144,6 @@ protected:
 // Global variables for tab page management
 extern int                  g_tabWidth;
 extern int                  g_pointingIndex;
-extern int                  g_hiddentTabIndex;
 extern url                  g_mostRecentlyClosedTab;
 extern url                  g_mostRecentlyDraggedTab;
 extern QTMTabPageContainer* g_mostRecentlyDraggedBar;
