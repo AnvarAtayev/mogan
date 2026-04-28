@@ -14,11 +14,24 @@
 (texmacs-module (texmacs texmacs tm-files)
   (:use (texmacs texmacs tm-server)
         (texmacs texmacs tm-print)
+        (kernel texmacs tm-convert)
+        (kernel library content)
+        (language locale)
         (utils library cursor)))
 
 (import (only (liii string) string-contains))
+(import (only (liii hashlib) md5))
+(import (only (liii uuid) uuid4))
+(import (only (liii path)
+              path->string path-dir? path-exists? path-from-env
+              path-from-string path-getsize path-join path-name path-parent
+              path-rename path-root path-stem path-unlink))
+(import (only (liii os) mkdir))
+(import (liii njson))
 (import (only (srfi srfi-1) find))
 (import (only (srfi srfi-1) remove))
+(import (only (srfi srfi-19)
+              TIME-UTC current-date current-time date->string time-second))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Remember last save/open directory 
@@ -251,9 +264,39 @@
         ((in? :commit opts)
          (commit-buffer name))))
 
+;; save-buffer-save
+;; 保存指定 buffer，并在保存前确保自动备份使用的稳定 doc id 已绑定。
+;;
+;; 语法
+;; ----
+;; (save-buffer-save name opts)
+;;
+;; 参数
+;; ----
+;; name : url
+;; 要保存的 buffer 名称。
+;;
+;; opts : list
+;; 保存后的附加动作，例如 :update 或 :commit。
+;;
+;; 返回值
+;; ----
+;; #<unspecified>
+;; 通过消息栏和 buffer 状态体现保存结果。
+;;
+;; 逻辑
+;; ----
+;; 先用 init-env 补齐缺失的 stem-doc-id，再执行原有 buffer-save 流程；
+;; 保存成功后清理旧 autosave 文件、记录最近文件并执行后续动作。
+;;
+;; 注意
+;; ----
+;; doc id 只在用户明确保存时随文档持久化；打开已有文件时不会静默
+;; 写回源文件。
 (define (save-buffer-save name opts)
   ;;(display* "save-buffer-save " name "\n")
   (with vname `(verbatim ,(utf8->cork (url->system name)))
+    (auto-backup-ensure-buffer-doc-id! name)
     (if (buffer-save name)
         (begin
           (buffer-pretend-modified name)
@@ -305,6 +348,36 @@
              "Failed to save"))
           (else #f))))
 
+;; save-buffer-check-permissions
+;; 保存前检查目标 buffer 是否存在、是否可写以及是否需要用户确认。
+;;
+;; 语法
+;; ----
+;; (save-buffer-check-permissions name opts)
+;;
+;; 参数
+;; ----
+;; name : url
+;; 要保存的 buffer 名称。
+;;
+;; opts : list
+;; 保存后的附加动作，例如 :update 或 :commit。
+;;
+;; 返回值
+;; ----
+;; #<unspecified>
+;; 根据检查结果继续保存、弹出提示或结束流程。
+;;
+;; 逻辑
+;; ----
+;; 保留原有权限和磁盘更新时间检查；若 buffer 本身没有修改，但缺少
+;; stem-doc-id，则在通过写权限检查后走正常保存链路，把 doc id 随本次
+;; 用户保存写入文档。
+;;
+;; 注意
+;; ----
+;; 这个分支只响应用户主动保存，不会因为自动备份发现缺少 doc id 而
+;; 立刻静默写回已有文件。
 (define (save-buffer-check-permissions name opts)
   ;;(display* "save-buffer-check-permissions " name "\n")
   (set! current-save-source name)
@@ -317,6 +390,13 @@
           ((not (buffer-exists? name))
            (with msg `(concat "The buffer " ,vname " does not exist")
              (set-message msg "Save file")))
+          ((and (not (buffer-modified? name))
+                (auto-backup-buffer-needs-doc-id? name))
+           (if (cannot-write? name "Save file")
+               (noop)
+               (begin
+                 (auto-backup-ensure-buffer-doc-id! name)
+                 (save-buffer-check-faithful name opts))))
           ((not (buffer-modified? name))
            (with msg "No changes need to be saved"
              (set-message msg "Save file"))
@@ -443,6 +523,946 @@
 ;; Autosave
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define autosave-fixed-interval-ms 120000)
+(define auto-backup-fixed-interval-ms 120000)
+(define auto-backup-retention-count 7)
+(define auto-backup-record-retention-days 30)
+(define auto-backup-day-seconds 86400)
+
+(tm-define (autosave-enabled?)
+  (!= (get-preference "autosave") "0"))
+
+(tm-define (liiistem-version)
+  (xmacs-version))
+
+(define auto-backup-scheduled? #f)
+
+(define (auto-backup-log msg)
+  (debug-message "debug-io" (string-append "Auto-backup " msg "\n")))
+
+(define (auto-backup-now-seconds)
+  (time-second (current-time TIME-UTC)))
+
+(define (auto-backup-home-path)
+  (path-from-env "TEXMACS_HOME_PATH"))
+
+(define (auto-backup-url-stree-tag x)
+  (cond ((symbol? x) (symbol->string x))
+        ((string? x) x)
+        (else "")))
+
+(define (auto-backup-url-stree-ref t n)
+  (list-ref t n))
+
+(define (auto-backup-url-stree->path t)
+  (cond ((string? t) t)
+        ((symbol? t) (symbol->string t))
+        ((pair? t)
+         (let ((tag (auto-backup-url-stree-tag (car t))))
+           (cond ((== tag "concat")
+                  (let ((left (auto-backup-url-stree->path
+                               (auto-backup-url-stree-ref t 1)))
+                        (right (auto-backup-url-stree->path
+                                (auto-backup-url-stree-ref t 2))))
+                    (cond ((== left "") right)
+                          ((== right "") left)
+                          (else (path-join left right)))))
+                 ((== tag "root")
+                  (let ((root (auto-backup-url-stree-tag
+                               (auto-backup-url-stree-ref t 1))))
+                    (if (in? root '("default" "file" "blank"))
+                        (path->string (path-root))
+                        "")))
+                 ((== tag "none") "untitled")
+                 ((== tag "or")
+                  (auto-backup-url-stree->path
+                   (auto-backup-url-stree-ref t 1)))
+                 (else tag))))
+        (else "untitled")))
+
+(define (auto-backup-buffer-path name)
+  (catch #t
+    (lambda ()
+      (path->string
+       (path-from-string
+        (auto-backup-url-stree->path (url->stree name)))))
+    (lambda args "untitled")))
+
+(define (auto-backup-trim-trailing-separators s)
+  (let loop ((n (string-length s)))
+    (if (and (> n 1)
+             (let ((c (string-ref s (- n 1))))
+               (or (char=? c #\/) (char=? c #\\))))
+        (loop (- n 1))
+        (substring s 0 n))))
+
+(define (auto-backup-path-normal-string path)
+  (auto-backup-trim-trailing-separators (path->string path)))
+
+(define (auto-backup-path-descends? child parent)
+  (catch #t
+    (lambda ()
+      (let ((parent-path (auto-backup-path-normal-string
+                          (path-from-string parent))))
+        (let loop ((path (path-from-string child)))
+          (let ((current-path (auto-backup-path-normal-string path)))
+            (or (== current-path parent-path)
+                (let* ((next (path-parent path))
+                       (next-path (auto-backup-path-normal-string next)))
+                  (and (!= next-path current-path)
+                       (loop next))))))))
+    (lambda args #f)))
+
+;; auto-backup-texmacs-path-buffer?
+;; 判断 buffer 是否位于 get-texmacs-path 返回的目录或其子目录中。
+;;
+;; 语法
+;; ----
+;; (auto-backup-texmacs-path-buffer? name)
+;;
+;; 参数
+;; ----
+;; name : url
+;; 待检查的 buffer 名称。
+;;
+;; 返回值
+;; ----
+;; boolean
+;; #t 表示 buffer 对应路径位于 get-texmacs-path 下。
+;;
+;; 逻辑
+;; ----
+;; 将 buffer url 转成系统路径，再使用 (liii path) 的 path-parent 逐级
+;; 向上检查是否能到达 get-texmacs-path。
+;;
+;; 注意
+;; ----
+;; TeXmacs 安装路径下的文件被视为只读内置资源，不进入自动备份。
+(tm-define (auto-backup-texmacs-path-buffer? name)
+  (catch #t
+    (lambda ()
+      (auto-backup-path-descends?
+       (auto-backup-buffer-path name)
+       (url->system (get-texmacs-path))))
+    (lambda args #f)))
+
+(define (auto-backup-path->url p)
+  (system->url (path->string p)))
+
+(tm-define (auto-backup-dir)
+  (path-join (auto-backup-home-path) "system" "backup"))
+
+(tm-define (auto-backup-manifest-path)
+  (path-join (auto-backup-dir) "auto-backup.json"))
+
+(tm-define (auto-backup-ensure-dir!)
+  (catch #t
+    (lambda ()
+      (let ((system-dir (path-join (auto-backup-home-path) "system"))
+            (backup-dir (auto-backup-dir)))
+        (when (not (path-exists? system-dir))
+          (mkdir system-dir))
+        (when (not (path-exists? backup-dir))
+          (mkdir backup-dir))
+        (and (path-exists? backup-dir) (path-dir? backup-dir))))
+    (lambda args
+      (auto-backup-log "failed-to-create-backup-dir")
+      #f)))
+
+;; auto-backup-empty-manifest
+;; 创建新的自动备份 manifest。
+;;
+;; 语法
+;; ----
+;; (auto-backup-empty-manifest)
+;;
+;; 参数
+;; ----
+;; 无。
+;;
+;; 返回值
+;; ----
+;; njson
+;; 包含 meta 和 documents 的 manifest 对象，调用者负责释放。
+;;
+;; 逻辑
+;; ----
+;; 初始化版本号、固定调度间隔、单文档 rolling 数量和 manifest 记录最长
+;; 保留天数。
+;;
+;; 注意
+;; ----
+;; manifest 的 njson 句柄需要用 let-njson 包裹，避免泄漏。
+(tm-define (auto-backup-empty-manifest)
+  (let ((manifest (string->njson
+                   "{\"meta\":{\"version\":1,\"interval_seconds\":120,\"retention\":7,\"max_record_age_days\":30,\"updated_at\":0},\"documents\":{}}")))
+    (njson-set! manifest "meta" "updated_at" (auto-backup-now-seconds))
+    manifest))
+
+(define (auto-backup-manifest-valid? manifest)
+  (catch #t
+    (lambda ()
+      (and (njson-object? manifest)
+           (let-njson ((meta (njson-ref manifest "meta"))
+                       (documents (njson-ref manifest "documents")))
+             (and (njson-object? meta)
+                  (njson-object? documents)
+                  (== (njson-ref meta "version") 1)))))
+    (lambda args #f)))
+
+(define (auto-backup-mark-broken! path)
+  (catch #t
+    (lambda ()
+      (when (path-exists? path)
+        (let ((broken (string-append
+                       path
+                       (string-append ".broken."
+                                      (number->string
+                                       (auto-backup-now-seconds))))))
+          (path-rename path broken)
+          (auto-backup-log
+           (string-append "manifest-broken moved-to "
+                          broken)))))
+    (lambda args
+      (auto-backup-log "manifest-broken move-failed"))))
+
+(tm-define (auto-backup-load-manifest)
+  (let ((path (auto-backup-manifest-path)))
+    (if (not (path-exists? path))
+        (auto-backup-empty-manifest)
+        (catch #t
+          (lambda ()
+            (let ((manifest (file->njson path)))
+              (if (auto-backup-manifest-valid? manifest)
+                  manifest
+                  (begin
+                    (njson-free manifest)
+                    (auto-backup-mark-broken! path)
+                    (auto-backup-empty-manifest)))))
+          (lambda args
+            (auto-backup-mark-broken! path)
+            (auto-backup-empty-manifest))))))
+
+;; auto-backup-save-manifest!
+;; 将自动备份 manifest 原子化写回磁盘。
+;;
+;; 语法
+;; ----
+;; (auto-backup-save-manifest! manifest)
+;;
+;; 参数
+;; ----
+;; manifest : njson
+;; 待写回的 manifest 对象。
+;;
+;; 返回值
+;; ----
+;; boolean
+;; #t 表示写入成功，#f 表示失败。
+;;
+;; 逻辑
+;; ----
+;; 写入前先清理 30 天以上的 manifest 记录，再更新 meta 并通过临时文件
+;; 替换正式文件。
+;;
+;; 注意
+;; ----
+;; 清理旧记录时会同步删除对应的过期备份文件。
+(tm-define (auto-backup-save-manifest! manifest)
+  (let* ((path (auto-backup-manifest-path))
+         (tmp (string-append
+               path
+               (string-append ".tmp."
+                              (number->string
+                               (auto-backup-now-seconds))))))
+    (catch #t
+      (lambda ()
+        (auto-backup-clean-stale-documents! manifest)
+        (njson-set! manifest "meta" "interval_seconds" 120)
+        (njson-set! manifest "meta" "retention" auto-backup-retention-count)
+        (njson-set! manifest "meta" "max_record_age_days"
+                    auto-backup-record-retention-days)
+        (njson-set! manifest "meta" "updated_at" (auto-backup-now-seconds))
+        (njson->file tmp manifest)
+        (when (path-exists? path) (path-unlink path))
+        (path-rename tmp path)
+        #t)
+      (lambda args
+        (auto-backup-log
+         (string-append "manifest-save-failed "
+                        path))
+        (when (path-exists? tmp) (path-unlink tmp))
+        #f))))
+
+(define (auto-backup-format name)
+  (if (url-scratch? name) "texmacs" (url-format name)))
+
+;; auto-backup-buffer-eligible?
+;; 判断指定 buffer 是否允许进入自动备份。
+;;
+;; 语法
+;; ----
+;; (auto-backup-buffer-eligible? name)
+;;
+;; 参数
+;; ----
+;; name : url
+;; 待检查的 buffer 名称。
+;;
+;; 返回值
+;; ----
+;; boolean
+;; #t 表示允许自动备份，#f 表示跳过。
+;;
+;; 逻辑
+;; ----
+;; 只允许本地、非 tmfs、非 web 且格式为 texmacs/stm/mgs/tmu 的文档备份；
+;; 位于 get-texmacs-path 目录或子目录下的内置只读文件直接跳过。
+;;
+;; 注意
+;; ----
+;; 这个判断也会影响 doc id 绑定，跳过的只读资源不会被写入 stem-doc-id。
+(tm-define (auto-backup-buffer-eligible? name)
+  (and (url? name)
+       (buffer-exists? name)
+       (not (url-rooted-web? name))
+       (not (url-rooted-tmfs? name))
+       (not (auto-backup-texmacs-path-buffer? name))
+       (in? (auto-backup-format name) '("texmacs" "stm" "mgs" "tmu"))))
+
+(define (auto-backup-buffer-last-visited* name)
+  (catch #t
+    (lambda () (buffer-last-visited name))
+    (lambda args 0)))
+
+(define (auto-backup-recent-buffers buffers)
+  (list-sort buffers
+             (lambda (a b)
+               (> (auto-backup-buffer-last-visited* a)
+                  (auto-backup-buffer-last-visited* b)))))
+
+(tm-define (auto-backup-manual-target)
+  (let ((name (current-buffer)))
+    (cond ((auto-backup-buffer-eligible? name) name)
+          (else
+           (let* ((eligible (auto-backup-recent-buffers
+                             (list-filter (buffer-list)
+                                          auto-backup-buffer-eligible?)))
+                  (modified (list-filter eligible buffer-modified?))
+                  (candidates (if (pair? modified) modified eligible)))
+             (if (pair? candidates)
+                 (begin
+                   (auto-backup-log
+                    (string-append "manual-target "
+                                   (auto-backup-buffer-path
+                                    (car candidates))))
+                   (car candidates))
+                 (begin
+                   (auto-backup-log "manual-target none")
+                   #f)))))))
+
+(define (auto-backup-safe-char? c)
+  (let ((i (char->integer c)))
+    (or (and (>= i (char->integer #\a)) (<= i (char->integer #\z)))
+        (and (>= i (char->integer #\A)) (<= i (char->integer #\Z)))
+        (and (>= i (char->integer #\0)) (<= i (char->integer #\9)))
+        (in? c '(#\- #\_ #\.)))))
+
+(define (auto-backup-sanitize-name name)
+  (let* ((chars (string->list name))
+         (safe (map (lambda (c) (if (auto-backup-safe-char? c) c #\_))
+                    chars))
+         (result (list->string safe)))
+    (if (== result "") "untitled" result)))
+
+(define (auto-backup-doc-short-id doc-id)
+  (if (>= (string-length doc-id) 8) (string-take doc-id 8) doc-id))
+
+(tm-define (auto-backup-safe-base name doc-id)
+  (let* ((path (auto-backup-buffer-path name))
+         (raw (path-stem path))
+         (base (if (or (url-scratch? name) (== raw "") (== raw "."))
+                   (string-append "untitled_"
+                                  (auto-backup-doc-short-id doc-id))
+                   raw)))
+    (auto-backup-sanitize-name base)))
+
+(tm-define (auto-backup-timestamp)
+  (catch #t
+    (lambda () (date->string (current-date) "~Y~m~d~H~M~S"))
+    (lambda args (number->string (auto-backup-now-seconds)))))
+
+(tm-define (auto-backup-target-path name doc-id)
+  (let* ((base (auto-backup-safe-base name doc-id))
+         (stamp (auto-backup-timestamp)))
+    (let loop ((i 0))
+      (let* ((suffix (if (== i 0) "" (string-append "_" (number->string i))))
+             (file (string-append base "_" stamp suffix ".tmu"))
+             (target (path-join (auto-backup-dir) file)))
+        (if (path-exists? target) (loop (+ i 1)) target)))))
+
+(tm-define (auto-backup-doc-id doc)
+  (let ((initial (tmfile-extract doc 'initial)))
+    (and initial (collection-ref initial "stem-doc-id"))))
+
+(define (auto-backup-valid-doc-id? doc-id)
+  (and (string? doc-id) (!= doc-id "")))
+
+(tm-define (auto-backup-buffer-doc-id name)
+  (catch #t
+    (lambda ()
+      ;; First try to get from init-env (memory), then from document tree (file)
+      (with-buffer name
+        (let* ((from-env (get-init-env "stem-doc-id"))
+               (doc-id (if (and (string? from-env) (!= from-env ""))
+                           from-env
+                           (let* ((doc (buffer-get name))
+                                  (initial (tmfile-extract doc 'initial)))
+                             (and initial (collection-ref initial "stem-doc-id"))))))
+          (auto-backup-log
+           (string-append "buffer-doc-id "
+                          (auto-backup-buffer-path name)
+                          " -> "
+                          (if doc-id doc-id "#f")))
+          doc-id)))
+    (lambda args
+      (auto-backup-log
+       (string-append "buffer-doc-id-error "
+                      (auto-backup-buffer-path name)))
+      #f)))
+
+(tm-define (auto-backup-buffer-needs-doc-id? name)
+  (and (auto-backup-buffer-eligible? name)
+       (not (auto-backup-valid-doc-id?
+             (auto-backup-buffer-doc-id name)))))
+
+;; auto-backup-find-doc-id-by-source-url
+;; 在 manifest 中按 source_url 查找已有 doc id。
+(define (auto-backup-find-doc-id-by-source-url manifest source-url)
+  (catch #t
+    (lambda ()
+      (let-njson ((docs (njson-ref manifest "documents")))
+        (let ((doc-ids (njson-keys docs)))
+          (let loop ((keys doc-ids))
+            (if (null? keys)
+                #f
+                (let ((doc-id (car keys)))
+                  (let-njson ((doc (njson-ref docs doc-id)))
+                    (let ((url (njson-ref doc "source_url")))
+                      (if (and url (== url source-url))
+                          doc-id
+                          (loop (cdr keys)))))))))))
+    (lambda args #f)))
+
+;; auto-backup-ensure-buffer-doc-id!
+;; 确保可备份 buffer 已经绑定 stem-doc-id。
+;;
+;; 语法
+;; ----
+;; (auto-backup-ensure-buffer-doc-id! name)
+;;
+;; 参数
+;; ----
+;; name : url
+;; 待检查和绑定的 buffer 名称。
+;;
+;; 返回值
+;; ----
+;; string or #f
+;; 返回已有或新生成的 doc id；不可备份或失败时返回 #f。
+;;
+;; 逻辑
+;; ----
+;; 先读取 buffer 当前 init-env 或 initial collection 中的 stem-doc-id；
+;; 若没有，则已有文件按 source_url 从 manifest 复用旧 id，新建 scratch
+;; 文档直接生成新的 uuid4。
+;;
+;; 注意
+;; ----
+;; 这里只写入 init-env，避免触发文档重新解析；已有文件是否持久化由用户
+;; 后续保存动作决定。
+(tm-define (auto-backup-ensure-buffer-doc-id! name)
+  (catch #t
+    (lambda ()
+      (and (auto-backup-buffer-eligible? name)
+           (with-buffer name
+             (let ((old-doc-id (auto-backup-buffer-doc-id name)))
+               (if (auto-backup-valid-doc-id? old-doc-id)
+                   (begin
+                     (auto-backup-log
+                      (string-append "doc-id-reuse "
+                                     (auto-backup-buffer-path name)
+                                     " -> "
+                                     old-doc-id))
+                     old-doc-id)
+                   ;; 已保存文件可按 source_url 复用 manifest 中的 doc id；
+                   ;; 新建 scratch 文档必须生成新的 doc id。
+                   (let-njson ((manifest (auto-backup-load-manifest)))
+                     (let* ((source-url (auto-backup-source-url name))
+                            (existing-doc-id
+                             (and (not (url-scratch? name))
+                                  (auto-backup-find-doc-id-by-source-url
+                                   manifest source-url)))
+                            (doc-id (or existing-doc-id (uuid4))))
+                       ;; 写入 init-env 即可绑定到当前会话，避免 buffer-set 触发
+                       ;; 文档重新解析。
+                       (init-env "stem-doc-id" doc-id)
+                       (auto-backup-log
+                        (string-append "doc-id-created "
+                                       (auto-backup-buffer-path name)
+                                       (if existing-doc-id
+                                           " (reused from manifest)"
+                                           "")))
+                       doc-id)))))))
+    (lambda args
+      (auto-backup-log
+       (string-append "doc-id-create-failed "
+                      (auto-backup-buffer-path name)))
+      #f)))
+
+(define (auto-backup-empty-collection? col)
+  (and (pair? col) (== (car col) 'collection) (null? (cdr col))))
+
+(define (auto-backup-tmfile-drop doc what)
+  (let ((sdoc (if (tree? doc) (tree->stree doc) doc)))
+    (if (and (pair? sdoc) (== (car sdoc) 'document))
+        (cons 'document
+              (list-filter (cdr sdoc)
+                           (lambda (x)
+                             (not (and (pair? x) (== (car x) what))))))
+        sdoc)))
+
+(tm-define (auto-backup-doc-with-doc-id doc doc-id)
+  ;; Keep the live buffer environment in sync, and return an exportable tree
+  ;; whose initial collection contains the same stable id.
+  (init-env "stem-doc-id" doc-id)
+  (let* ((initial (or (tmfile-extract doc 'initial) '(collection)))
+         (initial* (collection-set initial "stem-doc-id" doc-id))
+         (doc* (and initial* (tmfile-assign doc 'initial initial*))))
+    (or doc* doc)))
+
+(tm-define (auto-backup-doc-without-doc-id doc)
+  (let* ((initial (tmfile-extract doc 'initial))
+         (initial* (and initial (collection-exclude initial '("stem-doc-id")))))
+    (cond ((not initial) (if (tree? doc) (tree->stree doc) doc))
+          ((auto-backup-empty-collection? initial*)
+           (auto-backup-tmfile-drop doc 'initial))
+          (else (tmfile-assign doc 'initial initial*)))))
+
+(tm-define (auto-backup-canonical-md5 doc)
+  (md5 (object->string (auto-backup-doc-without-doc-id doc))))
+
+(define (auto-backup-display-name name)
+  (let ((tail (path-name (auto-backup-buffer-path name))))
+    (if (== tail "") "Untitled" tail)))
+
+(define (auto-backup-source-url name)
+  (auto-backup-buffer-path name))
+
+(tm-define (auto-backup-buffer-info name device-id app-version)
+  (catch #t
+    (lambda ()
+      (let* ((doc-id (auto-backup-ensure-buffer-doc-id! name))
+             (doc (buffer-get name))
+             (content-md5 (auto-backup-canonical-md5 doc)))
+        (and doc-id
+             (list (cons "doc_id" doc-id)
+                   (cons "md5" content-md5)
+                   (cons "display_name" (auto-backup-display-name name))
+                   (cons "source_url" (auto-backup-source-url name))
+                   (cons "format" (auto-backup-format name))
+                   (cons "device_id" device-id)
+                   (cons "liiistem_version" app-version)
+                   (cons "doc" doc)))))
+    (lambda args
+      (auto-backup-log
+       (string-append "buffer-info-failed "
+                      (auto-backup-buffer-path name)))
+      #f)))
+
+(define (auto-backup-file-size target)
+  (catch #t
+    (lambda () (path-getsize target))
+    (lambda args 0)))
+
+(tm-define (auto-backup-export-buffer name target info)
+  (catch #t
+    (lambda ()
+      (let* ((doc (assoc-ref info "doc"))
+             (doc-id (assoc-ref info "doc_id"))
+             (doc* (auto-backup-doc-with-doc-id doc doc-id)))
+        (if (tree-export (tm->tree doc*) (auto-backup-path->url target) "tmu")
+            #f
+            (auto-backup-file-size target))))
+    (lambda args
+      (auto-backup-log
+       (string-append "export-failed " (auto-backup-buffer-path name)
+                      " -> " target))
+      #f)))
+
+(define (auto-backup-document-ref manifest doc-id)
+  (catch #t
+    (lambda () (njson-ref manifest "documents" doc-id))
+    (lambda args #f)))
+
+(define (auto-backup-new-doc-record doc-id)
+  (json->njson `(("doc_id" . ,doc-id) ("versions" . #()))))
+
+(define (auto-backup-set-doc-fields! doc info now)
+  (catch #t
+    (lambda () (njson-drop! doc "user_id"))
+    (lambda args #f))
+  (njson-set! doc "doc_id" (assoc-ref info "doc_id"))
+  (njson-set! doc "display_name" (assoc-ref info "display_name"))
+  (njson-set! doc "source_url" (assoc-ref info "source_url"))
+  (njson-set! doc "format" (assoc-ref info "format"))
+  (njson-set! doc "device_id" (assoc-ref info "device_id"))
+  (njson-set! doc "liiistem_version" (assoc-ref info "liiistem_version"))
+  (njson-set! doc "last_checked_at" now)
+  (when (not (catch #t
+               (lambda ()
+                 (let-njson ((versions (njson-ref doc "versions")))
+                   (njson-array? versions)))
+               (lambda args #f)))
+    (let-njson ((versions (string->njson "[]")))
+      (njson-set! doc "versions" versions)))
+  doc)
+
+(define (auto-backup-ensure-doc-record! manifest info now)
+  (let* ((doc-id (assoc-ref info "doc_id"))
+         (old (auto-backup-document-ref manifest doc-id)))
+    (let-njson ((doc (or old (auto-backup-new-doc-record doc-id))))
+      (auto-backup-set-doc-fields! doc info now)
+      (njson-set! manifest "documents" doc-id doc))))
+
+(define (auto-backup-version-created-at version)
+  (with t (assoc-ref version "created_at")
+    (if (number? t) t 0)))
+
+(define (auto-backup-sort-versions versions)
+  (list-sort versions
+             (lambda (a b)
+               (> (auto-backup-version-created-at a)
+                  (auto-backup-version-created-at b)))))
+
+(define (auto-backup-doc-versions doc)
+  (catch #t
+    (lambda ()
+      (let-njson ((versions (njson-ref doc "versions")))
+        (if (njson-array? versions)
+            (vector->list (njson->json versions))
+            '())))
+    (lambda args '())))
+
+(tm-define (auto-backup-latest-version manifest doc-id)
+  (let-njson ((doc (auto-backup-document-ref manifest doc-id)))
+    (and doc
+         (let ((versions (auto-backup-sort-versions
+                          (auto-backup-doc-versions doc))))
+           (and (not (null? versions)) (car versions))))))
+
+(define (auto-backup-version-json target kind info size now)
+  `(("path" . ,target)
+    ("created_at" . ,now)
+    ("kind" . ,kind)
+    ("md5" . ,(assoc-ref info "md5"))
+    ("liiistem_version" . ,(assoc-ref info "liiistem_version"))
+    ("size" . ,size)
+    ("uploaded" . #f)
+    ("upload_status" . "pending")))
+
+(define (auto-backup-remove-version-file version)
+  (let ((path (assoc-ref version "path")))
+    (when (and (string? path) (!= path ""))
+      (catch #t
+        (lambda ()
+          (when (path-exists? path)
+            (path-unlink path)
+            (auto-backup-log
+             (string-append "retention-removed " path))))
+        (lambda args
+          (auto-backup-log
+           (string-append "retention-remove-failed " path)))))))
+
+(define (auto-backup-njson-number obj key)
+  (catch #t
+    (lambda ()
+      (let ((v (njson-ref obj key)))
+        (if (number? v) v 0)))
+    (lambda args 0)))
+
+(define (auto-backup-latest-version-time versions)
+  (if (null? versions)
+      0
+      (auto-backup-version-created-at
+       (car (auto-backup-sort-versions versions)))))
+
+(define (auto-backup-doc-last-activity doc)
+  (let ((versions (auto-backup-doc-versions doc)))
+    (max (auto-backup-njson-number doc "last_checked_at")
+         (auto-backup-njson-number doc "last_backup_at")
+         (auto-backup-latest-version-time versions))))
+
+(define (auto-backup-stale-version? version cutoff)
+  (let ((created-at (auto-backup-version-created-at version)))
+    (and (> created-at 0) (< created-at cutoff))))
+
+(define (auto-backup-stale-doc? doc cutoff)
+  (let ((last-activity (auto-backup-doc-last-activity doc)))
+    (and (> last-activity 0) (< last-activity cutoff))))
+
+(define (auto-backup-clean-stale-versions! manifest doc-id doc cutoff)
+  (let* ((versions (auto-backup-doc-versions doc))
+         (dropped (filter (lambda (version)
+                            (auto-backup-stale-version? version cutoff))
+                          versions)))
+    (if (null? dropped)
+        #f
+        (begin
+          (for-each auto-backup-remove-version-file dropped)
+          (let* ((kept (remove (lambda (version)
+                                 (auto-backup-stale-version? version cutoff))
+                               versions)))
+            (let-njson ((kept-json (json->njson (list->vector kept))))
+              (njson-set! doc "versions" kept-json))
+            (njson-set! manifest "documents" doc-id doc)
+            (auto-backup-log
+             (string-append "manifest-removed-stale-versions "
+                            doc-id)))
+          #t))))
+
+;; auto-backup-clean-stale-documents!
+;; 清理 manifest 中超过保留时间的文档记录和版本记录。
+;;
+;; 语法
+;; ----
+;; (auto-backup-clean-stale-documents! manifest)
+;;
+;; 参数
+;; ----
+;; manifest : njson
+;; 自动备份 manifest 对象。
+;;
+;; 返回值
+;; ----
+;; boolean
+;; #t 表示 manifest 有清理改动，#f 表示无改动或清理失败。
+;;
+;; 逻辑
+;; ----
+;; 以当前时间向前 30 天作为 cutoff。文档最后检查、最后备份和最新版本
+;; 都早于 cutoff 时，删除整个文档记录；仍活跃的文档只删除过期版本。
+;;
+;; 注意
+;; ----
+;; 被清理的版本会同步删除本地备份文件，manifest 的 njson 释放仍由外层
+;; let-njson 负责。
+(tm-define (auto-backup-clean-stale-documents! manifest)
+  (let* ((now (auto-backup-now-seconds))
+         (cutoff (- now (* auto-backup-record-retention-days
+                           auto-backup-day-seconds))))
+    (catch #t
+      (lambda ()
+        (let-njson ((docs (njson-ref manifest "documents")))
+          (let ((changed? #f))
+            (for-each
+             (lambda (doc-id)
+               (let-njson ((doc (njson-ref docs doc-id)))
+                 (when doc
+                   (if (auto-backup-stale-doc? doc cutoff)
+                       (begin
+                         (for-each auto-backup-remove-version-file
+                                   (auto-backup-doc-versions doc))
+                         (njson-drop! manifest "documents" doc-id)
+                         (set! changed? #t)
+                         (auto-backup-log
+                          (string-append "manifest-removed-stale-doc "
+                                         doc-id)))
+                       (when (auto-backup-clean-stale-versions!
+                              manifest doc-id doc cutoff)
+                         (set! changed? #t))))))
+             (njson-keys docs))
+            changed?)))
+      (lambda args
+        (auto-backup-log "manifest-clean-stale-failed")
+        #f))))
+
+(tm-define (auto-backup-apply-retention! manifest doc-id)
+  (let-njson ((doc (auto-backup-document-ref manifest doc-id)))
+    (when doc
+      (let* ((versions (auto-backup-sort-versions
+                        (auto-backup-doc-versions doc)))
+             (count (length versions))
+             (kept (if (> count auto-backup-retention-count)
+                       (list-head versions auto-backup-retention-count)
+                       versions))
+             (dropped (if (> count auto-backup-retention-count)
+                          (list-tail versions auto-backup-retention-count)
+                          '())))
+        (for-each auto-backup-remove-version-file dropped)
+        (let-njson ((kept-json (json->njson (list->vector kept))))
+          (njson-set! doc "versions" kept-json))
+        (njson-set! manifest "documents" doc-id doc)))))
+
+(tm-define (auto-backup-touch-manifest! manifest info)
+  (let ((now (auto-backup-now-seconds)))
+    (auto-backup-ensure-doc-record! manifest info now)))
+
+(tm-define (auto-backup-upsert-version! manifest info target kind size)
+  (let* ((now (auto-backup-now-seconds))
+         (doc-id (assoc-ref info "doc_id")))
+    (auto-backup-ensure-doc-record! manifest info now)
+    (let-njson ((doc (auto-backup-document-ref manifest doc-id)))
+      (when doc
+        (let* ((version (auto-backup-version-json target kind info size now))
+               (versions (cons version (auto-backup-doc-versions doc))))
+          (njson-set! doc "last_backup_at" now)
+          (let-njson ((versions-json (json->njson (list->vector versions))))
+            (njson-set! doc "versions" versions-json))
+          (njson-set! manifest "documents" doc-id doc))))
+    (auto-backup-apply-retention! manifest doc-id)))
+
+(define (auto-backup-remove-partial target)
+  (catch #t
+    (lambda ()
+      (when (path-exists? target) (path-unlink target)))
+    (lambda args
+      (auto-backup-log
+       (string-append "partial-remove-failed " target)))))
+
+;; auto-backup-buffer-do
+;; 执行实际的自动备份写文件和 manifest 更新逻辑。
+(define (auto-backup-buffer-do name kind)
+  (let-njson ((manifest (auto-backup-load-manifest)))
+    (let* ((device-id (stem-device-id))
+           (app-version (liiistem-version))
+           (info (auto-backup-buffer-info
+                  name device-id app-version)))
+      (if (not info)
+          'backup-failed
+          (let* ((doc-id (assoc-ref info "doc_id"))
+                 (content-md5 (assoc-ref info "md5"))
+                 (latest (auto-backup-latest-version manifest doc-id))
+                 (latest-md5 (and latest (assoc-ref latest "md5"))))
+            (if (and (string? latest-md5)
+                     (== latest-md5 content-md5))
+                (begin
+                  (auto-backup-touch-manifest! manifest info)
+                  (auto-backup-save-manifest! manifest)
+                  (auto-backup-log
+                   (string-append "skip-same-md5 "
+                                  (auto-backup-buffer-path name)))
+                  'skip-same-md5)
+                (let* ((target (auto-backup-target-path name doc-id))
+                       (size (auto-backup-export-buffer
+                              name target info)))
+                  (if (not size)
+                      (begin
+                        (auto-backup-remove-partial target)
+                        'backup-failed)
+                      (begin
+                        (auto-backup-upsert-version!
+                         manifest info target kind size)
+                        (auto-backup-save-manifest! manifest)
+                        (auto-backup-log
+                         (string-append "saved " target))
+                        'backup)))))))))
+
+(tm-define (auto-backup-buffer name . kind*)
+  (let ((kind (if (null? kind*) "periodic" (car kind*))))
+    (cond ((and (== kind "periodic") (not (buffer-modified? name)))
+           (auto-backup-log
+            (string-append "skip-clean "
+                           (auto-backup-buffer-path name)))
+           'skip-clean)
+          ((not (auto-backup-buffer-eligible? name))
+           (auto-backup-log
+            (string-append "skip-ineligible "
+                           (auto-backup-buffer-path name)))
+           'skip-ineligible)
+          ((not (auto-backup-ensure-dir!))
+           'backup-failed)
+          (else
+           ;; For on-open: proceed even if not modified
+           (when (== kind "on-open")
+             (auto-backup-log
+              (string-append "on-open "
+                             (auto-backup-buffer-path name))))
+           (auto-backup-buffer-do name kind)))))
+
+;; auto-backup-opened-buffer!
+;; 文件打开后的自动备份准备流程。
+;;
+;; 语法
+;; ----
+;; (auto-backup-opened-buffer! name)
+;;
+;; 参数
+;; ----
+;; name : url
+;; 已经打开并切换完成的 buffer 名称。
+;;
+;; 逻辑
+;; ----
+;; 打开文件时只在当前会话中绑定缺失的 stem-doc-id，避免静默改写源文件；
+;; 随后延迟触发一次 on-open 备份，由 md5 去重避免重复版本。
+(define (auto-backup-opened-buffer! name)
+  (auto-backup-ensure-buffer-doc-id! name)
+  (delayed (:pause 100)
+    (auto-backup-buffer name "on-open")))
+
+(tm-define (auto-backup-all)
+  (let ((buffers (buffer-list)))
+    (auto-backup-log
+     (string-append "periodic-scan buffers="
+                    (number->string (length buffers))))
+    (for-each (lambda (name) (auto-backup-buffer name "periodic"))
+              buffers)))
+
+(tm-define (auto-backup-now)
+  (set! auto-backup-scheduled? #f)
+  (if (autosave-enabled?)
+      (begin
+        (auto-backup-log "timer-fired")
+        (auto-backup-all)
+        (auto-backup-delayed))
+      (auto-backup-log "timer-skip-disabled")))
+
+(tm-define (auto-backup-delayed)
+  (if (autosave-enabled?)
+      (if auto-backup-scheduled?
+          (auto-backup-log "schedule-skip-already-pending")
+          (begin
+            (set! auto-backup-scheduled? #t)
+            (auto-backup-log "schedule-next 120s")
+            (delayed
+              (:pause auto-backup-fixed-interval-ms)
+              (auto-backup-now))))
+      (auto-backup-log "schedule-disabled")))
+
+(tm-define (auto-backup-official-url)
+  (if (== (get-output-language) "chinese")
+      "https://liiistem.cn/?utm_source=auto_backup_button"
+      "https://liiistem.com/?utm_source=auto_backup_button"))
+
+(tm-define (auto-backup-upload-buffer name backup-result)
+  (noop))
+
+(tm-define (auto-backup-button-label)
+  (if (community-stem?) "Open backup folder" "Cloud backup"))
+
+(tm-define (open-auto-backup-location)
+  (let ((name (auto-backup-manual-target)))
+    (when name
+      (let ((backup-result (auto-backup-buffer name "manual-open")))
+        (when (not (community-stem?))
+          (auto-backup-upload-buffer name backup-result)))))
+  (if (community-stem?)
+      (begin
+        (auto-backup-ensure-dir!)
+        (open-url (auto-backup-path->url (auto-backup-dir))))
+      (open-url (auto-backup-official-url))))
+
 (define (more-recent file suffix1 suffix2)
   (and (url-exists? (url-glue file suffix1))
        (url-exists? (url-glue file suffix2))
@@ -503,28 +1523,28 @@
   (for-each autosave-buffer (buffer-list)))
 
 (tm-define (autosave-now)
-  (autosave-all)
-  (autosave-delayed))
+  (when (autosave-enabled?)
+    (autosave-all)
+    (autosave-delayed)))
 
 (tm-define (save-all-buffers)
   (for-each (lambda (buf)
               (when (buffer-modified? buf)
+                (auto-backup-ensure-buffer-doc-id! buf)
                 (buffer-save buf)))
             (buffer-list)))
 
 (tm-define (autosave-delayed)
-  (let* ((pref (get-preference "autosave"))
-         (len (if (and (string? pref) (integer? (string->number pref)))
-                  (* (string->number pref) 1000)
-                  120000)))
-    (if (> len 0)
-        (delayed
-          (:pause len)
-          (autosave-now)))))
+  (when (autosave-enabled?)
+    (delayed
+      (:pause autosave-fixed-interval-ms)
+      (autosave-now))))
 
 (define (notify-autosave var val)
   (if (current-view) ; delayed-autosave would crash at initialization time
-      (autosave-delayed)))
+      (begin
+        (autosave-delayed)
+        (auto-backup-delayed))))
 
 (define-preferences
   ("autosave" "120" notify-autosave))
@@ -583,6 +1603,7 @@
              (inside? 'slideshow)
              (> (nr-pages) 1))
     (delayed (:idle 25) (fit-to-screen-width)))
+  (auto-backup-opened-buffer! name)
   (noop))
 
 (define (load-buffer-load name opts)
