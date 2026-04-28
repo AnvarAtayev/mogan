@@ -1,0 +1,46 @@
+/* Centers the viewport vertically around tm-labels when jumping to them*/
+.tm-eqlabel {
+    display: block;
+    visibility: hidden;
+    height: 50vh;
+    margin-top: -50vh;
+    margin-bottom: -1rem;
+}
+
+.tm-table-wrapper {
+    display: block;
+    text-align: center;
+    margin: 1rem 0;
+}
+.tm-table {
+    display: inline-table;
+    vertical-align: middle;
+    text-align: center;
+    border-collapse: collapse;
+    border-color: currentColor;
+}
+.tm-table th,
+.tm-table td {
+    padding: 0.3rem 0.8rem;
+}
+.tm-table thead tr {
+    border-bottom: 1px solid;
+}
+/* Vertical column separators: .tm-table-colsep-N adds a border after column N */
+.tm-table-colsep-1 th:nth-child(1),
+.tm-table-colsep-1 td:nth-child(1) {
+    border-right: 1px solid;
+}
+.tm-table-colsep-2 th:nth-child(2),
+.tm-table-colsep-2 td:nth-child(2) {
+    border-right: 1px solid;
+}
+.tm-table-colsep-3 th:nth-child(3),
+.tm-table-colsep-3 td:nth-child(3) {
+    border-right: 1px solid;
+}
+.tm-table-caption {
+    font-size: 0.9rem;
+    margin-top: 0.4rem;
+    text-align: center;
+}
