@@ -55,6 +55,8 @@ using lolly::data::as_hexadecimal;
 #include "Ghostscript/gs_utilities.hpp"
 #endif
 
+#include <moebius/data/scheme.hpp>
+
 #define SCREEN_PIXEL (PIXEL)
 
 hashmap<int, string> qtkeymap (0);
@@ -845,6 +847,16 @@ qt_translate (const string& s) {
 }
 
 string
+qt_scheme_quote (const QString& text) {
+  return moebius::data::scm_quote (from_qstring (text));
+}
+
+string
+qt_scheme_quote_utf8 (const QString& text) {
+  return moebius::data::scm_quote (from_qstring_utf8 (text));
+}
+
+string
 qt_application_directory () {
   return string (
       QCoreApplication::applicationDirPath ().toLatin1 ().constData ());
@@ -1519,4 +1531,18 @@ qt_clipboard_text () {
   QByteArray buf;
   buf= mimeData->text ().toUtf8 ();
   return string (buf.constData (), buf.size ());
+}
+
+void
+qt_clipboard_set_html (string html) {
+  QCoreApplication::processEvents ();
+  QClipboard* clipboard= QApplication::clipboard ();
+  if (clipboard == nullptr) return;
+
+  auto*         mimeData= new QMimeData;
+  c_string      htmlC (html);
+  const QString htmlText= QString::fromUtf8 ((char*) htmlC, N (html));
+  mimeData->setHtml (htmlText);
+  mimeData->setText (htmlText);
+  clipboard->setMimeData (mimeData, QClipboard::Clipboard);
 }

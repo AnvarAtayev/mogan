@@ -16,10 +16,9 @@
 
 (define-library (liii list)
   (export
-    ; S7 built-in
-    cons car cdr map for-each
+    ; S7 built-in 和 R7RS 6.4 函数从 (scheme base) 继承
     ; SRFI 1: Constructors
-    circular-list iota list-copy xcons cons*
+    circular-list iota xcons cons*
     ; SRFI 1: Predicates
     null-list? circular-list? proper-list? dotted-list?
     ; SRFI 1: Selectors
@@ -36,8 +35,8 @@
     take-while drop-while
     ; SRFI 1: Deleting
     delete
-    ; SRFI 1: Association List
-    assoc assq assv alist-cons
+    ; SRFI 1: Association List (assoc assq assv 从 scheme base 继承)
+    alist-cons
     ; Liii List extensions
     flat-map
     list-null? list-not-null? not-null-list?
@@ -45,11 +44,10 @@
     ; Scala-style take/drop with boundary tolerance
     list-take list-drop list-take-right list-drop-right
   ) ;export
-  (import (srfi srfi-1)
+  (import (scheme base)
+          (srfi srfi-1)
           (srfi srfi-13)
           (liii error)
-          (liii case)
-          (only (liii oop) define-case-class chain-apply)
   ) ;import
   (begin
 
@@ -141,12 +139,14 @@
     ) ;define
 
     (define (not-null-list? l)
-      (cond ((pair? l)
-             (or (null? (cdr l)) (pair? (cdr l))))
-            ((null? l) #f)
-            (else
-             (error 'type-error "type mismatch")
-            ) ;else
+      (cond
+        ((pair? l)
+         (or (null? (cdr l)) (pair? (cdr l)))
+        ) ;
+        ((null? l) #f)
+        (else
+         (error 'type-error "type mismatch")
+        ) ;else
       ) ;cond
     ) ;define
 
@@ -166,23 +166,25 @@
             res-node
             (let ((first (car rest))
                   (tail  (cdr rest)))
-              (cond ((and (null? first) (not (= 0 depth)))
-                     (flatten-depth-iter tail depth res-node))
-                    ((or (= depth 0) (not (pair? first)))
-                     (set-cdr! res-node (cons first '()))
-                     (flatten-depth-iter tail depth (cdr res-node))
-                    ) ;
-                    (else
-                     (flatten-depth-iter
-                      tail
-                      depth
-                      (flatten-depth-iter
-                       first
-                       (- depth 1)
-                       res-node
-                      ) ;flatten-depth-iter
-                     ) ;flatten-depth-iter
-                    ) ;else
+              (cond
+                ((and (null? first) (not (= 0 depth)))
+                 (flatten-depth-iter tail depth res-node)
+                ) ;
+                ((or (= depth 0) (not (pair? first)))
+                 (set-cdr! res-node (cons first '()))
+                 (flatten-depth-iter tail depth (cdr res-node))
+                ) ;
+                (else
+                 (flatten-depth-iter
+                  tail
+                  depth
+                  (flatten-depth-iter
+                   first
+                   (- depth 1)
+                   res-node
+                  ) ;flatten-depth-iter
+                 ) ;flatten-depth-iter
+                ) ;else
               ) ;cond
             ) ;let
         ) ;if
@@ -199,21 +201,22 @@
           res-node
           (let ((first (car rest))
                 (tail  (cdr rest)))
-            (cond ((pair? first)
-                   (flatten-deepest-iter
-                    tail
-                    (flatten-deepest-iter
-                     first
-                     res-node)
-                    ) ;flatten-deepest-iter
-                   ) ;flatten-deepest-iter
-                  ((null? first)
-                   (flatten-deepest-iter tail res-node)
-                  ) ;
-                  (else
-                   (set-cdr! res-node (cons first '()))
-                   (flatten-deepest-iter tail (cdr res-node))
-                  ) ;else
+            (cond
+              ((pair? first)
+               (flatten-deepest-iter
+                tail
+                (flatten-deepest-iter
+                 first
+                 res-node)
+                ) ;flatten-deepest-iter
+               ) ;flatten-deepest-iter
+              ((null? first)
+               (flatten-deepest-iter tail res-node)
+              ) ;
+              (else
+               (set-cdr! res-node (cons first '()))
+               (flatten-deepest-iter tail (cdr res-node))
+              ) ;else
             ) ;cond
           ) ;let
         ) ;if
@@ -225,17 +228,19 @@
         ) ;let
       ) ;define
 
-      (cond ((eq? depth 'deepest)
-             (flatten-deepest lst))
-            ((integer? depth)
-             (flatten-depth lst depth)
-            ) ;
-            (else
-             (type-error
-              (string-append
-                "flatten: the second argument depth should be symbol "
-                "`deepest' or a integer, which will be uesd as depth,"
-                " but got a ~A") depth)))
+      (cond
+        ((eq? depth 'deepest)
+         (flatten-deepest lst)
+        ) ;
+        ((integer? depth)
+         (flatten-depth lst depth)
+        ) ;
+        (else
+         (type-error
+          (string-append
+            "flatten: the second argument depth should be symbol "
+            "`deepest' or a integer, which will be uesd as depth,"
+            " but got a ~A") depth)))
     ) ;define*
 
   ) ;begin

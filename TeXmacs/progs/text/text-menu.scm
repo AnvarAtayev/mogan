@@ -170,11 +170,12 @@
       ("Warning" (make 'warning))
       ("Acknowledgments" (make 'acknowledgments*))
       ---)
+  ("Question" (make 'question))
+  ("Answer" (make 'answer*))
+  ---
   ("Exercise" (make 'exercise))
   ("Problem" (make 'problem))
-  ("Question" (make 'question))
-  ("Solution" (make 'solution*))
-  ("Answer" (make 'answer*)))
+  ("Solution" (make 'solution*)))
 
 (menu-bind prominent-menu
   ("Quote" (make 'quote-env))
@@ -401,20 +402,25 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (menu-bind itemize-menu
-  ("Default" (make-tmlist 'itemize))
+  ((shortcut "Default" "- space") (make-tmlist 'itemize))
   ---
   ("Bullets" (make-tmlist 'itemize-dot))
   ("Dashes" (make-tmlist 'itemize-minus))
   ("Arrows" (make-tmlist 'itemize-arrow)))
 
 (menu-bind enumerate-menu
-  ("Default" (make-tmlist 'enumerate))
+  ((shortcut "Default" "1 . space") (make-tmlist 'enumerate))
   ---
   ("1, 2, 3, ..." (make-tmlist 'enumerate-numeric))
+  ("1), 2), 3), ..." (make-tmlist 'enumerate-numeric-bracket))
   ("(1), (2), (3), ..." (make-tmlist 'enumerate-numeric-paren))
   ("i, ii, iii, ..." (make-tmlist 'enumerate-roman))
+  ("i), ii), iii), ..." (make-tmlist 'enumerate-roman-bracket))
+  ("(i), (ii), (iii), ..." (make-tmlist 'enumerate-roman-paren))
   ("I, II, III, ..." (make-tmlist 'enumerate-Roman))
   ("a, b, c, ..." (make-tmlist 'enumerate-alpha))
+  ("a), b), c), ..." (make-tmlist 'enumerate-alpha-bracket))
+  ("(a), (b), (c), ..." (make-tmlist 'enumerate-alpha-full-paren))
   ("A, B, C, ..." (make-tmlist 'enumerate-Alpha))
   ("①, ②, ③, ..." (make-tmlist 'enumerate-circle))
   ("一, 二, 三, ..." (make-tmlist 'enumerate-hanzi)))
@@ -429,19 +435,24 @@
   ("Paragraphs" (make-tmlist 'description-paragraphs)))
 
 (menu-bind list-menu
-  ("Itemize" (make-tmlist 'itemize))
+  ((shortcut "Itemize" "- space") (make-tmlist 'itemize))
   ---
   ("Bullets" (make-tmlist 'itemize-dot))
   ("Dashes" (make-tmlist 'itemize-minus))
   ("Arrows" (make-tmlist 'itemize-arrow))
   ---
-  ("Enumerate" (make-tmlist 'enumerate))
+  ((shortcut "Enumerate" "1 . space") (make-tmlist 'enumerate))
   ---
   ("1, 2, 3, ..." (make-tmlist 'enumerate-numeric))
+  ("1), 2), 3), ..." (make-tmlist 'enumerate-numeric-bracket))
   ("(1), (2), (3), ..." (make-tmlist 'enumerate-numeric-paren))
   ("i, ii, iii, ..." (make-tmlist 'enumerate-roman))
+  ("i), ii), iii), ..." (make-tmlist 'enumerate-roman-bracket))
+  ("(i), (ii), (iii), ..." (make-tmlist 'enumerate-roman-paren))
   ("I, II, III, ..." (make-tmlist 'enumerate-Roman))
   ("a, b, c, ..." (make-tmlist 'enumerate-alpha))
+  ("a), b), c), ..." (make-tmlist 'enumerate-alpha-bracket))
+  ("(a), (b), (c), ..." (make-tmlist 'enumerate-alpha-full-paren))
   ("A, B, C, ..." (make-tmlist 'enumerate-Alpha))
   ("①, ②, ③, ..." (make-tmlist 'enumerate-circle))
   ("一, 二, 三, ..." (make-tmlist 'enumerate-hanzi))
@@ -586,7 +597,8 @@
       (=> (balloon (icon "tm_program.xpm") "Insert a computer program")
           (link code-menu)))
   (if (style-has? "std-list-dtd")
-      (=> (balloon (icon "tm_list.xpm") "Insert a list")
+      (=> (balloon (icon "tm_list.xpm")
+                   "Insert a list (- Space, 1. Space)")
           (link list-menu)))
   (if (and (style-has? "env-float-dtd") (detailed-menus?))
       ;;((balloon (icon "tm_footnote.xpm") "Insert a footnote") ())
@@ -978,30 +990,49 @@
 
 (tm-define (section-prefix-sep-var t)
   (with l (tree-label t)
-    (cond ((== l 'chapter) "chapter-prefix-sep")
-          ((== l 'section) "section-prefix-sep")
+    (cond ((== l 'section) "section-prefix-sep")
           ((== l 'subsection) "subsection-prefix-sep")
           ((== l 'subsubsection) "subsubsection-prefix-sep")
           (else #f))))
+
+(tm-define (section-display-numbers-var t)
+  (with l (tree-label t)
+    (cond ((== l 'chapter) "chapter-display-numbers")
+          ((== l 'section) "section-display-numbers")
+          ((== l 'subsection) "subsection-display-numbers")
+          ((== l 'subsubsection) "subsubsection-display-numbers")
+          ((== l 'paragraph) "paragraph-display-numbers")
+          ((== l 'subparagraph) "subparagraph-display-numbers")
+          (else #f))))
+
+(tm-define (section-display-label t)
+  (with l (tree-label t)
+    (cond ((== l 'chapter) "Global hide chapter numbers")
+          ((== l 'section) "Global hide section numbers")
+          ((== l 'subsection) "Global hide subsection numbers")
+          ((== l 'subsubsection) "Global hide subsubsection numbers")
+          ((== l 'paragraph) "Global hide paragraph numbers")
+          ((== l 'subparagraph) "Global hide subparagraph numbers")
+          (else "Global hide section numbers"))))
+
+(tm-define (section-numbering-label t)
+  (with l (tree-label t)
+    (cond ((== l 'chapter) "Chapter numbering")
+          ((== l 'section) "Section numbering")
+          ((== l 'subsection) "Subsection numbering")
+          ((== l 'subsubsection) "Subsubsection numbering")
+          ((== l 'paragraph) "Paragraph numbering")
+          ((== l 'subparagraph) "Subparagraph numbering")
+          (else "Section numbering"))))
 
 (tm-define (safe-init-env var)
   (if (or (string? var) (symbol? var))
       (get-init-env var)
       #f))
 
-(tm-menu (focus-preferences-menu t)
-  (:require (section-context? t))
-  (with var (focus-section-title-style-var t)
-    (when var
-      (group "Title style")
-      ((check "Centered" "v" (== (safe-init-env var) "center"))
-       (init-env var "center"))
-      ((check "Left aligned" "v" (== (safe-init-env var) "left"))
-       (init-env var "left"))
-      ---))
-  (with num-var (section-number-style-var t)
+(menu-bind section-number-style-menu
+  (with num-var (section-number-style-var (focus-tree))
     (when num-var
-      (group "Number style")
       ((check "Arabic (1, 2, 3)" "v" (== (safe-init-env num-var) "arabic"))
        (init-env num-var "arabic"))
       ((check "Hanzi (一, 二, 三)" "v" (== (safe-init-env num-var) "hanzi"))
@@ -1015,21 +1046,11 @@
       ((check "alpha (a, b, c)" "v" (== (safe-init-env num-var) "alpha"))
        (init-env num-var "alpha"))
       ((check (verbatim "Circle (①, ②, ③)") "v" (== (safe-init-env num-var) "circle"))
-       (init-env num-var "circle"))
-      ---))
-  (with l (tree-label t)
-    (when (in? l '(section subsection))
-      (group "Section prefix")
-      ((check "Short numbering" "v"
-              (== (get-init-env "sectional-short-style") "true"))
-       (init-env "sectional-short-style" "true"))
-      ((check "Long numbering" "v"
-              (!= (get-init-env "sectional-short-style") "true"))
-       (init-env "sectional-short-style" "false"))
-      ---))
-  (with sep-var (section-sep-var t)
+       (init-env num-var "circle")))))
+
+(menu-bind section-sep-menu
+  (with sep-var (section-sep-var (focus-tree))
     (when sep-var
-      (group "Separator")
       ((check "." "v" (== (safe-init-env sep-var) "."))
        (init-env sep-var "."))
       ((check "、" "v" (== (safe-init-env sep-var) "<#3001>"))
@@ -1037,13 +1058,12 @@
       ((check "-" "v" (== (safe-init-env sep-var) "-"))
        (init-env sep-var "-"))
       ((check "space" "v" (== (safe-init-env sep-var) " "))
-       (init-env sep-var " "))
-      ((check "none" "v" (== (safe-init-env sep-var) ""))
-       (init-env sep-var ""))
-      ---))
-  (with prefix-sep-var (section-prefix-sep-var t)
+       (init-env sep-var " "))))
+) ;menu-bind
+
+(menu-bind section-prefix-sep-menu
+  (with prefix-sep-var (section-prefix-sep-var (focus-tree))
     (when prefix-sep-var
-      (group "Prefix separator")
       ((check "." "v" (== (safe-init-env prefix-sep-var) "."))
        (init-env prefix-sep-var "."))
       ((check "、" "v" (== (safe-init-env prefix-sep-var) "<#3001>"))
@@ -1051,10 +1071,47 @@
       ((check "-" "v" (== (safe-init-env prefix-sep-var) "-"))
        (init-env prefix-sep-var "-"))
       ((check "space" "v" (== (safe-init-env prefix-sep-var) " "))
-       (init-env prefix-sep-var " "))
-      ((check "none" "v" (== (safe-init-env prefix-sep-var) ""))
-       (init-env prefix-sep-var ""))
-      ---))
+       (init-env prefix-sep-var " "))))
+) ;menu-bind
+
+(tm-menu (focus-preferences-menu t)
+  (:require (section-context? t))
+  (with var (focus-section-title-style-var t)
+    (if var
+        (group "Title style")
+        ((check "Centered" "v" (== (safe-init-env var) "center"))
+         (init-env var "center"))
+        ((check "Left aligned" "v" (== (safe-init-env var) "left"))
+         (init-env var "left"))
+        ---))
+  (with num-var (section-number-style-var t)
+    (if num-var
+        (-> "Number style" (link section-number-style-menu))
+        ---))
+  (with display-num-var (section-display-numbers-var t)
+    (if display-num-var
+        (group (eval (section-numbering-label t)))
+        ((check (eval (section-display-label t)) "v"
+                (== (get-init-env display-num-var) "false"))
+         (init-env display-num-var
+                  (if (== (get-init-env display-num-var) "true") "false" "true")))
+        ---))
+  (with prefix-num-var (section-number-style-var t)
+    (if prefix-num-var
+        (group "Section prefix")
+        ((check "Prepend chapter number prefix for section numbers" "v"
+                (== (get-init-env "sectional-short-style") "false"))
+         (init-env "sectional-short-style"
+                  (if (== (get-init-env "sectional-short-style") "true") "false" "true")))
+        ---))
+  (with sep-var (section-sep-var t)
+    (if sep-var
+        (-> "Number-title separator" (link section-sep-menu))
+        ---))
+  (with prefix-sep-var (section-prefix-sep-var t)
+    (if prefix-sep-var
+        (-> "Sub-level separator" (link section-prefix-sep-menu))
+        ---))
   (dynamic (focus-tag-edit-menu (tree-label t))))
 
 (tm-menu (focus-preferences-menu t)

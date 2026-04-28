@@ -11,17 +11,15 @@
 
 #include "QTMTabPage.hpp"
 #include "new_view.hpp"
+#include "qt_utilities.hpp"
 #include "string.hpp"
 #include "tm_window.hpp"
-#include <QGuiApplication>
-#include <QScreen>
 #include <QSize>
 
-// The minimum width of a single tab page (in pixels).
-const int MIN_TAB_PAGE_WIDTH= 150;
-// The maximum width of a single tab page (in pixels).
-const int MAX_TAB_PAGE_WIDTH   = 200;
-const int STARTUP_TAB_MAX_WIDTH= 100;
+// Base tab widths
+constexpr int MAX_TAB_PAGE_WIDTH_BASE   = 150;
+constexpr int MIN_TAB_PAGE_WIDTH_BASE   = 25;
+constexpr int STARTUP_TAB_MAX_WIDTH_BASE= 100;
 
 // The horizontal padding for tab container (in pixels).
 #ifdef Q_OS_MAC
@@ -40,18 +38,31 @@ constexpr int ADD_TAB_BUTTON_VERTICAL_OFFSET= 0;
 constexpr int TAB_RIGHT_EXTRA_GAP           = 66;
 #endif
 
-// DPI scaling utility functions
+// DPI scaling utility functions (使用 DpiUtils)
 static double
 getDPIScaleFactor () {
-  QScreen* screen= QGuiApplication::primaryScreen ();
-  double   dpi   = screen ? screen->logicalDotsPerInch () : 96.0;
-  return dpi / 96.0;
+  return DpiUtils::scaleFactor ();
+}
+
+static int
+getScaledMaxTabPageWidth () {
+  return DpiUtils::scaled (MAX_TAB_PAGE_WIDTH_BASE);
+}
+
+static int
+getScaledMinTabPageWidth () {
+  return DpiUtils::scaled (MIN_TAB_PAGE_WIDTH_BASE);
+}
+
+static int
+getScaledStartupTabMaxWidth () {
+  return DpiUtils::scaled (STARTUP_TAB_MAX_WIDTH_BASE);
 }
 
 static int
 getScaledSystemBarHeight () {
 #ifdef Q_OS_MAC
-  constexpr int baseHeight= 30;
+  constexpr int baseHeight= 22;
 #else
   constexpr int baseHeight= 36;
 #endif
@@ -61,7 +72,7 @@ getScaledSystemBarHeight () {
 static int
 getScaledSystemButtonHeight () {
 #ifdef Q_OS_MAC
-  constexpr int baseHeight= 20;
+  constexpr int baseHeight= 15;
 #else
   constexpr int baseHeight= 24;
 #endif
@@ -71,7 +82,7 @@ getScaledSystemButtonHeight () {
 static QSize
 getScaledTabCloseButtonSize () {
 #ifdef Q_OS_MAC
-  constexpr int baseSize= 16;
+  constexpr int baseSize= 12;
 #else
   constexpr int baseSize= 20;
 #endif
@@ -217,6 +228,11 @@ QTMTabPage::resizeEvent (QResizeEvent* e) {
 void
 QTMTabPage::mousePressEvent (QMouseEvent* e) {
   if (is_startup_tab_view (m_viewUrl)) {
+    // 如果启动页标签已经是当前视图，不处理点击事件，避免取消选中状态
+    url currentView= get_current_view_safe ();
+    if (!is_none (currentView) && currentView == m_viewUrl) {
+      return;
+    }
     return QToolButton::mousePressEvent (e);
   }
   if (e->button () == Qt::LeftButton) {
@@ -428,7 +444,8 @@ QTMTabPageContainer::arrangeTabPages () {
   int availableWidth= windowWidth - 2 * TAB_CONTAINER_PADDING - reservedRight;
   int tabWidth      = availableWidth / visibleTabCount;
   // Clamp width into a reasonable range: allow longer tabs when count is small
-  tabWidth  = std::max (25, std::min (MAX_TAB_PAGE_WIDTH, tabWidth));
+  tabWidth  = std::max (getScaledMinTabPageWidth (),
+                        std::min (getScaledMaxTabPageWidth (), tabWidth));
   g_tabWidth= tabWidth; // for external use
 
   int accumWidth= TAB_CONTAINER_PADDING;
@@ -438,7 +455,7 @@ QTMTabPageContainer::arrangeTabPages () {
     QTMTabPage* tab            = m_tabPageList[i];
     int         currentTabWidth= tabWidth;
     if (is_startup_tab_view (tab->m_viewUrl)) {
-      currentTabWidth= std::min (tabWidth, STARTUP_TAB_MAX_WIDTH);
+      currentTabWidth= std::min (tabWidth, getScaledStartupTabMaxWidth ());
     }
 
     if (g_pointingIndex == i) {

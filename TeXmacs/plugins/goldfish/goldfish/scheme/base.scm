@@ -19,22 +19,39 @@
     let-values
     ; R7RS 5: Program Structure
     define-values define-record-type
+    ; R7RS 6.1: Equivalence predicates
+    eq? eqv? equal?
     ; R7RS 6.2: Numbers
+    ; - 比较和算术
+    = < > <= >=
+    + - * / abs
+    ; - 数值函数
     square exact inexact max min floor floor/ s7-floor ceiling s7-ceiling truncate truncate/ s7-truncate
-    round s7-round floor-quotient floor-remainder gcd lcm s7-lcm modulo boolean=? exact-integer-sqrt
-    numerator denominator exact-integer? number->string string->number
+    round s7-round floor-quotient floor-remainder gcd lcm s7-lcm modulo quotient remainder
+    numerator denominator rationalize exact-integer-sqrt
+    number->string string->number
+    ; - 类型判断
+    number? complex? real? rational? integer? exact? inexact? exact-integer?
+    positive? negative? zero? odd? even?
+    ; R7RS 6.3: Booleans
+    not boolean=? boolean?
     ; R7RS 6.4: list
     pair? cons car cdr set-car! set-cdr! caar cadr cdar cddr
     null? list? make-list list length append reverse list-tail
-    list-ref list-set! memq memv member assq assv assoc list-copy
+    list-ref list-set! memq memv member assq assv assoc list-copy map
     ; R7RS 6.5: Symbol
     symbol? symbol=? string->symbol symbol->string
     ; R7RS 6.6: Characters
-    digit-value
+    char? char=? char<? char>? char<=? char>=? char->integer integer->char
     ; R7RS 6.7: String
-    string-copy
+    string? make-string string string-length string-ref string-set!
+    string-copy string-append substring string-fill!
+    string->list list->string
+    string=? string<? string>? string<=? string>=?
     ; R7RS 6.8: Vector
-    vector->string string->vector vector-copy vector-copy! vector-fill!
+    vector? make-vector vector vector-length vector-ref vector-set!
+    vector->list list->vector vector->string string->vector
+    vector-copy vector-copy! vector-fill! vector-append
     ; R7RS 6.9: Bytevectors
     bytevector? make-bytevector bytevector bytevector-length bytevector-u8-ref
     bytevector-u8-set! bytevector-copy bytevector-append
@@ -68,16 +85,17 @@
                          (values ,@(map (lambda (name)
                                           (values (symbol->keyword name) name))
                                      (let args->proper-list ((args (car v)))
-                                       (cond ((symbol? args)
-                                              (list args))
-                                             ((not (pair? args))
-                                              args)
-                                             ((pair? (car args))
-                                              (cons (caar args)
-                                                    (args->proper-list (cdr args))))
-                                             (else
-                                              (cons (car args)
-                                                    (args->proper-list (cdr args)))))))))
+                                       (cond
+                                         ((symbol? args)
+                                          (list args))
+                                         ((not (pair? args))
+                                          args)
+                                         ((pair? (car args))
+                                          (cons (caar args)
+                                                (args->proper-list (cdr args))))
+                                         (else
+                                          (cons (car args)
+                                                (args->proper-list (cdr args)))))))))
                        ,(cadr v)))
                    vars)))
             ,@body)
@@ -92,16 +110,20 @@
 
     ; 0-clause BSD by Bill Schottstaedt from S7 source repo: r7rs.scm
     (define-macro (define-record-type type make ? . fields)
-      (let ((obj (gensym))
-            (typ (gensym)) ; this means each call on this macro makes a new type
-            (args (map (lambda (field)
-                         (values (list 'quote (car field))
-                                 (let ((par (memq (car field) (cdr make))))
-                                   (and (pair? par) (car par)))
-                                 ) ;let
-                         ) ;values
-                       fields))
-            ) ;args
+      (let
+        ((obj (gensym))
+         (typ (gensym)) ; this means each call on this macro makes a new type
+         (args
+           (map
+             (lambda (field)
+               (values (list 'quote (car field))
+                       (let ((par (memq (car field) (cdr make))))
+                         (and (pair? par) (car par)))
+                       ) ;let
+               ) ;values
+             fields)
+           ) ;map
+         ) ;args
         `(begin
            (define (,? ,obj)
              (and (let? ,obj)
@@ -368,15 +390,17 @@ wrong-type-arg
       (when (or (not (real? x)) (not (real? y)))
         (error 'type-error "lcm: parameters must be reals")
       ) ;when
-      (cond ((and (inexact? x) (exact? y))
-             (inexact (s7-lcm (exact x) y)))
-            ((and (exact? x) (inexact? y))
-             (inexact (s7-lcm x (exact y)))
-            ) ;
-            ((and (inexact? x) (inexact? y))
-             (inexact (s7-lcm (exact x) (exact y)))
-            ) ;
-            (else (s7-lcm x y))
+      (cond
+        ((and (inexact? x) (exact? y))
+         (inexact (s7-lcm (exact x) y))
+        ) ;
+        ((and (exact? x) (inexact? y))
+         (inexact (s7-lcm x (exact y)))
+        ) ;
+        ((and (inexact? x) (inexact? y))
+         (inexact (s7-lcm (exact x) (exact y)))
+        ) ;
+        (else (s7-lcm x y))
       ) ;cond
     ) ;define
 
@@ -388,8 +412,10 @@ wrong-type-arg
             ((null? (cddr args))
              (lcm2 (car args) (cadr args))
             ) ;
-            (else (apply lcm (cons (lcm (car args) (cadr args))
-                                   (cddr args)))
+            (else
+             (apply lcm (cons (lcm (car args) (cadr args))
+                              (cddr args))
+             ) ;apply
             ) ;else
       ) ;cond
     ) ;define
@@ -640,14 +666,15 @@ wrong-type-arg
     ) ;define
 
     (define-macro (guard results . body)
-      `(let ((,(car results) 
-              (catch #t 
-                (lambda () 
-                  ,@body) 
-                (lambda (type info)
-                  (if (pair? (*s7* 'catches))
-                      (lambda () (apply throw type info))
-                      (car info))))))
+      `(let
+         ((,(car results)
+           (catch #t 
+             (lambda () 
+               ,@body) 
+             (lambda (type info)
+               (if (pair? (*s7* 'catches))
+                   (lambda () (apply throw type info))
+                   (car info))))))
          (cond ,@(cdr results)
                (else 
                 (if (procedure? ,(car results)) 
@@ -689,15 +716,17 @@ wrong-type-arg
     (define list-copy copy)
 
     (define (string-copy str . start_end)
-      (cond ((null? start_end)
-             (substring str 0))
-            ((= (length start_end) 1)
-             (substring str (car start_end))
-            ) ;
-            ((= (length start_end) 2)
-             (substring str (car start_end) (cadr start_end))
-            ) ;
-            (else (error 'wrong-number-of-args))
+      (cond
+        ((null? start_end)
+         (substring str 0)
+        ) ;
+        ((= (length start_end) 1)
+         (substring str (car start_end))
+        ) ;
+        ((= (length start_end) 2)
+         (substring str (car start_end) (cadr start_end))
+        ) ;
+        (else (error 'wrong-number-of-args))
       ) ;cond
     ) ;define
 

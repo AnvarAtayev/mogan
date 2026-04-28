@@ -146,7 +146,7 @@
 (define (split-code-and-magic-line code)
   (if (not (string-starts? code "%"))
       (list "" code)
-      (let1 i/false (string-index code #\newline)
+      (let ((i/false (string-index code #\newline)))
         (if (not i/false)
             (list code "")
             (list (substring code 0 i/false)

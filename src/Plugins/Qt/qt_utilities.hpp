@@ -87,6 +87,13 @@ string  from_qstring_utf8 (const QString& s);
  */
 QString qt_translate (const string& s);
 
+/******************************************************************************
+ * Scheme string escaping
+ ******************************************************************************/
+
+string qt_scheme_quote (const QString& text);
+string qt_scheme_quote_utf8 (const QString& text);
+
 #ifdef OS_MACOS
 QString fromNSUrl (const QUrl& url);
 #endif
@@ -181,5 +188,11 @@ string from_key_release_event (const QKeyEvent* event);
 
 string qt_clipboard_format ();
 string qt_clipboard_text ();
+void   qt_clipboard_set_html (string html);
+
+/******************************************************************************
+ * DPI and scale factor utilities
+ ******************************************************************************/
+#include "qt_dpi_utils.hpp"
 
 #endif // QT_UTILITIES_HPP

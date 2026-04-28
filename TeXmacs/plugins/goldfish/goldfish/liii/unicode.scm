@@ -17,7 +17,7 @@
 (define-library (liii unicode)
   (export
    ;; UTF-8 函数
-   utf8->string string->utf8 utf8-string-length u8-substring bytevector-advance-utf8
+   utf8->string string->utf8 utf8-string-length utf8-substring bytevector-advance-utf8
    codepoint->utf8 utf8->codepoint
 
    ;; UTF-16BE 函数
@@ -33,9 +33,18 @@
    unicode-max-codepoint unicode-replacement-char
   ) ;export
 
-  (import (liii base) (liii bitwise) (liii error))
+  (import (scheme base)
+          (liii base)
+          (liii bitwise)
+          (liii error)
+  ) ;import
 
   (begin
+
+    (define* (utf8-substring str (start 0) (end #t))
+      (utf8->string (string->utf8 str start end))
+    ) ;define*
+
     (define (codepoint->utf8 codepoint)
       (unless (integer? codepoint)
         (error 'type-error "codepoint->utf8: expected integer, got" codepoint)
@@ -116,10 +125,14 @@
                (unless (and (<= #x80 byte2 #xBF) (<= #x80 byte3 #xBF))
                  (error 'value-error "utf8->codepoint: invalid continuation byte")
                ) ;unless
-               (let ((codepoint (bitwise-ior
-                                 (ash (bitwise-and first-byte #b00001111) 12)
-                                 (ash (bitwise-and byte2 #b00111111) 6)
-                                 (bitwise-and byte3 #b00111111))))
+               (let
+                 ((codepoint
+                    (bitwise-ior
+                     (ash (bitwise-and first-byte #b00001111) 12)
+                     (ash (bitwise-and byte2 #b00111111) 6)
+                     (bitwise-and byte3 #b00111111))
+                    ) ;bitwise-ior
+                  ) ;codepoint
                  (when (or (<= #xD800 codepoint #xDFFF)
                            (and (= first-byte #xE0) (< codepoint #x0800))
                            (and (= first-byte #xED) (>= codepoint #xD800)))
@@ -140,11 +153,15 @@
                (unless (and (<= #x80 byte2 #xBF) (<= #x80 byte3 #xBF) (<= #x80 byte4 #xBF))
                  (error 'value-error "utf8->codepoint: invalid continuation byte")
                ) ;unless
-               (let ((codepoint (bitwise-ior
-                                 (ash (bitwise-and first-byte #b00000111) 18)
-                                 (ash (bitwise-and byte2 #b00111111) 12)
-                                 (ash (bitwise-and byte3 #b00111111) 6)
-                                 (bitwise-and byte4 #b00111111))))
+               (let
+                 ((codepoint
+                    (bitwise-ior
+                     (ash (bitwise-and first-byte #b00000111) 18)
+                     (ash (bitwise-and byte2 #b00111111) 12)
+                     (ash (bitwise-and byte3 #b00111111) 6)
+                     (bitwise-and byte4 #b00111111))
+                    ) ;bitwise-ior
+                  ) ;codepoint
                  (when (or (< codepoint #x10000)
                            (> codepoint #x10FFFF)
                            (and (= first-byte #xF0) (< codepoint #x10000))
@@ -293,8 +310,12 @@
                  (error 'value-error "utf16be->codepoint: invalid low surrogate")
                ) ;unless
 
-               (let ((codepoint-prime (+ (ash (- first-codepoint #xD800) 10)
-                                         (- second-codepoint #xDC00))))
+               (let
+                 ((codepoint-prime
+                    (+ (ash (- first-codepoint #xD800) 10)
+                       (- second-codepoint #xDC00))
+                    ) ;+
+                  ) ;codepoint-prime
                  (+ codepoint-prime #x10000)
                ) ;let
              ) ;let*
@@ -313,7 +334,6 @@
         ) ;let*
       ) ;let
     ) ;define
-  ) ;begin
 
     (define (codepoint->utf16le codepoint)
       (unless (integer? codepoint)
@@ -388,8 +408,12 @@
                  (error 'value-error "utf16le->codepoint: invalid low surrogate")
                ) ;unless
 
-               (let ((codepoint-prime (+ (ash (- first-codepoint #xD800) 10)
-                                         (- second-codepoint #xDC00))))
+               (let
+                 ((codepoint-prime
+                    (+ (ash (- first-codepoint #xD800) 10)
+                       (- second-codepoint #xDC00))
+                    ) ;+
+                  ) ;codepoint-prime
                  (+ codepoint-prime #x10000)
                ) ;let
              ) ;let*
@@ -408,7 +432,6 @@
         ) ;let*
       ) ;let
     ) ;define
-) ;define-library
 
     (define (utf8->utf16le bv)
       (unless (bytevector? bv)
@@ -629,3 +652,6 @@
         ) ;if
       ) ;let
     ) ;define
+
+  ) ;begin
+) ;define-library
