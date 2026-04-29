@@ -225,30 +225,237 @@
 	(else
 	  (insert-go-to w (list (- (tm-arity w) 1) 0)))))
 
+(tm-define (with-like-selection-parent-target t u w)
+  (and u
+       (with-like? u)
+       (with-same-type? u w)
+       (tm-equal? (tree-ref u :last) t)
+       u))
+
+(tm-define (with-like-selection-target t w)
+  (cond ((and t (with-like? t) (with-same-type? t w))
+         t)
+        ((with-like-selection-parent-target t (and t (tree-ref t :up)) w))
+        (else t)))
+
+(tm-define (with-like-focus-target w)
+  (with t (focus-tree)
+    (cond ((and t (with-like? t) (with-same-type? t w))
+           t)
+          ((with-like-selection-parent-target t (and t (tree-ref t :up)) w))
+          (else #f))))
+
+(define (with-like-attrs t)
+  (let loop ((i 0) (r '()))
+    (if (>= i (- (tree-arity t) 1))
+        (reverse r)
+        (loop (+ i 2)
+              (cons (tree-ref t (+ i 1))
+                    (cons (tree-ref t i) r))))))
+
+(define (with-like-build-body attrs body)
+  (if (null? attrs) body
+      `(with ,@attrs ,body)))
+
+(define (with-like-string-offset s n)
+  (let loop ((i 0) (pos 0))
+    (if (>= i n) pos
+        (loop (+ i 1) (string-next s pos)))))
+
+(define (with-like-compact l)
+  (cond ((null? l) '())
+        ((or (not (car l)) (== (car l) ""))
+         (with-like-compact (cdr l)))
+        (else (cons (car l) (with-like-compact (cdr l))))))
+
+(define (with-like-build-body-without t var body)
+  (let loop ((attrs (with-like-attrs t)) (r '()))
+    (cond ((null? attrs)
+           (with-like-build-body (reverse r) body))
+          ((tm-equal? (car attrs) var)
+           (loop (cddr attrs) r))
+          (else
+           (loop (cddr attrs)
+                 (cons (cadr attrs) (cons (car attrs) r)))))))
+
+(define (with-like-partial-toggle-data t var start end)
+  (with s (tree->string (tree-ref t :last))
+    (let* ((start* (with-like-string-offset s start))
+           (end*   (with-like-string-offset s end))
+           (left  (substring s 0 start*))
+           (mid   (substring s start* end*))
+           (right (substring s end* (string-length s)))
+           (mid-index (if (!= left "") 1 0))
+           (parts (list
+                   (and (!= left "") (with-like-build-body (with-like-attrs t) left))
+                   (with-like-build-body-without t var mid)
+                   (and (!= right "") (with-like-build-body (with-like-attrs t) right))))
+           (parts* (with-like-compact parts)))
+      (list parts* mid-index))))
+
+(tm-define (with-like-partial-toggle-result t var start end)
+  (with data (with-like-partial-toggle-data t var start end)
+    (with parts* (car data)
+      (cond ((null? parts*) "")
+            ((null? (cdr parts*)) (car parts*))
+            (else `(concat ,@parts*))))))
+
+(define (selection-subtrees t p1 p2)
+  (cond ((== p1 p2) '())
+        ((or (<= (length p1) 1) (<= (length p2) 1)) (list t))
+        ((and (== (car p1) (car p2)) (tm-ref t (car p1)))
+         (selection-subtrees (tm-ref t (car p1)) (cdr p1) (cdr p2)))
+        ((< (car p1) (car p2))
+         (let* ((i1 (car p1))
+                (i2 (car p2))
+                (t1 (tm-ref t i1))
+                (t2 (tm-ref t i2))
+                (l1 (selection-subtrees t1 (cdr p1)
+                                        (list (tree-right-index t1))))
+                (l2 (selection-subtrees t2 (list 0) (cdr p2)))
+                (ll (sublist (tree-children t) (+ i1 1) i2)))
+           (append l1 ll l2)))
+        (else '())))
+
+(tm-define (with-like-selection-trees)
+  (let* ((p1 (selection-get-start))
+         (p2 (selection-get-end)))
+    (and p1 p2
+         (selection-subtrees (root-tree) p1 p2))))
+
+(define (with-like-wrap-node w t)
+  (if (func? w 'with 3)
+      `(with ,(cadr w) ,(caddr w) ,t)
+      `(,(car w) ,t)))
+
+(tm-define (with-like-node-without t w)
+  (if (func? w 'with 3)
+      (with-like-build-body-without t (cadr w) (tree-ref t :last))
+      (tree-ref t :last)))
+
+(define (with-like-node-has-target? t w)
+  (and (with-like? t) (with-same-type? t w)))
+
+(define (with-like-all-have-target? l w)
+  (list-and (map (cut with-like-node-has-target? <> w) l)))
+
+(define (with-like-strip-target-from-node t w)
+  (if (with-like-node-has-target? t w)
+      (with-like-node-without t w)
+      t))
+
+(define (with-like-uniform-selection-tree? t)
+  (and t
+       (tree-compound? t)
+       (tree-in? t '(document concat))
+       (> (tree-arity t) 1)))
+
+(tm-define (with-like-uniform-toggle? w)
+  (and (selection-active-any?)
+       (func? w 'with 3)
+       (with-like-uniform-selection-tree? (selection-tree))))
+
+(tm-define (with-like-uniform-toggle-result t w)
+  (let* ((l (tree-children t))
+         (all? (with-like-all-have-target? l w))
+         (label (tree-label t)))
+    (cond (all?
+           (let ((r (map (lambda (u) (with-like-strip-target-from-node u w)) l)))
+             (cond ((null? r) "")
+                   ((null? (cdr r)) (car r))
+                   (else `(,label ,@r)))))
+          ((== label 'concat)
+           (with-like-wrap-node
+            w
+            `(concat ,@(map (lambda (u) (with-like-strip-target-from-node u w)) l))))
+          (else
+           (let ((r (map (lambda (u)
+                           (if (with-like-node-has-target? u w)
+                               u
+                               (with-like-wrap-node w u)))
+                         l)))
+             (cond ((null? r) "")
+                   ((null? (cdr r)) (car r))
+                   (else `(,label ,@r))))))))
+
+(define (with-like-uniform-toggle-path t)
+  (if (and (tree-compound? t) (> (tree-arity t) 1))
+      (let ((i (- (tree-arity t) 1)))
+        (cons i (path-end (tree-ref t i) '())))
+      (path-end t '())))
+
+(tm-define (toggle-with-like-uniform-selection w)
+  (with t (selection-tree)
+    (when t
+      (let* ((replacement (with-like-uniform-toggle-result t w))
+             (replacement* (tm->tree replacement)))
+        (clipboard-cut "nowhere")
+        (insert-go-to replacement
+                      (with-like-uniform-toggle-path replacement*))))))
+
+(tm-define (with-like-partial-toggle? t)
+  (and (selection-active-small?)
+       t
+       (tree-is? t 'with)
+       (tree-atomic? (tree-ref t :last))
+       (let* ((body-path (tree->path (tree-ref t :last)))
+              (start (selection-get-start))
+              (end (selection-get-end)))
+         (and body-path
+              start
+              end
+              (== (cDr start) body-path)
+              (== (cDr end) body-path)
+              (< (cAr start) (cAr end))))))
+
+(tm-define (toggle-with-like-partial-remove t w)
+  (let* ((start (selection-get-start))
+         (end (selection-get-end))
+         (var (cadr w))
+         (data (with-like-partial-toggle-data t var (cAr start) (cAr end)))
+         (parts* (car data))
+         (mid-index (cadr data))
+         (replacement (with-like-partial-toggle-result t var (cAr start) (cAr end))))
+    (focus-tree-modified t)
+    (tree-set! t replacement)
+    (if (null? (cdr parts*))
+        (tree-go-to t :end)
+        (tree-go-to t mid-index :end))))
+
+(tm-define (with-like-toggle-target w)
+  (cond ((and (selection-active-any?)
+              (== (selection-tree) (path->tree (selection-path))))
+         (with-like-selection-target (path->tree (selection-path)) w))
+        ((with-like-focus-target w))
+        (else (with-like-search (tree-ref (cursor-tree) :up)))))
+
+(tm-define (remove-with-like-target t)
+  (tree-remove-node! t (- (tree-arity t) 1))
+  (tree-correct-node (tree-ref t :up)))
+
 (tm-define (toggle-with-like w back)
-  (with t (if (and (selection-active-any?)
-		   (== (selection-tree) (path->tree (selection-path))))
-	      (path->tree (selection-path))
-	      (with-like-search (tree-ref (cursor-tree) :up)))
-    ;;(display* "t= " t "\n")
-    (cond ((not (and t (with-like? t) (with-same-type? t w)))
-           (make-with-like w))
-          ((or (not back) (tree-empty? (tm-ref t :last)))
-           (tree-remove-node! t (- (tree-arity t) 1))
-           (tree-correct-node (tree-ref t :up)))
-          ((tree-at-start? (tm-ref t :last))
-           (tree-go-to t 0))
-          ((tree-at-end? (tm-ref t :last))
-           (tree-go-to t 1))
-          (else (make-with-like back)))))
+  (cond ((with-like-uniform-toggle? w)
+         (toggle-with-like-uniform-selection w))
+        (else
+         (with t (with-like-toggle-target w)
+           ;;(display* "t= " t "\n")
+           (cond ((not (and t (with-like? t) (with-same-type? t w)))
+                  (make-with-like w))
+                 ((and (not back) (with-like-partial-toggle? t))
+                  (toggle-with-like-partial-remove t w))
+                 ((or (not back) (tree-empty? (tm-ref t :last)))
+                  (remove-with-like-target t))
+                 ((tree-at-start? (tm-ref t :last))
+                  (tree-go-to t 0))
+                 ((tree-at-end? (tm-ref t :last))
+                  (tree-go-to t 1))
+                 (else (make-with-like back)))))))
 
 (tm-define (toggle-bold)
-  (toggle-with-like '(with "font-series" "bold" "")
-                    '(with "font-series" "medium" "")))
+  (toggle-with-like '(with "font-series" "bold" "") #f))
 
 (tm-define (toggle-italic)
-  (toggle-with-like '(with "font-shape" "italic" "")
-                    '(with "font-shape" "right" "")))
+  (toggle-with-like '(with "font-shape" "italic" "") #f))
 
 (tm-define (toggle-small-caps)
   (toggle-with-like '(with "font-shape" "small-caps" "")
