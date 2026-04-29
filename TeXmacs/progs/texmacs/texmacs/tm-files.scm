@@ -533,6 +533,9 @@
 (tm-define (autosave-enabled?)
   (!= (get-preference "autosave") "0"))
 
+(tm-define (auto-backup-enabled?)
+  (!= (get-preference "autobackup") "off"))
+
 (tm-define (liiistem-version)
   (xmacs-version))
 
@@ -1426,7 +1429,7 @@
 
 (tm-define (auto-backup-now)
   (set! auto-backup-scheduled? #f)
-  (if (autosave-enabled?)
+  (if (auto-backup-enabled?)
       (begin
         (auto-backup-log "timer-fired")
         (auto-backup-all)
@@ -1434,7 +1437,7 @@
       (auto-backup-log "timer-skip-disabled")))
 
 (tm-define (auto-backup-delayed)
-  (if (autosave-enabled?)
+  (if (auto-backup-enabled?)
       (if auto-backup-scheduled?
           (auto-backup-log "schedule-skip-already-pending")
           (begin
