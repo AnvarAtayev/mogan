@@ -225,11 +225,13 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
     mw->setMenuWidget (outBar);
   };
 
-  double scale         = DpiUtils::scaleFactor ();
-  int    titleBarHeight= int (42 * scale);
-  int    buttonWidth   = int (60 * scale);
-  int    buttonHeight  = int (42 * scale);
-  int    iconBaseSize  = int (16 * scale);
+  double scale          = DpiUtils::scaleFactor ();
+  int    titleBarHeight = int (42 * scale);
+  int    buttonWidth    = int (60 * scale);
+  int    buttonHeight   = int (42 * scale);
+  int    vipbuttonWidth = int (90 * scale);
+  int    vipbuttonHeight= int (32 * scale);
+  int    iconBaseSize   = int (16 * scale);
 
 #if defined(Q_OS_MAC)
   // 无边框布局（macOS）- 只显示登录按钮
@@ -392,39 +394,25 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
                       [this] () { checkLocalTokenAndLogin (); });
   }
 
-  // VIP升级会员按钮 - 放在登录按钮右侧（只在商业版显示）
+  // VIP升级会员按钮 - 放在登录按钮左侧（只在商业版显示）
   vipButton= new QPushButton (windowBar);
   vipButton->setObjectName ("vip-button");
-  vipButton->setText ("  " + qt_translate ("Upgrade VIP"));
+  vipButton->setText (qt_translate ("Upgrade VIP"));
   vipButton->setProperty ("system-button", true);
   vipButton->setFocusPolicy (Qt::NoFocus);
   vipButton->setSizePolicy (QSizePolicy::Fixed, QSizePolicy::Fixed);
-  vipButton->setFixedHeight (buttonHeight - 8);
+  vipButton->setFixedSize (vipbuttonWidth, vipbuttonHeight);
   vipButton->setCursor (Qt::PointingHandCursor);
-
-  // 设置醒目的样式 - 金色/橙色渐变，圆角，闪电图标
-  vipButton->setStyleSheet ("QPushButton#vip-button {"
-                            "  background: qlineargradient(x1:0, y1:0, x2:1, "
-                            "y2:0, stop:0 #FFD700, stop:1 #FFA500);"
-                            "  border: none;"
-                            "  border-radius: 12px;"
-                            "  color: #8B4513;"
-                            "  font-weight: bold;"
-                            "  font-size: 12px;"
-                            "  padding: 0 14px 0 8px;"
-                            "}"
-                            "QPushButton#vip-button:hover {"
-                            "  background: qlineargradient(x1:0, y1:0, x2:1, "
-                            "y2:0, stop:0 #FFE135, stop:1 #FFB347);"
-                            "}"
-                            "QPushButton#vip-button:pressed {"
-                            "  background: qlineargradient(x1:0, y1:0, x2:1, "
-                            "y2:0, stop:0 #FFC125, stop:1 #FF8C00);"
-                            "}");
+  vipButton->setStyleSheet (
+      QString ("QPushButton#vip-button { border-radius: %1px; font-size: %2px; "
+               "margin-right: %3px; }")
+          .arg (DpiUtils::scaled (12))
+          .arg (DpiUtils::scaled (12))
+          .arg (DpiUtils::scaled (4)));
 
   // 设置闪电图标
   vipButton->setIcon (QIcon (":/window-bar/vip-lightning.svg"));
-  vipButton->setIconSize (QSize (16, 16));
+  vipButton->setIconSize (QSize (DpiUtils::scaled (20), DpiUtils::scaled (20)));
 
   windowBar->setVipButton (vipButton);
   if (windowAgent) {
@@ -2492,8 +2480,6 @@ qt_tm_widget_rep::updateLoginButtonState (bool           isLoggedIn,
   if (!isLoggedIn) {
     label= qt_translate ("Not logged in");
   }
-  loginButton->setIconSize (
-      QSize (DpiUtils::scaled (12), DpiUtils::scaled (12)));
   // 已登录时不设置文字，只显示图标
 
   QFontMetrics  metrics (loginButton->font ());
@@ -2510,10 +2496,9 @@ qt_tm_widget_rep::updateLoginButtonState (bool           isLoggedIn,
   const int iconTextSpacing= visibleText.isEmpty () ? 0 : DpiUtils::scaled (6);
   const int iconWidth      = loginButton->iconSize ().width ();
   const int textWidth      = metrics.horizontalAdvance (visibleText);
-  const int minWidth=
-      isLoggedIn ? DpiUtils::scaled (46) : DpiUtils::scaled (96);
+  const int minWidth       = DpiUtils::scaled (60);
   const int maxWidth=
-      isLoggedIn ? DpiUtils::scaled (46) : DpiUtils::scaled (120);
+      isLoggedIn ? DpiUtils::scaled (60) : DpiUtils::scaled (120);
   const int rawDesiredWidth=
       iconWidth + iconTextSpacing + textWidth + horizontalPadding;
   const int desiredWidth= qBound (minWidth, rawDesiredWidth, maxWidth);
