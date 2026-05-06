@@ -639,7 +639,9 @@
 
 (tm-menu (document-columns-menu)
   ("One column" (init-env "par-columns" "1"))
-  ("Two columns" (init-env "par-columns" "2")))
+  ("Two columns" (init-env "par-columns" "2"))
+  ("Three columns" (init-env "par-columns" "3")
+                   (init-env "par-columns-sep" "0.6667fn")))
   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; The Document -> Page menu
@@ -1148,10 +1150,12 @@
   (cond ((test-init? "page-orientation" "landscape")
          (cond ((test-init? "par-columns" "1") "tm_landscape_1col.xpm")
                ((test-init? "par-columns" "2") "tm_landscape_2col.xpm")
+               ((test-init? "par-columns" "3") "tm_landscape_2col.xpm")
                (else "tm_landscape.xpm")))
         (else
          (cond ((test-init? "par-columns" "1") "tm_portrait_1col.xpm")
                ((test-init? "par-columns" "2") "tm_portrait_2col.xpm")
+               ((test-init? "par-columns" "3") "tm_portrait_2col.xpm")
                (else "tm_portrait.xpm")))))
 
 (tm-menu (focus-document-icons t)
