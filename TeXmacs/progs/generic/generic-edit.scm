@@ -244,8 +244,38 @@
        (> (tree-arity t) 0)
        (list-item-marker-node? (tree-ref t 0))))
 
+(define (list-document-child t)
+  (let loop ((child t)
+             (parent (and t (tree-up t))))
+    (cond ((not parent) #f)
+          ((tree-is? parent 'document) child)
+          (else (loop parent (tree-up parent))))))
+
+(define (list-item-marker-at node)
+  (cond ((list-item-marker-node? node) node)
+        ((list-item-wrapper-node? node) (tree-ref node 0))
+        (else #f)))
+
+(tm-define (current-list-item-index-from-nearest-left t)
+  (and-with child (list-document-child t)
+    (let* ((doc (tree-up child))
+           (list-node (and doc (tree-up doc)))
+           (pos (tree-index child)))
+      (and doc list-node pos
+           (list-node? list-node)
+           (find-previous-item-index doc (+ pos 1))))))
+
+(tm-define (current-list-item-marker-from-nearest-left t)
+  (and-with child (list-document-child t)
+    (let* ((doc (tree-up child))
+           (item-index (current-list-item-index-from-nearest-left t)))
+      (and doc item-index
+           (list-item-marker-at (tree-ref doc item-index))))))
+
 ;; Tab/Shift+Tab should work both on the item marker and inside its content.
 ;; When the cursor is in a concat-wrapped item, return the marker at index 0.
+;; Content after a marker still belongs to that logical item until the next
+;; marker, so fall back to the nearest item on the left in the same document.
 (define (current-list-item-marker)
   (let* ((focus (focus-tree))
          (cursor (cursor-tree))
@@ -253,11 +283,11 @@
                   (or (list-item-marker-node? t)
                       (list-item-wrapper-node? t))))
          (item (or (tree-search-upwards cursor item?)
-                   (tree-search-upwards focus item?)))
+                   (tree-search-upwards focus item?)
+                   (current-list-item-marker-from-nearest-left cursor)
+                   (current-list-item-marker-from-nearest-left focus)))
          (marker (and item
-                      (if (list-item-wrapper-node? item)
-                          (tree-ref item 0)
-                          item))))
+                      (or (list-item-marker-at item) item))))
     marker))
 
 (define (list-tab-context-match? forwards?)
@@ -310,6 +340,12 @@
 (define (same-list-family? lhs rhs)
   (and lhs rhs (== (list-family lhs) (list-family rhs))))
 
+(tm-define (list-structured-insert-context?)
+  (and-with item (current-list-item-marker)
+    (or (in? (tree-label item) '(item item*))
+        (in? (list-family (get-current-list-label item))
+             '(enumerate itemize description)))))
+
 (define (find-previous-item-index item-list start)
   (let loop ((i (- start 1)))
     (cond ((< i 0) #f)
@@ -327,6 +363,36 @@
 (define (append-strees-to-document doc strees)
   (if (null? strees) doc
       (tree-insert doc (tree-arity doc) strees)))
+
+(tm-define (blank-list-item-stree list-type)
+  (if (== list-type 'description)
+      `(item*)
+      `(item)))
+
+(tm-define (list-item-end-index item-list item-index list-type)
+  (let loop ((i (+ item-index 1)))
+    (cond ((>= i (tree-arity item-list)) i)
+          ((list-item-node? (tree-ref item-list i)) i)
+          ((and (list-node? (tree-ref item-list i))
+                (same-list-family? (tree-label (tree-ref item-list i))
+                                   list-type))
+           (loop (+ i 1)))
+          (else (loop (+ i 1))))))
+
+(tm-define (list-item-insert-index item-list item-index list-type downwards?)
+  (if downwards?
+      (list-item-end-index item-list item-index list-type)
+      item-index))
+
+(tm-define (list-item-remove-range item-list item-index list-type downwards?)
+  (if downwards?
+      (list item-index (list-item-end-index item-list item-index list-type))
+      (and-with start (find-previous-item-index item-list item-index)
+        (list start item-index))))
+
+(tm-define (remove-list-item-range item-list range)
+  (and range
+       (tree-remove item-list (car range) (- (cadr range) (car range)))))
 
 ;; 在有序和无序列表中实现缩进功能
 (tm-define (kbd-variant t forwards?)
@@ -804,7 +870,8 @@ TODO: 在文本模式中，可以自动识别剪贴板中的内容，并智能�
 
 (tm-define (structured-vertical? t)
   (or (tree-in? t '(tree))
-      (table-markup-context? t)))
+      (table-markup-context? t)
+      (list-structured-insert-context?)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Focus predicates
@@ -822,7 +889,8 @@ TODO: 在文本模式中，可以自动识别剪贴板中的内容，并智能�
 
 (tm-define (focus-can-insert-remove? t)
   (and (or (structured-horizontal? t) (structured-vertical? t))
-       (cursor-inside? t)))
+       (or (cursor-inside? t)
+           (in? (tree-label t) '(item item*)))))
 
 (tm-define (focus-can-insert? t)
   (< (tree-arity t) (tree-maximal-arity t)))
@@ -941,6 +1009,43 @@ TODO: 在文本模式中，可以自动识别剪贴板中的内容，并智能�
   (:require (structured-horizontal? t))
   (when (tree->path t :down)
     (remove-argument-at (tree->path t :down) forwards?)))
+
+(tm-define (structured-insert-vertical t downwards?)
+  (:require (list-structured-insert-context?))
+  (let ((item (current-list-item-marker)))
+    (call-with-values (lambda () (find-item-wrapper-and-list item))
+      (lambda (wrapper item-list)
+        (when (and item item-list (tree-is? item-list 'document))
+          (let* ((item-index (if wrapper (tree-index wrapper) (tree-index item)))
+                 (list-type (list-family (or (get-current-list-label item)
+                                             'enumerate)))
+                 (insert-pos (list-item-insert-index item-list item-index
+                                                     list-type downwards?)))
+            (let* ((new-list (tree-insert item-list insert-pos
+                                          (list (blank-list-item-stree list-type))))
+                   (new-item (tree-ref new-list insert-pos)))
+              (if (and (tree-is? new-item 'concat)
+                       (> (tree-arity new-item) 1))
+                  (tree-go-to new-item 1 :end)
+                  (tree-go-to new-list insert-pos :end)))))))))
+
+(tm-define (structured-remove-vertical t downwards?)
+  (:require (list-structured-insert-context?))
+  (let ((item (current-list-item-marker)))
+    (call-with-values (lambda () (find-item-wrapper-and-list item))
+      (lambda (wrapper item-list)
+        (when (and item item-list (tree-is? item-list 'document))
+          (let* ((item-index (if wrapper (tree-index wrapper) (tree-index item)))
+                 (list-type (list-family (or (get-current-list-label item)
+                                             'enumerate)))
+                 (range (list-item-remove-range item-list item-index
+                                                list-type downwards?)))
+            (when range
+              (let* ((new-list (remove-list-item-range item-list range))
+                     (pos (min (car range) (- (tree-arity new-list) 1))))
+                (if (>= pos 0)
+                    (tree-go-to new-list pos :end)
+                    (tree-go-to new-list :end))))))))))
 
 (tm-define (structured-insert-extremal t forwards?)
   (structured-extremal t forwards?)
