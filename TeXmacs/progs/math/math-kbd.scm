@@ -838,9 +838,9 @@
   ("> var var var var var =" "<geqangle>")
   
   ("< var var var var var var" (math-bracket-open "<langle>" "<rangle>" 'default))
-  ("> var var var var var var" (math-bracket-close "<rangle>" "<langle>" 'default))
+  ("> var var var var var var" (math-bracket-open "<rangle>" "<langle>" 'default))
   ("< < var var var" (math-bracket-open "<llangle>" "<rrangle>" 'default))
-  ("> > var var var" (math-bracket-close "<rrangle>" "<llangle>" 'default))
+  ("> > var var var" (math-bracket-open "<rrangle>" "<llangle>" 'default))
 
   ("- < var" "<lebar>")
   ("> - var" "<gebar>")
