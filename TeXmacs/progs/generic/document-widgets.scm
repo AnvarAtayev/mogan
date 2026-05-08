@@ -204,9 +204,13 @@
       (item (text "First page:")
         (input (set! pf answer) "string" (list pf) "6em"))
       (item (text "Number style:")
-        (enum (begin (set! nt answer))
-              '("arabic" "roman" "Roman" "hanzi")
-              "arabic"
+        (enum (set! nt (cond ((== answer "1, 2, 3") "arabic")
+                             ((== answer "i, ii, iii") "roman")
+                             ((== answer "I, II, III") "Roman")
+                             ((== answer "一, 二, 三") "hanzi")
+                             (else answer)))
+              '("1, 2, 3" "i, ii, iii" "I, II, III" "一, 二, 三")
+              "1, 2, 3"
               "10em"))))
   ======
   (explicit-buttons
@@ -223,6 +227,20 @@
 (define (open-page-number-style-window u)
   (dialogue-window (page-number-style-editor u) noop
                    "Page number style layer"))
+
+(tm-define (set-page-number-style-window-state opened?)
+  (set-auxiliary-widget-state opened? 'page-number-style))
+
+(tm-define (open-document-page-number)
+  (:interactive #t)
+  (change-auxiliary-widget-focus)
+  (let ((u (current-buffer)))
+    (auxiliary-widget (page-number-style-editor u)
+                      noop
+                      "Page number style" u)
+    (set-page-number-style-window-state #t)))
+
+(register-auxiliary-widget-type 'page-number-style (list open-document-page-number))
 
 (tm-widget (page-formatter-format u quit)
   (centered
@@ -255,10 +273,7 @@
           (enum (initial-set u "page-crop-marks" (encode-crop-marks answer))
                 '("none" "a3" "a4" "letter")
                 (decode-crop-marks (initial-get u "page-crop-marks"))
-                "10em"))
-        (item (text "Advanced page numbering:")
-          (explicit-buttons ("New page number style layer"
-                            (open-page-number-style-window u)))))))
+                "10em")))))
   ===
   (centered
     (refreshable "page-user-format-settings"
