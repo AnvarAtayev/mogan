@@ -470,6 +470,15 @@
   (autosave-delayed))
 (delayed (:pause 30000)
   (auto-backup-delayed))
+(catch #t
+  (lambda ()
+    (use-modules (telemetry telemetry-utils))
+    (use-modules (telemetry telemetry-track))
+    (use-modules (telemetry init-telemetry))
+    (init-telemetry))
+  (lambda args
+    (display (string-append "[telemetry] error: init failed: "
+                            (object->string args) "\n"))))
 (texmacs-banner)
 (display "Initialization done\n")
 

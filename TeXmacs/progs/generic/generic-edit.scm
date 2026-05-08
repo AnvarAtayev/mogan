@@ -17,7 +17,8 @@
 	(utils edit variants)
         (utils misc tooltip)
         (bibtex bib-complete)
-	(source macro-search)))
+	(source macro-search)
+        (telemetry telemetry-track)))
 
 (tm-define (generic-context? t) #t) ;; overridden in, e.g., graphics mode
 
@@ -749,13 +750,23 @@ TODO: 在文本模式中，可以自动识别剪贴板中的内容，并智能�
 |#
 (tm-define (kbd-magic-paste)
   (if (string-starts? (qt-clipboard-format) "image")
-      (ocr-paste)
+      (begin
+        (ocr-paste)
+        (when (not (community-stem?))
+          (track-event "OCR_RECOGNIZE" '())))
       (with mode (get-env "mode")
         (cond ((== mode "prog")
-               (clipboard-paste-import "code" "primary"))
+               (clipboard-paste-import "code" "primary")
+               (when (not (community-stem?))
+                 (track-event "MAGIC_PASTE" '(("mode" . "prog")))))
               ((== mode "math")
-               (clipboard-paste-import "latex" "primary"))
-              (else (smart-format-paste)))))
+               (clipboard-paste-import "latex" "primary")
+               (when (not (community-stem?))
+                 (track-event "MAGIC_PASTE" '(("mode" . "math")))))
+              (else
+               (smart-format-paste)
+               (when (not (community-stem?))
+                 (track-event "MAGIC_PASTE" '(("mode" . "text"))))))))
   (when (defined? 'tutorial-notify-action)
     (tutorial-notify-action "ocr-paste")))
 
