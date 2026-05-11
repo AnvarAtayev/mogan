@@ -115,6 +115,7 @@
       ---)
   ("Full screen mode"  (toggle-full-screen-edit-mode))
   ("Focus mode" (toggle-focus-mode))
+  ("Simplest mode" (toggle-simplest-mode))
   ("Presentation mode" (toggle-full-screen-mode))
   ("Show panorama" (toggle-panorama-mode))
   ("Show all slides" (toggle-slideshow-mode))
