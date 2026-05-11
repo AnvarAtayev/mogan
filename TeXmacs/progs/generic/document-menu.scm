@@ -661,7 +661,6 @@
 (menu-bind page-layout-menu
   ("Margins as on paper" (toggle-page-screen-margin))
   ("Reduced margins" (toggle-reduced-margins))
-  ("Indent paragraphs" (toggle-indent-paragraphs))
   ("No page numbers" (toggle-no-page-numbers)))
 
 (menu-bind document-page-menu
