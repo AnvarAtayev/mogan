@@ -134,7 +134,8 @@
 (define (page-size-list u)
   (if (initial-defined? u "beamer-style")
       (list "16:9" "8:5" "4:3" "5:4")
-      (list "a3" "a4" "a5" "b4" "b5" "letter" "legal" "executive")))
+      (map page-type-pretty
+           (list "a3" "a4" "a5" "b4" "b5" "letter" "legal" "executive"))))
 
 (define (user-page-size? u)
   (== (initial-get u "page-type") "user"))
@@ -269,8 +270,8 @@
                 (decode-rendering (initial-get-page-rendering u)) "10em"))
         (item (text "Page type:")
           (enum (begin
-                  (initial-set u "page-type" answer)
-                  (when (!= answer "user")
+                  (initial-set u "page-type" (page-type-raw answer))
+                  (when (!= (page-type-raw answer) "user")
                     (initial-set u "page-width" "auto")
                     (initial-set u "page-height" "auto"))
                   (refresh-now "page-user-format-settings")
@@ -281,7 +282,7 @@
                     (page-size-list u))
                 (if (== (initial-get u "page-type") "user")
                     (string-append (get-init "page-width") " x " (get-init "page-height"))
-                    (initial-get u "page-type")) "10em"))
+                    (page-type-pretty (initial-get u "page-type"))) "10em"))
         (item (text "Orientation:")
           (enum (initial-set u "page-orientation" answer)
                 '("portrait" "landscape")

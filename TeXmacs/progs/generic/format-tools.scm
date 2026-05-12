@@ -226,7 +226,8 @@
 (define (window-page-size-list win)
   (if (window-defined-init? win "beamer-style")
       (list "16:9" "8:5" "4:3" "5:4" "user")
-      (list "a3" "a4" "a5" "b4" "b5" "letter" "legal" "executive" "user")))
+      (map page-type-pretty
+           (list "a3" "a4" "a5" "b4" "b5" "letter" "legal" "executive" "user"))))
 
 (define (window-user-page-size? win)
   (== (window-get-init win "page-type") "user"))
@@ -276,14 +277,14 @@
               (decode-rendering (window-get-page-rendering win)) "10em"))
       (item (text "Page type:")
         (enum (begin
-                (window-set-init win "page-type" answer)
-                (when (!= answer "user")
+                (window-set-init win "page-type" (page-type-raw answer))
+                (when (!= (page-type-raw answer) "user")
                   (window-set-init win "page-width" "auto")
                   (window-set-init win "page-height" "auto"))
                 (refresh-now "page format tool"))
-              (cons-new (window-get-init win "page-type")
+              (cons-new (page-type-pretty (window-get-init win "page-type"))
                         (window-page-size-list win))
-              (window-get-init win "page-type") "10em"))
+              (page-type-pretty (window-get-init win "page-type")) "10em"))
       (item (when (window-user-page-size? win) (text "Page width:"))
         (when (window-user-page-size? win)
           (enum (window-set-init win "page-width" answer)
