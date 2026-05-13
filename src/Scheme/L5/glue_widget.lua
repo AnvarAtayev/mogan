@@ -186,6 +186,20 @@ function main()
                 }
             },
             {
+                scm_name = "widget-numeric-input",
+                cpp_name = "numeric_input_widget",
+                ret_type = "widget",
+                arg_list = {
+                    "command",
+                    "string",
+                    "string",
+                    "int",
+                    "int",
+                    "int",
+                    "int"
+                }
+            },
+            {
                 scm_name = "widget-enum",
                 cpp_name = "enum_widget",
                 ret_type = "widget",
