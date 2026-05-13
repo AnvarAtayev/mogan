@@ -101,20 +101,26 @@
   ) ;let
 ) ;define-public
 
-(define-public (telemetry-session-id) (uuid4))
+(define *telemetry-session-id* (uuid4))
+
+(define-public (telemetry-session-id)
+  *telemetry-session-id*)
 
 (define-public (telemetry-app-version) (xmacs-version))
 
 (define-public (telemetry-platform)
-  (cond ((os-macos?) "macos")
-        ((or (os-win32?) (os-mingw?)) "windows")
-        (else "linux")
-  ) ;cond
+  (let* ((pretty (get-pretty-os-name))
+         (no-underscore (string-replace pretty "_" ""))
+         (no-spaces (string-replace no-underscore " " ""))
+         (normalized (string-downcase no-spaces))
+        )
+    normalized
+  ) ;let*
 ) ;define-public
 
 (define-public (telemetry-language)
-  (let ((lang (or (system-getenv "LANG") "en_US")))
-    (if (string-contains? lang ".") (car (string-split lang #\.)) lang)
+  (let ((lang (get-locale-language)))
+    (language-to-locale lang)
   ) ;let
 ) ;define-public
 
@@ -145,8 +151,6 @@
 ) ;define-public
 
 (define-public (telemetry-now) (inexact->exact (truncate (current-time))))
-
-(define-public *telemetry-session-id* (telemetry-session-id))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; JSON serialization helpers
@@ -296,7 +300,7 @@
   `((,"eventType" unquote event-type)
     (,"timestamp" unquote (telemetry-now))
     (,"distinctId" unquote (telemetry-device-id))
-    (,"sessionId" unquote *telemetry-session-id*)
+    (,"sessionId" unquote (telemetry-session-id))
     (,"eventId" unquote (uuid4))
     (,"appVersion" unquote (telemetry-app-version))
     (,"deviceId" unquote (telemetry-device-id))

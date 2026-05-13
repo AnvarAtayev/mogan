@@ -1982,6 +1982,11 @@ function main()
                 cpp_name = "stem_device_id",
                 ret_type = "string"
             },
+            {
+                scm_name = "get-pretty-os-name",
+                cpp_name = "get_pretty_os_name",
+                ret_type = "string"
+            },
         }
     }
 end
