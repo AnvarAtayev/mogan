@@ -626,6 +626,72 @@ table_rep::position_columns (bool large) {
   // for (int i=0; i<nr_cols; i++)
   //   cout << "Column " << i << ": " << (mw[i]>>8) << "; "
   //        << (lw[i]>>8) << ", " << (rw[i]>>8) << LF;
+
+  // Scale column widths if total exceeds page width
+  if (hmode == "auto" && large) {
+    SI total= sum (mw, nr_cols);
+    SI page_w, d1, d2, d3, d4, d5, d6, d7;
+    env->get_page_pars (page_w, d1, d2, d3, d4, d5, d6, d7);
+    if (total > page_w) {
+      bool has_hyphen= false;
+      for (int i= 0; i < nr_rows && !has_hyphen; i++)
+        for (int j= 0; j < nr_cols && !has_hyphen; j++)
+          if (!is_nil (T[i][j]) && !is_nil (T[i][j]->lz)) has_hyphen= true;
+      if (has_hyphen) {
+        // Proportional scaling
+        for (int j= 0; j < nr_cols; j++) {
+          mw[j]= (SI) ((((long long) mw[j]) * page_w) / total);
+          if (mw[j] < lw[j] + rw[j]) mw[j]= lw[j] + rw[j];
+        }
+        // Ensure no column is narrower than its content's minimum width
+        // by producing cells at the scaled width and checking for overflow
+        STACK_NEW_ARRAY (min_w, SI, nr_cols);
+        for (int j= 0; j < nr_cols; j++)
+          min_w[j]= lw[j] + rw[j];
+        for (int i= 0; i < nr_rows; i++)
+          for (int j= 0; j < nr_cols; j++) {
+            cell C= T[i][j];
+            if (!is_nil (C) && !is_nil (C->lz)) {
+              SI  w= mw[j] - C->lsep - C->lborder - C->rsep - C->rborder;
+              int v= C->hyphen == "t" ? 1 : (C->hyphen == "c" ? 0 : -1);
+              SI  d= ((C->vcorrect == "b") || (C->vcorrect == "a"))
+                         ? -env->fn->y1
+                         : 0;
+              SI h= ((C->vcorrect == "t") || (C->vcorrect == "a")) ? env->fn->y2
+                                                                   : 0;
+              box cb= (box) C->lz->produce (LAZY_BOX,
+                                            make_format_cell (w, v, d, h));
+              SI  cell_min=
+                  cb->w () + C->lsep + C->lborder + C->rsep + C->rborder;
+              min_w[j]= max (min_w[j], cell_min);
+            }
+          }
+        // Adjust columns that are below their minimum content width
+        for (int j= 0; j < nr_cols; j++)
+          if (mw[j] < min_w[j]) mw[j]= min_w[j];
+        // Redistribute: if total exceeds page_w, reduce columns above min_w
+        SI new_total= sum (mw, nr_cols);
+        if (new_total > page_w) {
+          SI excess  = new_total - page_w;
+          SI flexible= 0;
+          for (int j= 0; j < nr_cols; j++)
+            if (mw[j] > min_w[j]) flexible+= mw[j] - min_w[j];
+          if (flexible > 0) {
+            for (int j= 0; j < nr_cols; j++)
+              if (mw[j] > min_w[j]) {
+                SI reduction=
+                    (SI) ((((long long) excess) * (mw[j] - min_w[j])) /
+                          flexible);
+                mw[j]-= reduction;
+                if (mw[j] < min_w[j]) mw[j]= min_w[j];
+              }
+          }
+        }
+        STACK_DELETE_ARRAY (min_w);
+      }
+    }
+  }
+
   if (hmode != "auto" && large) {
     SI min_width= sum (mw, nr_cols);
     SI hextra   = width - min_width;
