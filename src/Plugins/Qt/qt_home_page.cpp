@@ -24,7 +24,6 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QMenu>
-#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPointer>
@@ -35,10 +34,10 @@
 #include <QStyleOption>
 #include <QTimer>
 #include <QVBoxLayout>
-#include <memory>
 
 #include "qt_dpi_utils.hpp"
 #include "qt_floating_toast.hpp"
+#include "qt_template_utils.hpp"
 #include "qt_utilities.hpp"
 #include "s7_tm.hpp"
 #include "sys_utils.hpp"
@@ -776,74 +775,67 @@ QtHomePage::createDocumentFromTemplate (const QString& templateId) {
   if (!mgr) return;
 
   if (mgr->isTemplateAvailableLocally (templateId)) {
-    QString localPath= mgr->localTemplatePath (templateId);
-    if (!localPath.isEmpty ()) {
-      eval_scheme ("(load-document " * qt_scheme_quote_utf8 (localPath) * ")");
+    auto meta= mgr->templateById (templateId);
+    if (!meta) {
+      QtFloatingToast::showToast (this,
+                                  qt_translate ("Template metadata not found"),
+                                  3000, QtFloatingToast::Error);
       return;
     }
+    QString localPath= mgr->localTemplatePath (templateId);
+    if (localPath.isEmpty ()) {
+      QtFloatingToast::showToast (
+          this, qt_translate ("Local template file is missing"), 3000,
+          QtFloatingToast::Error);
+      return;
+    }
+    qt_copy_template_and_load (this, localPath, meta->name);
+    return;
   }
 
-  QPointer<QProgressDialog> dialog=
-      new QProgressDialog (qt_translate ("Downloading template..."),
-                           qt_translate ("Cancel"), 0, 100, this);
-  dialog->setWindowModality (Qt::WindowModal);
-  dialog->setAutoClose (true);
+  QProgressDialog dialog (qt_translate ("Downloading template..."),
+                          qt_translate ("Cancel"), 0, 100, this);
+  dialog.setWindowModality (Qt::WindowModal);
+  dialog.setAutoClose (true);
 
-  struct DownloadCtx {
-    QPointer<QProgressDialog> dialog;
-    QMetaObject::Connection   progressConn;
-    QMetaObject::Connection   completedConn;
-    QMetaObject::Connection   failedConn;
-    bool                      cancelledByUser= false;
-
-    void cleanup () {
-      QObject::disconnect (progressConn);
-      QObject::disconnect (completedConn);
-      QObject::disconnect (failedConn);
-      if (dialog) {
-        dialog->hide ();
-        dialog->deleteLater ();
-      }
-    }
-  };
-
-  auto ctx   = std::make_shared<DownloadCtx> ();
-  ctx->dialog= dialog;
-
-  connect (dialog, &QProgressDialog::canceled, this, [ctx, mgr, templateId] () {
-    ctx->cancelledByUser= true;
+  bool cancelledByUser= false;
+  connect (&dialog, &QProgressDialog::canceled, [&] () {
+    cancelledByUser= true;
     mgr->cancelDownload (templateId);
   });
 
-  ctx->progressConn=
-      connect (mgr, &TemplateManager::downloadProgress, this,
-               [ctx] (const QString&, qint64 received, qint64 total) {
-                 if (!ctx->dialog || total <= 0) return;
-                 ctx->dialog->setMaximum (static_cast<int> (total));
-                 ctx->dialog->setValue (static_cast<int> (received));
-               });
+  connect (mgr, &TemplateManager::downloadProgress, &dialog,
+           [&dialog] (const QString&, qint64 received, qint64 total) {
+             if (total <= 0) return;
+             dialog.setMaximum (static_cast<int> (total));
+             dialog.setValue (static_cast<int> (received));
+           });
 
-  ctx->completedConn= connect (
-      mgr, &TemplateManager::downloadCompleted, this,
-      [this, ctx, templateId] (const QString& id, const QString& localPath) {
-        if (id != templateId) return;
-        ctx->cleanup ();
-        eval_scheme ("(load-document " * qt_scheme_quote_utf8 (localPath) *
-                     ")");
-      });
+  dialog.show ();
 
-  ctx->failedConn= connect (
-      mgr, &TemplateManager::downloadFailed, this,
-      [this, ctx, templateId] (const QString& id, const QString& error) {
-        if (id != templateId) return;
-        ctx->cleanup ();
-        if (!ctx->cancelledByUser) {
-          QMessageBox::warning (this, qt_translate ("Download Failed"), error);
-        }
-      });
+  QString errorMsg;
+  QString localPath= mgr->downloadTemplateSync (templateId, 30000, &errorMsg);
 
-  mgr->downloadTemplate (templateId);
-  dialog->show ();
+  dialog.hide ();
+
+  if (localPath.isEmpty ()) {
+    if (!cancelledByUser) {
+      QtFloatingToast::showToast (
+          this,
+          errorMsg.isEmpty () ? qt_translate ("Download failed") : errorMsg,
+          3000, QtFloatingToast::Error);
+    }
+    return;
+  }
+
+  auto meta= mgr->templateById (templateId);
+  if (!meta) {
+    QtFloatingToast::showToast (this,
+                                qt_translate ("Template metadata not found"),
+                                3000, QtFloatingToast::Error);
+    return;
+  }
+  qt_copy_template_and_load (this, localPath, meta->name);
 }
 
 void
