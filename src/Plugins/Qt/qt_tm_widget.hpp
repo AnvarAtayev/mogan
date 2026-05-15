@@ -41,6 +41,7 @@
 class QLabel;
 class QToolBar;
 class QTMInteractivePrompt;
+class PDFReaderWidget;
 
 /*! Models one main window with toolbars, an associated view, etc.
 
@@ -173,6 +174,10 @@ private:
   qt_widget dock_window_widget; // trick to return correct widget position
   QWidget*  startupContentWidget;
   bool      startupTabMode;
+  PDFReaderWidget* pdfViewerWidget;
+  bool             pdfTabMode;
+  QString          currentPdfPath;
+  QString          lastLoadedPdfPath;
 
 public:
   qt_tm_widget_rep (int mask, command _quit);

@@ -1571,7 +1571,6 @@
   (or (url-rooted-web? u)
       (not (in? (url-root u) (list "tmfs" "file" "default" "blank" "ramdisc")))
       (file-of-format? u "image")
-      (file-of-format? u "pdf")
       (file-of-format? u "postscript")
       (file-of-format? u "generic")))
 
@@ -1579,6 +1578,18 @@
   (when (not (url-rooted? u))
     (set! u (url-relative (current-buffer) u)))
   (open-url u))
+
+(tm-define (load-pdf-buffer u)
+  (when (not (url-rooted? u))
+    (set! u (url-relative (current-buffer) u)))
+  (if (buffer-exists? u)
+      (switch-to-buffer u)
+      (begin
+        (buffer-set u '(document))
+        (buffer-set-title u (url->system (url-tail u)))
+        (switch-to-buffer u)))
+  (buffer-notify-recent u)
+  (remember-file-dialog-directory u))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Loading buffers
@@ -1679,7 +1690,9 @@
       (if (current-buffer)
           (set! name (url-relative (current-buffer) name))
           (set! name (url-append (url-pwd) name))))
-  (load-buffer-check-autosave name opts))
+  (if (== (url-suffix name) "pdf")
+      (load-pdf-buffer name)
+      (load-buffer-check-autosave name opts)))
 
 ;; The load flowgraph:
 ;; load-buffer
@@ -1705,6 +1718,8 @@
 (tm-define (load-browse-buffer name)
   (:synopsis "Load a buffer or switch to it if already open")
   (cond ((buffer-exists? name) (switch-to-buffer name))
+        ((== (url-suffix name) "pdf")
+         (load-pdf-buffer name))
         ((and (buffer-external? name)
          (!= (url-suffix name) "tm")
          (!= (url-suffix name) "tmu"))
@@ -1800,13 +1815,21 @@
   (:argument u smart-file "File name")
   (:default  u (propose-name-buffer))
   (when (not (url-none? u))
-    (if (window-per-buffer?) (load-buffer-in-new-window u) (load-buffer u))))
+    (if (== (url-suffix u) "pdf")
+        (load-pdf-buffer u)
+        (if (window-per-buffer?)
+            (load-buffer-in-new-window u)
+            (load-buffer u)))))
 
 (tm-define (load-document* u)
   (:argument u smart-file "File name")
   (:default  u (propose-name-buffer))
   (when (not (url-none? u))
-    (if (window-per-buffer?) (load-buffer u) (load-buffer-in-new-window u))))
+    (if (== (url-suffix u) "pdf")
+        (load-pdf-buffer u)
+        (if (window-per-buffer?)
+            (load-buffer u)
+            (load-buffer-in-new-window u)))))
 
 (tm-define (switch-document u)
   (:argument u smart-file "File name")
