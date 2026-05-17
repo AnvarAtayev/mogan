@@ -42,6 +42,12 @@ get_background_color (edit_env env) {
   return named_color (bg_color_str, env->alpha);
 }
 
+color
+get_env_bg_color (edit_env env) {
+  if (!has_background_color (env)) return rgb_color (0, 0, 0, 0);
+  return get_background_color (env);
+}
+
 static inline color
 apply_alpha (color c, int alpha) {
   if (alpha == 255) return c;
@@ -53,7 +59,7 @@ apply_alpha (color c, int alpha) {
 /******************************************************************************
  * Unified text box builder
  ******************************************************************************/
-static inline box
+box
 build_text_box (path ip, int pos, string s, edit_env env) {
   if (has_background_color (env)) {
     color bg_color= get_background_color (env);
@@ -77,7 +83,7 @@ concater_rep::typeset_substring (string s, path ip, int pos) {
 
 void
 concater_rep::typeset_math_substring (string s, path ip, int pos, int otype) {
-  box b= text_box (ip, pos, s, env->fn, env->pen);
+  box b= build_text_box (ip, pos, s, env);
   a << line_item (STRING_ITEM, otype, b, HYPH_INVALID, env->lan);
 }
 
