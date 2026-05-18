@@ -35,14 +35,10 @@ TemplateAPI::setMetadataEtag (const QString& etag) {
 }
 
 TemplateAPI::~TemplateAPI () {
-  // Cancel all active downloads
-  for (auto reply : downloadReplies_) {
-    if (!reply) continue;
-    disconnect (reply, nullptr, this, nullptr);
-    reply->abort ();
-    reply->deleteLater ();
+  // Abort all active downloads (reuses abortDownload for consistency)
+  while (!downloadReplies_.isEmpty ()) {
+    abortDownload (downloadReplies_.begin ().key ());
   }
-  downloadReplies_.clear ();
 
   if (metadataReply_) {
     disconnect (metadataReply_, nullptr, this, nullptr);
@@ -95,8 +91,8 @@ TemplateAPI::downloadTemplate (const QString& templateId,
     return;
   }
 
-  // Cancel any existing download for this template
-  cancelDownload (templateId);
+  // Abort any existing download for this template (internal cleanup, no signal)
+  abortDownload (templateId);
 
   QNetworkRequest request{QUrl (downloadUrl)};
   setupRequestHeaders (request);
@@ -114,14 +110,28 @@ TemplateAPI::downloadTemplate (const QString& templateId,
            &TemplateAPI::onDownloadProgress);
 }
 
-void
-TemplateAPI::cancelDownload (const QString& templateId) {
+bool
+TemplateAPI::abortAndRemoveReply (const QString& templateId) {
   auto it= downloadReplies_.find (templateId);
   if (it != downloadReplies_.end () && it.value ()) {
     disconnect (it.value (), nullptr, this, nullptr);
     it.value ()->abort ();
     it.value ()->deleteLater ();
     downloadReplies_.erase (it);
+    return true;
+  }
+  return false;
+}
+
+void
+TemplateAPI::abortDownload (const QString& templateId) {
+  abortAndRemoveReply (templateId);
+}
+
+void
+TemplateAPI::cancelDownload (const QString& templateId) {
+  if (abortAndRemoveReply (templateId)) {
+    emit downloadFailed (templateId, tr ("Download cancelled"));
   }
 }
 
@@ -201,6 +211,16 @@ TemplateAPI::onDownloadFinished () {
   if (reply->error () != QNetworkReply::NoError) {
     emit downloadFailed (
         templateId, tr ("Download failed: %1").arg (reply->errorString ()));
+    reply->deleteLater ();
+    return;
+  }
+
+  // Check HTTP status code (e.g., 404 may not trigger QNetworkReply error)
+  int httpStatus=
+      reply->attribute (QNetworkRequest::HttpStatusCodeAttribute).toInt ();
+  if (httpStatus >= 400) {
+    emit downloadFailed (templateId,
+                         tr ("Download failed: HTTP %1").arg (httpStatus));
     reply->deleteLater ();
     return;
   }
