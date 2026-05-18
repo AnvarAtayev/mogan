@@ -79,6 +79,11 @@ is_startup_tab_file (const string& file) {
   return file == "tmfs://startup-tab";
 }
 
+/**
+ * @brief 判断给定文件路径是否指向聊天标签页 buffer。
+ * @param file 文件路径字符串。
+ * @return 若文件为 \c tmfs://chat-tab 则返回 true。
+ */
 static bool
 is_chat_tab_file (const string& file) {
   return file == "tmfs://chat-tab";
@@ -849,7 +854,7 @@ qt_tm_widget_rep::~qt_tm_widget_rep () {
   if (pdfViewerWidget) {
     delete pdfViewerWidget;
   }
-  // delete chat content widget
+  /// delete chat content widget
   if (chatContentWidget) {
     delete chatContentWidget;
   }
@@ -979,6 +984,13 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
   }
 }
 
+/**
+ * @brief 同步聊天标签页控件的可见性。
+ *
+ * 当 \ref chatTabMode 激活时，隐藏编辑器、启动页和 PDF
+ * 阅读器，然后显示 \ref chatContentWidget（按需创建）。
+ * 否则隐藏聊天控件，并在启动标签页模式未激活时恢复普通编辑器视图。
+ */
 void
 qt_tm_widget_rep::sync_chat_tab_mode () {
   QWidget* editorWidget= main_widget->qwid;

@@ -109,17 +109,31 @@ startup_tab_index (const QList<QTMTabPage*>& tabs) {
   return -1;
 }
 
+/**
+ * @brief 返回聊天标签页 buffer 的 URL。
+ * @return \c tmfs://chat-tab。
+ */
 static url
 chat_tab_buffer_name () {
   return url ("tmfs://chat-tab");
 }
 
+/**
+ * @brief 判断视图 URL 是否属于聊天标签页。
+ * @param viewUrl 待检测的视图 URL。
+ * @return 若视图由聊天标签页 buffer 支撑则返回 true。
+ */
 static bool
 is_chat_tab_view (url viewUrl) {
   if (is_none (viewUrl)) return false;
   return view_to_buffer (viewUrl) == chat_tab_buffer_name ();
 }
 
+/**
+ * @brief 在给定标签列表中查找聊天标签页的索引。
+ * @param tabs 待搜索的标签页列表。
+ * @return 聊天标签页的索引，未找到则返回 -1。
+ */
 static int
 chat_tab_index (const QList<QTMTabPage*>& tabs) {
   for (int i= 0; i < tabs.size (); ++i)

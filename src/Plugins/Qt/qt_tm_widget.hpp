@@ -172,15 +172,16 @@ private:
   qt_widget tab_bar_widget;
   qt_widget notification_bar_widget;
   qt_widget auxiliary_widget;
-  qt_widget dock_window_widget; // trick to return correct widget position
-  QWidget*  startupContentWidget;
-  QWidget*  chatContentWidget;
-  bool      startupTabMode;
-  PDFReaderWidget* pdfViewerWidget;
-  bool             pdfTabMode;
-  QString          currentPdfPath;
-  QString          lastLoadedPdfPath;
-  bool             chatTabMode;
+  qt_widget dock_window_widget;   // trick to return correct widget position
+  QWidget*  startupContentWidget; ///\< 启动标签页模式下显示的控件。
+  QWidget*
+       chatContentWidget; ///\< 聊天标签页模式下显示的控件（QTChatTabWidget）。
+  bool startupTabMode;    ///\< 启动标签页视图是否激活。
+  PDFReaderWidget* pdfViewerWidget;   ///\< PDF 标签页模式下的阅读器控件。
+  bool             pdfTabMode;        ///\< PDF 阅读器标签页是否激活。
+  QString          currentPdfPath;    ///\< 当前显示的 PDF 路径。
+  QString          lastLoadedPdfPath; ///\< 上次加载的 PDF 路径。
+  bool             chatTabMode;       ///\< 聊天标签页视图是否激活。
 
 public:
   qt_tm_widget_rep (int mask, command _quit);
@@ -200,7 +201,14 @@ public:
   void        openRenewalPage ();
   void        checkNetworkAvailable ();
   void        sync_startup_tab_mode ();
-  void        sync_chat_tab_mode ();
+  /**
+   * @brief 同步聊天标签页控件的可见性。
+   *
+   * 当 \ref chatTabMode 为 true 时，隐藏编辑器并显示
+   * \ref chatContentWidget（按需创建）。
+   * 否则隐藏聊天控件并恢复编辑器。
+   */
+  void sync_chat_tab_mode ();
 
   friend class QTMInteractiveInputHelper;
 

@@ -77,6 +77,11 @@ decode_url (string s) {
   return url_root (s (0, i)) * url_general (s (i + 1, N (s)), URL_CLEAN_UNIX);
 }
 
+/**
+ * @brief 判断 buffer 名称是否指向聊天标签页。
+ * @param name 待检测的 buffer URL。
+ * @return 若名称以 \c tmfs://chat-tab 开头则返回 true。
+ */
 static bool
 is_chat_tab_buffer (url name) {
   return starts (as_string (name), "tmfs://chat-tab");
@@ -447,6 +452,11 @@ kill_tabpage (url win_u, url u) {
   if (win == NULL) win= win_tabpage;
   url  current_u = get_current_view_safe ();
   bool is_current= (!is_none (current_u) && current_u == u);
+  /**
+   * @note 对于聊天标签页 buffer，嵌入的输入编辑器可能持有键盘焦点，
+   *       而视图 URL 指向底层的 tmfs://chat-input-* / chat-message-* buffer。
+   *       当它们共享同一个主控件时，我们将这类视图视为当前视图。
+   */
   if (!is_current && vw->buf != NULL &&
       is_chat_tab_buffer (vw->buf->buf->name)) {
     tm_view current_vw= concrete_view (current_u);

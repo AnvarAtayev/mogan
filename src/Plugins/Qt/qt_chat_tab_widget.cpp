@@ -1,7 +1,7 @@
 
 /******************************************************************************
  * MODULE     : qt_chat_tab_widget.cpp
- * DESCRIPTION: LLM Chat tab widget for Mogan STEM
+ * DESCRIPTION: Mogan STEM 的 LLM 聊天标签页控件
  * COPYRIGHT  : (C) 2026 Mogan STEM
  ******************************************************************************
  * This software falls under the GNU general public license version 3 or later.
@@ -36,28 +36,49 @@
 using namespace moebius;
 
 namespace {
+
+/**
+ * @brief 生成下一个聊天 buffer 的唯一 ID。
+ * @return 递增后的 ID。
+ */
 int
 next_chat_input_buffer_id () {
   static int s_nextId= 0;
   return ++s_nextId;
 }
 
+/**
+ * @brief 创建唯一的输入 buffer URL。
+ * @return 格式为 tmfs://chat-input-<id> 的 URL。
+ */
 url
 make_chat_input_buffer_name () {
   return url ("tmfs://chat-input-" * as_string (next_chat_input_buffer_id ()));
 }
 
+/**
+ * @brief 创建唯一的消息 buffer URL。
+ * @return 格式为 tmfs://chat-message-<id> 的 URL。
+ */
 url
 make_chat_message_buffer_name () {
   return url ("tmfs://chat-message-" *
               as_string (next_chat_input_buffer_id ()));
 }
 
+/**
+ * @brief 返回聊天控件使用的嵌入样式树。
+ * @return 包含 "generic" 和 "llm" 标签的复合样式树。
+ */
 tree
 make_chat_embedded_style () {
   return compound ("style", tuple ("generic", "llm"));
 }
 
+/**
+ * @brief 递归禁用所有 QAbstractScrollArea 后代控件的滚动条。
+ * @param root 搜索起始的根控件。
+ */
 void
 disable_scrollbars_recursively (QWidget* root) {
   if (!root) return;
@@ -73,6 +94,11 @@ disable_scrollbars_recursively (QWidget* root) {
   }
 }
 
+/**
+ * @brief 判断文档主体是否实际为空。
+ * @param body TeXmacs 文档树。
+ * @return 若主体不含可见内容则返回 true。
+ */
 bool
 is_empty_document_body (tree body) {
   if (!is_func (body, DOCUMENT)) return false;
@@ -80,53 +106,91 @@ is_empty_document_body (tree body) {
   return N (body) == 1 && is_atomic (body[0]) && body[0]->label == "";
 }
 
-constexpr int kSidebarMinWidth       = 200;
-constexpr int kSidebarMarginX        = 12;
-constexpr int kSidebarMarginY        = 16;
-constexpr int kSidebarSpacing        = 8;
-constexpr int kNavTitleFontPx        = 11;
-constexpr int kNavTitlePadding       = 4;
-constexpr int kNavButtonPadY         = 8;
-constexpr int kNavButtonPadX         = 12;
-constexpr int kNavButtonFontPx       = 13;
-constexpr int kCollapseFontPx        = 11;
-constexpr int kCollapseBorderRadius  = 4;
-constexpr int kCollapsePadY          = 4;
-constexpr int kCollapsePadX          = 8;
-constexpr int kWelcomeFontPx         = 34;
-constexpr int kInputHeight           = 44;
-constexpr int kSendButtonPadY        = 6;
-constexpr int kSendButtonPadX        = 16;
-constexpr int kSendButtonFontPx      = 13;
-constexpr int kContentMarginX        = 24;
-constexpr int kContentMarginY        = 24;
-constexpr int kContentSpacing        = 16;
-constexpr int kWelcomeTopOffsetY     = 240;
+/// 左侧边栏最小宽度（像素）。
+constexpr int kSidebarMinWidth= 200;
+/// 边栏布局水平边距。
+constexpr int kSidebarMarginX= 12;
+/// 边栏布局垂直边距。
+constexpr int kSidebarMarginY= 16;
+/// 边栏元素间距。
+constexpr int kSidebarSpacing= 8;
+/// 导航标题字体大小（像素）。
+constexpr int kNavTitleFontPx= 11;
+/// 导航标题内边距。
+constexpr int kNavTitlePadding= 4;
+/// 导航按钮垂直内边距。
+constexpr int kNavButtonPadY= 8;
+/// 导航按钮水平内边距。
+constexpr int kNavButtonPadX= 12;
+/// 导航按钮字体大小（像素）。
+constexpr int kNavButtonFontPx= 13;
+/// 收缩按钮字体大小（像素）。
+constexpr int kCollapseFontPx= 11;
+/// 收缩按钮圆角半径。
+constexpr int kCollapseBorderRadius= 4;
+/// 收缩按钮垂直内边距。
+constexpr int kCollapsePadY= 4;
+/// 收缩按钮水平内边距。
+constexpr int kCollapsePadX= 8;
+/// 欢迎标题字体大小（像素）。
+constexpr int kWelcomeFontPx= 34;
+/// 输入编辑器固定高度（像素）。
+constexpr int kInputHeight= 44;
+/// 发送按钮垂直内边距。
+constexpr int kSendButtonPadY= 6;
+/// 发送按钮水平内边距。
+constexpr int kSendButtonPadX= 16;
+/// 发送按钮字体大小（像素）。
+constexpr int kSendButtonFontPx= 13;
+/// 内容区水平边距。
+constexpr int kContentMarginX= 24;
+/// 内容区垂直边距。
+constexpr int kContentMarginY= 24;
+/// 内容区元素间距。
+constexpr int kContentSpacing= 16;
+/// 欢迎模式下顶部占位高度（像素）。
+constexpr int kWelcomeTopOffsetY= 240;
+/// 会话模式下顶部占位高度（像素）。
 constexpr int kConversationTopOffsetY= 24;
-constexpr int kTopPanelMaxWidth      = 680;
-constexpr int kInputFrameRadius      = 8;
-constexpr int kInputFrameBorder      = 1;
-constexpr int kInputFramePad         = 8;
-constexpr int kMessageMinHeight      = 240;
-constexpr int kTransitionDurationMs  = 220;
+/// 顶部面板最大宽度（像素）。
+constexpr int kTopPanelMaxWidth= 680;
+/// 输入/消息框圆角半径。
+constexpr int kInputFrameRadius= 8;
+/// 输入/消息框边框宽度（像素）。
+constexpr int kInputFrameBorder= 1;
+/// 输入/消息框内边距。
+constexpr int kInputFramePad= 8;
+/// 消息展示区最小高度（像素）。
+constexpr int kMessageMinHeight= 240;
+/// 欢迎态到会话态过渡动画时长（毫秒）。
+constexpr int kTransitionDurationMs= 220;
+
 } // namespace
 
+/**
+ * @brief 单个会话面板的内部数据。
+ */
 struct QTChatTabWidget::ChatConversationPanel {
-  QWidget*     pageWidget       = nullptr;
-  QLabel*      welcomeTitle     = nullptr;
-  QWidget*     messageFrame     = nullptr;
-  QWidget*     inputEditorWidget= nullptr;
-  QPushButton* sendButton       = nullptr;
-  QPushButton* sidebarButton    = nullptr;
-  QSpacerItem* topSpacer        = nullptr;
-  widget       messageWidget;
-  widget       inputWidget;
-  url          messageBufferName;
-  url          inputBufferName;
-  bool         conversationMode= false;
-  QString      title;
+  QWidget*     pageWidget       = nullptr; ///< 本会话的堆叠页面。
+  QLabel*      welcomeTitle     = nullptr; ///< 欢迎标题标签。
+  QWidget*     messageFrame     = nullptr; ///< 承载消息控件的边框。
+  QWidget*     inputEditorWidget= nullptr; ///< 输入编辑器的 Qt 控件。
+  QPushButton* sendButton       = nullptr; ///< 发送按钮。
+  QPushButton* sidebarButton    = nullptr; ///< 侧边栏入口按钮。
+  QSpacerItem* topSpacer        = nullptr; ///< 顶部占位，用于垂直偏移。
+  widget       messageWidget;              ///< 消息显示的 TeXmacs 控件。
+  widget       inputWidget;                ///< 用户输入的 TeXmacs 控件。
+  url          messageBufferName;          ///< 消息历史 buffer 的 URL。
+  url          inputBufferName;            ///< 输入编辑器 buffer 的 URL。
+  bool         conversationMode= false;    ///< 面板是否已离开欢迎态。
+  QString      title;                      ///< 会话的显示标题。
 };
 
+/**
+ * @brief 构造聊天标签页控件。
+ *
+ * 创建左侧边栏和右侧内容区，然后创建第一个会话。
+ */
 QTChatTabWidget::QTChatTabWidget (QWidget* parent)
     : QWidget (parent), sidebarWidget_ (nullptr), contentWidget_ (nullptr),
       conversationCountLabel_ (nullptr), conversationListWidget_ (nullptr),
@@ -165,12 +229,19 @@ QTChatTabWidget::QTChatTabWidget (QWidget* parent)
   create_new_conversation ();
 }
 
+/**
+ * @brief 销毁控件及其所有会话面板。
+ */
 QTChatTabWidget::~QTChatTabWidget () {
   for (ChatConversationPanel* panel : conversations_)
     delete panel;
   conversations_.clear ();
 }
 
+/**
+ * @brief 构建左侧边栏，包含标题、新建聊天按钮和会话列表。
+ * @param sidebarLayout 待填充的布局。
+ */
 void
 QTChatTabWidget::setup_left_sidebar (QVBoxLayout* sidebarLayout) {
   // 顶部行：标题 + 收缩按钮
@@ -228,6 +299,10 @@ QTChatTabWidget::setup_left_sidebar (QVBoxLayout* sidebarLayout) {
   sidebarLayout->addStretch ();
 }
 
+/**
+ * @brief 构建右侧内容区，使用 QStackedWidget 管理会话页面。
+ * @param mainLayout 主水平布局，用于插入内容区。
+ */
 void
 QTChatTabWidget::setup_right_content (QHBoxLayout* mainLayout) {
   QWidget* content= new QWidget (this);
@@ -244,6 +319,11 @@ QTChatTabWidget::setup_right_content (QHBoxLayout* mainLayout) {
   mainLayout->addWidget (content, 1);
 }
 
+/**
+ * @brief 创建新的会话面板，包含控件和 buffer。
+ * @param title 会话的显示标题。
+ * @return 新建会话面板的指针，失败时返回 nullptr。
+ */
 QTChatTabWidget::ChatConversationPanel*
 QTChatTabWidget::create_conversation (const QString& title) {
   if (!conversationStack_ || !conversationListLayout_) return nullptr;
@@ -368,6 +448,9 @@ QTChatTabWidget::create_conversation (const QString& title) {
   return panel;
 }
 
+/**
+ * @brief 创建并激活一个以自动生成标题命名的新会话。
+ */
 void
 QTChatTabWidget::create_new_conversation () {
   QString title= QString ("Chat %1").arg (nextConversationTitleId_++);
@@ -377,6 +460,10 @@ QTChatTabWidget::create_new_conversation () {
   activate_conversation (panel);
 }
 
+/**
+ * @brief 将可见页面切换到指定会话，并更新侧边栏。
+ * @param panel 待激活的会话面板。
+ */
 void
 QTChatTabWidget::activate_conversation (ChatConversationPanel* panel) {
   if (!panel || !conversationStack_) return;
@@ -386,6 +473,9 @@ QTChatTabWidget::activate_conversation (ChatConversationPanel* panel) {
   focus_input_editor (panel);
 }
 
+/**
+ * @brief 更新会话计数标签及侧边栏按钮的选中状态。
+ */
 void
 QTChatTabWidget::refresh_sidebar () {
   if (conversationCountLabel_) {
@@ -399,6 +489,12 @@ QTChatTabWidget::refresh_sidebar () {
   }
 }
 
+/**
+ * @brief 将指定面板从欢迎态切换到会话态。
+ *
+ * 播放时长为 \ref kTransitionDurationMs 毫秒的淡入淡出及间距动画。
+ * @param panel 目标会话面板。
+ */
 void
 QTChatTabWidget::enter_conversation_mode (ChatConversationPanel* panel) {
   if (!panel || panel->conversationMode) return;
@@ -458,6 +554,10 @@ QTChatTabWidget::enter_conversation_mode (ChatConversationPanel* panel) {
   }
 }
 
+/**
+ * @brief 读取面板输入内容，委托发送给 Scheme 层，成功后进入会话态。
+ * @param panel 发送消息的会话面板。
+ */
 void
 QTChatTabWidget::handle_send (ChatConversationPanel* panel) {
   if (!panel) return;
@@ -473,12 +573,21 @@ QTChatTabWidget::handle_send (ChatConversationPanel* panel) {
   focus_input_editor (panel);
 }
 
+/**
+ * @brief 从面板输入 buffer 中获取文档树。
+ * @param panel 待读取输入的会话面板。
+ * @return 输入内容对应的 TeXmacs 树。
+ */
 tree
 QTChatTabWidget::read_input_message (const ChatConversationPanel* panel) const {
   if (!panel) return tree (DOCUMENT, "");
   return get_buffer_body (panel->inputBufferName);
 }
 
+/**
+ * @brief 将键盘焦点设置到指定面板的输入编辑器。
+ * @param panel 目标会话面板。
+ */
 void
 QTChatTabWidget::focus_input_editor (ChatConversationPanel* panel) {
   if (panel && panel->inputEditorWidget) {
@@ -486,6 +595,10 @@ QTChatTabWidget::focus_input_editor (ChatConversationPanel* panel) {
   }
 }
 
+/**
+ * @brief 通过 \c eval_scheme 将按键按下事件转发到 Scheme 层。
+ * @param event Qt 按键事件。
+ */
 void
 QTChatTabWidget::keyPressEvent (QKeyEvent* event) {
   string key= from_key_press_event (event);
@@ -495,6 +608,10 @@ QTChatTabWidget::keyPressEvent (QKeyEvent* event) {
   event->accept ();
 }
 
+/**
+ * @brief 通过 \c eval_scheme 将按键释放事件转发到 Scheme 层。
+ * @param event Qt 按键事件。
+ */
 void
 QTChatTabWidget::keyReleaseEvent (QKeyEvent* event) {
   string key= from_key_release_event (event);
