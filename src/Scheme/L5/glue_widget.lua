@@ -502,6 +502,23 @@ function main()
                 scm_name = "open-pricing-url",
                 cpp_name = "open_pricing_url",
                 ret_type = "void"
+            },
+            {
+                scm_name = "qt-chat-tab-set-state",
+                cpp_name = "qt_chat_tab_set_state",
+                ret_type = "void",
+                arg_list = {
+                    "string",
+                    "string"
+                }
+            },
+            {
+                scm_name = "qt-chat-tab-new-session",
+                cpp_name = "qt_chat_tab_new_session",
+                ret_type = "void",
+                arg_list = {
+                    "string"
+                }
             }
         }
     }
