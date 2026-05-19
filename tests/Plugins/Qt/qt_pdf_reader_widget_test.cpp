@@ -164,6 +164,131 @@ private slots:
     QCOMPARE (widget->currentPage (), 1);
     delete widget;
   }
+
+  void test_rectSelectButtonExists () {
+    PDFReaderWidget* widget = new PDFReaderWidget ();
+    QPushButton*     rectBtn= widget->findChild<QPushButton*> ("rectSelectBtn");
+    QVERIFY (rectBtn != nullptr);
+    delete widget;
+  }
+
+  void test_rectSelectModeToggle () {
+    PDFReaderWidget* widget = new PDFReaderWidget ();
+    QPushButton*     rectBtn= widget->findChild<QPushButton*> ("rectSelectBtn");
+    QVERIFY (rectBtn != nullptr);
+
+    QVERIFY (!widget->isRectSelectMode ());
+    rectBtn->click ();
+    QVERIFY (widget->isRectSelectMode ());
+    rectBtn->click ();
+    QVERIFY (!widget->isRectSelectMode ());
+    delete widget;
+  }
+
+  void test_rectSelectCursor () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->show ();
+    QApplication::processEvents ();
+
+    QPushButton* rectBtn= widget->findChild<QPushButton*> ("rectSelectBtn");
+    QVERIFY (rectBtn != nullptr);
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+
+    QCOMPARE (vp->cursor ().shape (), Qt::ArrowCursor);
+    rectBtn->click ();
+    QApplication::processEvents ();
+    QCOMPARE (vp->cursor ().shape (), Qt::CrossCursor);
+    rectBtn->click ();
+    QApplication::processEvents ();
+    QCOMPARE (vp->cursor ().shape (), Qt::ArrowCursor);
+    delete widget;
+  }
+
+  void test_rectSelectHint () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (400, 300);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+
+    QApplication::processEvents ();
+
+    QPushButton* rectBtn= widget->findChild<QPushButton*> ("rectSelectBtn");
+    QVERIFY (rectBtn != nullptr);
+
+    // 进入选择模式后显示提示
+    rectBtn->click ();
+    QApplication::processEvents ();
+
+    QLabel* hint= widget->findChild<QLabel*> ("rectSelectHint");
+    QVERIFY (hint != nullptr);
+    QVERIFY (hint->isVisible ());
+    QVERIFY (hint->text ().contains ("Draw a rectangle"));
+
+    // 模拟拖拽选择
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+    QPoint start (50, 50);
+    QPoint end (150, 150);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove (vp, end);
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, end);
+    QApplication::processEvents ();
+
+    // 选择完成后提示变为 Copied to Clipboard!
+    QCOMPARE (hint->text (), QString ("Copied to Clipboard!"));
+
+    // 退出选择模式后隐藏提示
+    rectBtn->click ();
+    QApplication::processEvents ();
+    QVERIFY (!hint->isVisible ());
+
+    delete widget;
+  }
+
+  void test_rectSelectClipboard () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (400, 300);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+
+    QApplication::processEvents ();
+
+    // 清空剪贴板
+    QClipboard* clipboard= QApplication::clipboard ();
+    clipboard->clear ();
+    QApplication::processEvents ();
+
+    // 进入选择模式
+    QPushButton* rectBtn= widget->findChild<QPushButton*> ("rectSelectBtn");
+    QVERIFY (rectBtn != nullptr);
+    rectBtn->click ();
+    QApplication::processEvents ();
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+
+    // 模拟拖拽选择
+    QPoint start (50, 50);
+    QPoint end (150, 150);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove (vp, end);
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, end);
+    QApplication::processEvents ();
+
+    // 验证剪贴板有图片
+    QVERIFY (clipboard->mimeData ()->hasImage ());
+    delete widget;
+  }
 };
 
 QTEST_MAIN (TestPdfReaderWidget)

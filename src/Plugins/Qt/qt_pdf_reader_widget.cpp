@@ -8,6 +8,7 @@
 #include "qt_pdf_reader_widget.hpp"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QDebug>
 #include <QFile>
 #include <QKeyEvent>
@@ -35,7 +36,9 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
     : QWidget (parent), scrollArea_ (nullptr), contentWidget_ (nullptr),
       pageLayout_ (nullptr), mainLayout_ (nullptr), toolBar_ (nullptr),
       zoomCombo_ (nullptr), prevPageBtn_ (nullptr), pageEdit_ (nullptr),
-      pageTotalLabel_ (nullptr), nextPageBtn_ (nullptr), pageCount_ (0),
+      pageTotalLabel_ (nullptr), nextPageBtn_ (nullptr), zoomInBtn_ (nullptr),
+      rectSelectBtn_ (nullptr), rubberBand_ (nullptr), rectSelectMode_ (false),
+      rectSelectDragging_ (false), hintLabel_ (nullptr), pageCount_ (0),
       hasError_ (false), targetDpi_ (DEFAULT_DPI), zoomFactor_ (1.0),
       pageAspectRatio_ (0.0), pageBaseWidthPts_ (0.0),
       zoomDebounceTimer_ (nullptr), resizeDebounceTimer_ (nullptr) {
@@ -152,6 +155,16 @@ PDFReaderWidget::setupToolBar () {
   toolBar_->addWidget (pageEdit_);
   toolBar_->addWidget (pageTotalLabel_);
   toolBar_->addWidget (nextPageBtn_);
+
+  rectSelectBtn_= new QPushButton ("□", toolBar_);
+  rectSelectBtn_->setObjectName ("rectSelectBtn");
+  rectSelectBtn_->setFixedWidth (30);
+  rectSelectBtn_->setCheckable (true);
+  connect (rectSelectBtn_, &QPushButton::toggled, this,
+           &PDFReaderWidget::onRectSelectToggled);
+
+  toolBar_->addSeparator ();
+  toolBar_->addWidget (rectSelectBtn_);
 
   mainLayout_->insertWidget (0, toolBar_);
 }
@@ -309,6 +322,127 @@ void
 PDFReaderWidget::onNextPage () {
   int page= currentPage () + 1;
   if (page <= pageCount_) goToPage (page);
+}
+
+bool
+PDFReaderWidget::isRectSelectMode () const {
+  return rectSelectMode_;
+}
+
+void
+PDFReaderWidget::onRectSelectToggled (bool checked) {
+  rectSelectMode_= checked;
+  if (scrollArea_ && scrollArea_->viewport ()) {
+    QWidget* vp= scrollArea_->viewport ();
+    vp->setMouseTracking (rectSelectMode_);
+    vp->setCursor (rectSelectMode_ ? Qt::CrossCursor : Qt::ArrowCursor);
+  }
+  if (!rectSelectMode_ && rubberBand_) {
+    rubberBand_->hide ();
+    delete rubberBand_;
+    rubberBand_= nullptr;
+  }
+  rectSelectDragging_= false;
+
+  if (rectSelectMode_) {
+    if (!hintLabel_) {
+      hintLabel_= new QLabel (contentWidget_);
+      hintLabel_->setObjectName ("rectSelectHint");
+      hintLabel_->setStyleSheet (
+          "QLabel { background-color: rgba(0, 0, 0, 180); color: white; "
+          "padding: 4px 8px; border-radius: 4px; font-size: 12px; }");
+    }
+#ifdef Q_OS_MACOS
+    QString shortcut= "Cmd+Shift+v";
+#else
+    QString shortcut= "Ctrl+Shift+v";
+#endif
+    hintLabel_->setText (
+        QString ("Draw a rectangle and use %1 to magic paste!").arg (shortcut));
+    hintLabel_->adjustSize ();
+    hintLabel_->move (PAGE_MARGIN, PAGE_MARGIN);
+    hintLabel_->show ();
+  }
+  else if (hintLabel_) {
+    hintLabel_->hide ();
+  }
+}
+
+void
+PDFReaderWidget::finishRectSelect (const QPoint& viewportPos) {
+  if (!rubberBand_ || !contentWidget_) return;
+
+  QRect rubberRect= rubberBand_->geometry ();
+  rubberBand_->hide ();
+
+  // 将 rubber band 的 geometry（contentWidget_ 坐标）转换为内容坐标
+  QPoint contentTopLeft    = rubberRect.topLeft ();
+  QPoint contentBottomRight= rubberRect.bottomRight ();
+
+  QRect contentRect (contentTopLeft, contentBottomRight);
+  if (contentRect.width () <= 0 || contentRect.height () <= 0) return;
+
+  QLabel* label= findPageLabelAt (contentRect.center ());
+  if (!label) return;
+
+  QPixmap selected= extractSelectionPixmap (label, contentRect);
+  if (selected.isNull ()) return;
+
+  QClipboard* clipboard= QApplication::clipboard ();
+  if (clipboard) {
+    clipboard->setPixmap (selected);
+  }
+
+  if (hintLabel_) {
+    hintLabel_->setText ("Copied to Clipboard!");
+    hintLabel_->adjustSize ();
+  }
+}
+
+QLabel*
+PDFReaderWidget::findPageLabelAt (const QPoint& contentPos) const {
+  int childCount= pageLayout_->count ();
+  for (int i= 0; i < childCount; ++i) {
+    QLayoutItem* item= pageLayout_->itemAt (i);
+    if (!item) continue;
+    QWidget* w= item->widget ();
+    if (!w) continue;
+    QLabel* label= qobject_cast<QLabel*> (w);
+    if (!label) continue;
+    if (label->geometry ().contains (contentPos)) {
+      return label;
+    }
+  }
+  return nullptr;
+}
+
+QPixmap
+PDFReaderWidget::extractSelectionPixmap (QLabel*      label,
+                                         const QRect& contentRect) const {
+  if (!label) return QPixmap ();
+
+  QPixmap pm= label->pixmap ();
+  if (pm.isNull ()) return QPixmap ();
+
+  // 计算选择区域相对于 label 的坐标
+  QRect labelRect= label->geometry ();
+  QRect intersect= contentRect.intersected (labelRect);
+  if (intersect.isEmpty ()) return QPixmap ();
+
+  int relX= intersect.x () - labelRect.x ();
+  int relY= intersect.y () - labelRect.y ();
+  int relW= intersect.width ();
+  int relH= intersect.height ();
+
+  qreal dpr = pm.devicePixelRatio ();
+  int   srcX= qRound (relX * dpr);
+  int   srcY= qRound (relY * dpr);
+  int   srcW= qRound (relW * dpr);
+  int   srcH= qRound (relH * dpr);
+
+  QPixmap copied= pm.copy (srcX, srcY, srcW, srcH);
+  copied.setDevicePixelRatio (1.0);
+  return copied;
 }
 
 void
@@ -823,6 +957,43 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
     else if (event->type () == QEvent::Resize) {
       if (!pdfData_.isEmpty () && pageCount_ > 0) {
         resizeDebounceTimer_->start ();
+      }
+    }
+    else if (rectSelectMode_ && event->type () == QEvent::MouseButtonPress) {
+      QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
+      if (mouseEvent->button () == Qt::LeftButton) {
+        rectSelectDragging_= true;
+        rectSelectStart_=
+            scrollArea_->viewport ()->mapToGlobal (mouseEvent->pos ());
+        rectSelectStart_= contentWidget_->mapFromGlobal (rectSelectStart_);
+        if (!rubberBand_) {
+          rubberBand_= new QRubberBand (QRubberBand::Rectangle, contentWidget_);
+        }
+        rubberBand_->setGeometry (QRect (rectSelectStart_, QSize ()));
+        rubberBand_->show ();
+        mouseEvent->accept ();
+        return true;
+      }
+    }
+    else if (rectSelectMode_ && rectSelectDragging_ &&
+             event->type () == QEvent::MouseMove) {
+      QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
+      QPoint       currentPos= contentWidget_->mapFromGlobal (
+          scrollArea_->viewport ()->mapToGlobal (mouseEvent->pos ()));
+      QRect rect (rectSelectStart_, currentPos);
+      rect= rect.normalized ();
+      rubberBand_->setGeometry (rect);
+      mouseEvent->accept ();
+      return true;
+    }
+    else if (rectSelectMode_ && rectSelectDragging_ &&
+             event->type () == QEvent::MouseButtonRelease) {
+      QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
+      if (mouseEvent->button () == Qt::LeftButton) {
+        rectSelectDragging_= false;
+        finishRectSelect (mouseEvent->pos ());
+        mouseEvent->accept ();
+        return true;
       }
     }
   }
