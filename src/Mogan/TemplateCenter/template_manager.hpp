@@ -49,22 +49,28 @@ public:
   void initialize ();
   bool isInitialized () const { return initialized_; }
 
-  // Category operations
+  // 分类操作
   QList<TemplateCategory> categories () const;
   QString                 categoryName (const QString& categoryId) const;
 
-  // Template queries
+  // 模板查询
   QList<TemplateMetadataPtr> templates () const;
   QList<TemplateMetadataPtr>
                       templatesByCategory (const QString& categoryId) const;
   TemplateMetadataPtr templateById (const QString& templateId) const;
 
-  // Template availability
+  // 本地模板可用性（纯查询，不验证 MD5）
   bool    isTemplateAvailableLocally (const QString& templateId) const;
   QString localTemplatePath (const QString& templateId) const;
 
-  // Operations
-  void refreshTemplates (); // Force refresh from remote
+  // 验证本地模板完整性（MD5 校验），损坏时自动清理缓存
+  bool verifyLocalTemplate (const QString& templateId);
+
+  // 刷新操作
+  void refreshCategories (); // 强制刷新分类列表
+  void refreshTemplates ();  // 强制刷新全部模板
+  void
+  refreshTemplatesByCategory (const QString& categoryId); // 按分类增量刷新模板
 
   // Template download
   void downloadTemplate (const QString& templateId);
@@ -109,12 +115,11 @@ signals:
   void updateAvailable (int newTemplatesCount, int updatedTemplatesCount);
 
 private slots:
-  // liiistem.cn API format with categories
+  void onRemoteCategoriesLoaded (const QList<TemplateCategory>& categories);
+  void onRemoteCategoriesFailed (const QString& error);
   void
-  onRemoteMetadataLoaded (const QHash<QString, TemplateMetadataPtr>& metadata,
-                          const QList<TemplateCategory>& categories);
-  void onRemoteMetadataFailed (const QString& error);
-  void onMetadataNotModified ();
+  onRemoteTemplatesLoaded (const QHash<QString, TemplateMetadataPtr>& metadata);
+  void onRemoteTemplatesFailed (const QString& error);
   void onTemplateDownloaded (const QString& templateId,
                              const QString& localPath);
   void onTemplateDownloadFailed (const QString& templateId,
@@ -129,8 +134,8 @@ private:
   QList<TemplateCategory> loadLocalCategoriesFromScheme ();
 
   // Merge remote metadata with local cache
-  void
-  mergeMetadata (const QHash<QString, TemplateMetadataPtr>& remoteMetadata);
+  void mergeMetadata (const QHash<QString, TemplateMetadataPtr>& remoteMetadata,
+                      bool incremental= false);
 
   // Utility functions
   QString localTemplatesDir () const;
@@ -150,8 +155,13 @@ private:
 
   // State
   bool isOnline_;
-  bool isRefreshing_;
-  bool isRetryingWithoutEtag_;
+  bool isRefreshingCategories_;
+  bool isRefreshingTemplates_;
+  bool categoriesFetched_; // true after first successful categories fetch
+  QSet<QString> fetchedCategories_; // categories whose templates have been
+                                    // fetched this session
+  QString
+      pendingIncrementalCategoryId_; // 当前正在请求的分类 ID，用于增量更新标记
 };
 
 #endif // TEMPLATE_MANAGER_HPP

@@ -29,6 +29,8 @@ private slots:
     qInstallMessageHandler (oldHandler);
   }
 
+  // --- 构造与初始化 ---
+
   // QTMTemplatePage 应能正常构造和初始化
   void test_template_page_construct_and_initialize () {
     QTMTemplatePage page;
@@ -40,6 +42,8 @@ private slots:
     // initialize 连接信号后不应改变基本结构
     QVERIFY (page.findChild<QWidget*> ("startup-tab-grid") != nullptr);
   }
+
+  // --- 信号响应 ---
 
   // 手动发射 TemplateManager::templatesLoaded 后，网格应被刷新
   void test_templates_loaded_signal_refreshes_grid () {
@@ -73,27 +77,44 @@ private slots:
               "templatesLoaded signal with empty template list");
   }
 
-  // 手动发射 categoriesLoaded 后，分类栏应被刷新
-  void test_categories_loaded_signal_refreshes_bar () {
+  // --- 分类操作 ---
+
+  // setCategory 不应导致崩溃
+  void test_set_category_does_not_crash () {
     QTMTemplatePage page;
     page.initialize ();
 
-    TemplateManager* mgr= TemplateManager::instance ();
-    emit             mgr->categoriesLoaded ();
+    page.setCategory ("test-category");
     QCoreApplication::processEvents ();
 
-    // 分类栏存在但可能为空（无本地分类数据）
-    QWidget* bar= page.findChild<QWidget*> ("startup-tab-category-bar");
-    QVERIFY (bar != nullptr);
+    QVERIFY (page.currentCategory () == "test-category");
   }
 
-  // resizeEvent 不应导致崩溃（不等待 debounce 定时器）
+  void test_refresh_grid_does_not_crash () {
+    QTMTemplatePage page;
+    page.initialize ();
+    page.setCategory ("cat1");
+    page.refreshGrid ();
+    QCoreApplication::processEvents ();
+    QVERIFY (true);
+  }
+
+  void test_set_category_with_display_name () {
+    QTMTemplatePage page;
+    page.initialize ();
+    page.setCategory ("thesis", "Thesis");
+    QCoreApplication::processEvents ();
+
+    QVERIFY (page.currentCategory () == "thesis");
+  }
+
+  // --- 事件处理 ---
+
   void test_resize_event_does_not_crash () {
     QTMTemplatePage page;
     page.initialize ();
     page.resize (800, 600);
     page.resize (400, 300);
-    // 如果到这里没有崩溃，测试通过
     QVERIFY (true);
   }
 };
