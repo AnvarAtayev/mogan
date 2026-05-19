@@ -242,7 +242,8 @@ QTChatTabWidget::QTChatTabWidget (QWidget* parent)
 
   // 右侧内容区
   setup_right_content (mainLayout);
-  create_new_conversation ();
+  loadSessions ();
+  if (conversations_.isEmpty ()) create_new_conversation ();
 }
 
 /**
@@ -616,6 +617,7 @@ QTChatTabWidget::create_new_conversation_with_model (const string& model) {
   }
 
   activate_conversation (panel);
+  saveOneSession (panel->sessionId);
 }
 
 /**
@@ -625,6 +627,9 @@ QTChatTabWidget::create_new_conversation_with_model (const string& model) {
 void
 QTChatTabWidget::activate_conversation (ChatConversationPanel* panel) {
   if (!panel || !conversationStack_) return;
+  cout << "[chat-persist] activate_conversation: sid=" << panel->sessionId
+       << " panel=" << (void*) panel << " page=" << (void*) panel->pageWidget
+       << " stack_count=" << conversationStack_->count () << LF;
   activeConversation_= panel;
   conversationStack_->setCurrentWidget (panel->pageWidget);
   refresh_sidebar ();
@@ -636,6 +641,8 @@ QTChatTabWidget::activate_conversation (ChatConversationPanel* panel) {
  */
 void
 QTChatTabWidget::refresh_sidebar () {
+  cout << "[chat-persist] refresh_sidebar: conversations_.size()="
+       << conversations_.size () << LF;
   // 统计活跃和归档会话数
   int activeCount  = 0;
   int archivedCount= 0;
@@ -689,6 +696,13 @@ QTChatTabWidget::refresh_sidebar () {
     if (!panel || !panel->sidebarButton) continue;
     ChatSession* session = sessionManager_.getSession (panel->sessionId);
     bool         archived= session && session->archived;
+
+    cout << "[chat-persist] refresh_sidebar panel: sid=" << panel->sessionId
+         << " btn=" << (void*) panel->sidebarButton
+         << " parent=" << (void*) panel->sidebarButton->parent ()
+         << " visible=" << panel->sidebarButton->isVisible ()
+         << " enabled=" << panel->sidebarButton->isEnabled ()
+         << " archived=" << archived << LF;
 
     QString displayText;
     if (session && !is_empty (session->title)) {
@@ -764,6 +778,7 @@ QTChatTabWidget::refresh_sidebar () {
                    sessionManager_.setTitle (panel->sessionId,
                                              from_qstring (newTitle));
                    refresh_sidebar ();
+                   saveOneSession (panel->sessionId);
                  }
                }
                else if (chosen == archiveAction) {
@@ -771,6 +786,7 @@ QTChatTabWidget::refresh_sidebar () {
                    sessionManager_.restoreSession (panel->sessionId);
                  else sessionManager_.archiveSession (panel->sessionId);
                  refresh_sidebar ();
+                 saveOneSession (panel->sessionId);
                }
              });
   }
@@ -895,6 +911,7 @@ QTChatTabWidget::handle_send (ChatConversationPanel* panel) {
   enter_conversation_mode (panel);
   refresh_sidebar ();
   focus_input_editor (panel);
+  saveOneSession (panel->sessionId);
 }
 
 /**
@@ -951,6 +968,8 @@ QTChatTabWidget::notifyStateChanged (const string& sessionId,
     disconnect (panel->sendButton, &QPushButton::clicked, this, nullptr);
     connect (panel->sendButton, &QPushButton::clicked, this,
              [this, panel] () { handle_send (panel); });
+    // 模型输出结束，保存会话内容
+    saveOneSession (sessionId);
   }
 }
 
@@ -1243,6 +1262,14 @@ ChatSessionManager::getSession (const string& sessionId) {
   return nullptr;
 }
 
+std::vector<string>
+ChatSessionManager::getAllSessionIds () const {
+  std::vector<string> ids;
+  for (const auto& kv : sessions_)
+    ids.push_back (kv.first);
+  return ids;
+}
+
 ChatSession*
 ChatSessionManager::findSessionByPanel (void* panel) {
   for (auto& kv : sessions_) {
@@ -1265,6 +1292,260 @@ ChatSessionManager::messageBufferUrl (const string& sessionId) {
 url
 ChatSessionManager::inputBufferUrl (const string& sessionId) {
   return url ("tmfs://chat-input-" * sessionId);
+}
+
+void
+ChatSessionManager::insertSession (const ChatSession& session) {
+  sessions_.insert (std::make_pair (session.sessionId, session));
+}
+
+/******************************************************************************
+ * QTChatTabWidget 持久化实现
+ ******************************************************************************/
+
+void
+QTChatTabWidget::saveOneSession (const string& sessionId) {
+  ChatSession* s= sessionManager_.getSession (sessionId);
+  if (!s) return;
+  call ("chat-persist-save-one", sessionId, s->title, s->model,
+        s->archived ? string ("true") : string ("false"));
+}
+
+void
+QTChatTabWidget::loadSessions () {
+  cout << "[chat-persist] loadSessions started" << LF;
+  // Scheme 端 chat-persist-load-all 会逐个调用 qt-chat-tab-restore-session
+  call ("chat-persist-load-all");
+  cout << "[chat-persist] loadSessions: restored " << conversations_.size ()
+       << " sessions" << LF;
+
+  // 激活第一个非归档会话，否则激活第一个
+  for (ChatConversationPanel* panel : conversations_) {
+    if (!panel) continue;
+    ChatSession* s= sessionManager_.getSession (panel->sessionId);
+    cout << "[chat-persist] loadSessions scanning: sid=" << panel->sessionId
+         << " archived=" << (s ? s->archived : -1) << " panel=" << (void*) panel
+         << " page=" << (void*) panel->pageWidget << LF;
+    if (s && !s->archived) {
+      cout << "[chat-persist] loadSessions: activating first non-archived"
+           << LF;
+      activate_conversation (panel);
+      return;
+    }
+  }
+  if (!conversations_.isEmpty ()) {
+    cout << "[chat-persist] loadSessions: activating first (all archived)"
+         << LF;
+    activate_conversation (conversations_.first ());
+  }
+
+  // 恢复 Scheme 层的全局当前模型
+  if (!conversations_.isEmpty ()) {
+    ChatConversationPanel* last= conversations_.last ();
+    ChatSession*           s   = sessionManager_.getSession (last->sessionId);
+    if (s && !is_empty (s->model)) {
+      call ("chat-tab-session-select-model", s->model);
+    }
+  }
+}
+
+void
+QTChatTabWidget::addConversation (ChatConversationPanel* panel) {
+  if (panel) conversations_.append (panel);
+}
+
+QTChatTabWidget::ChatConversationPanel*
+QTChatTabWidget::restore_conversation (const string& sessionId,
+                                       const string& title, const string& model,
+                                       bool archived) {
+  if (!conversationStack_ || !conversationListLayout_) return nullptr;
+
+  // 注册 Scheme 侧会话状态
+  call ("chat-persist-register-session", sessionId, model);
+
+  // 手动插入会话元数据
+  ChatSession session;
+  session.sessionId= sessionId;
+  session.title    = title;
+  session.model    = model;
+  session.state    = ChatState::Idle;
+  session.archived = archived;
+  session.panel    = nullptr;
+  sessionManager_.insertSession (session);
+
+  ChatConversationPanel* panel= new ChatConversationPanel ();
+  panel->sessionId            = sessionId;
+  sessionManager_.setPanel (sessionId, panel);
+
+  url msgBufUrl= ChatSessionManager::messageBufferUrl (sessionId);
+  url inBufUrl = ChatSessionManager::inputBufferUrl (sessionId);
+
+  QWidget* page= new QWidget (conversationStack_);
+  page->setObjectName ("chat-tab-conversation-page");
+  panel->pageWidget= page;
+
+  QVBoxLayout* contentLayout= new QVBoxLayout (page);
+  contentLayout->setContentsMargins (
+      DpiUtils::scaled (kContentMarginX), DpiUtils::scaled (kContentMarginY),
+      DpiUtils::scaled (kContentMarginX), DpiUtils::scaled (kContentMarginY));
+  contentLayout->setSpacing (DpiUtils::scaled (kContentSpacing));
+  panel->topSpacer= new QSpacerItem (0, DpiUtils::scaled (kWelcomeTopOffsetY),
+                                     QSizePolicy::Minimum, QSizePolicy::Fixed);
+  contentLayout->addSpacerItem (panel->topSpacer);
+
+  QWidget* topPanel= new QWidget (page);
+  topPanel->setMaximumWidth (DpiUtils::scaled (kTopPanelMaxWidth));
+  QVBoxLayout* topLayout= new QVBoxLayout (topPanel);
+  topLayout->setContentsMargins (0, 0, 0, 0);
+  topLayout->setSpacing (DpiUtils::scaled (kContentSpacing));
+
+  panel->welcomeTitle= new QLabel ("Welcome to Liii STEM!", topPanel);
+  panel->welcomeTitle->setObjectName ("chat-tab-welcome-title");
+  panel->welcomeTitle->setAlignment (Qt::AlignCenter);
+  DpiUtils::applyScaledFont (panel->welcomeTitle, kWelcomeFontPx);
+  topLayout->addWidget (panel->welcomeTitle);
+
+  panel->modelLabel= new QLabel ("", topPanel);
+  panel->modelLabel->setObjectName ("chat-tab-model-label");
+  panel->modelLabel->setAlignment (Qt::AlignCenter);
+  DpiUtils::applyScaledFont (panel->modelLabel, kNavTitleFontPx);
+  panel->modelLabel->setStyleSheet (
+      "color: #888888; padding: 2px 8px; background-color: #f0f0f0; "
+      "border-radius: 4px;");
+  panel->modelLabel->setMinimumHeight (DpiUtils::scaled (20));
+  topLayout->addWidget (panel->modelLabel, 0, Qt::AlignHCenter);
+
+  // 恢复会话时，buffer 中已有 Scheme 加载的消息内容，需使用 buffer 内容而非空
+  // tree
+  tree msgBody= get_buffer_body (msgBufUrl);
+  if (is_empty_document_body (msgBody)) msgBody= tree (DOCUMENT, "");
+  panel->messageWidget=
+      texmacs_input_widget (msgBody, make_chat_embedded_style (), msgBufUrl);
+  QSplitter* splitter= new QSplitter (Qt::Vertical, topPanel);
+  splitter->setObjectName ("chat-tab-splitter");
+  splitter->setHandleWidth (DpiUtils::scaled (4));
+  splitter->setChildrenCollapsible (false);
+
+  QWidget* messageQWidget= concrete (panel->messageWidget)->as_qwidget ();
+  panel->messageFrame    = new QWidget (splitter);
+  panel->messageFrame->setObjectName ("chat-tab-message-frame");
+  panel->messageFrame->setStyleSheet (
+      QString ("border: %1px solid #d9d9d9; border-radius: %2px; "
+               "background-color: #ffffff;")
+          .arg (DpiUtils::scaled (kInputFrameBorder))
+          .arg (DpiUtils::scaled (kInputFrameRadius)));
+  QVBoxLayout* messageFrameLayout= new QVBoxLayout (panel->messageFrame);
+  messageFrameLayout->setContentsMargins (
+      DpiUtils::scaled (kInputFramePad), DpiUtils::scaled (kInputFramePad),
+      DpiUtils::scaled (kInputFramePad), DpiUtils::scaled (kInputFramePad));
+  messageFrameLayout->setSpacing (0);
+  messageQWidget->setParent (panel->messageFrame);
+  messageQWidget->setMinimumHeight (DpiUtils::scaled (kMessageMinHeight));
+  messageFrameLayout->addWidget (messageQWidget);
+  panel->messageFrame->hide ();
+  splitter->addWidget (panel->messageFrame);
+
+  QWidget* inputArea= new QWidget (splitter);
+  inputArea->setObjectName ("chat-tab-input-area");
+  QVBoxLayout* inputAreaLayout= new QVBoxLayout (inputArea);
+  inputAreaLayout->setContentsMargins (0, 0, 0, 0);
+  inputAreaLayout->setSpacing (DpiUtils::scaled (kContentSpacing));
+
+  panel->inputWidget= texmacs_input_widget (
+      tree (WITH, "par-par-sep", "0.05fn", tree (DOCUMENT, "")),
+      make_chat_embedded_style (), inBufUrl);
+  QWidget* inputQWidget   = concrete (panel->inputWidget)->as_qwidget ();
+  panel->inputEditorWidget= inputQWidget;
+  disable_scrollbars_recursively (inputQWidget);
+  if (QTMWidget* editor= inputQWidget->findChild<QTMWidget*> ()) {
+    editor->setProperty ("chat_panel", QVariant::fromValue ((void*) panel));
+    editor->installEventFilter (this);
+  }
+  QWidget* inputFrame= new QWidget (inputArea);
+  inputFrame->setObjectName ("chat-tab-input-frame");
+  inputFrame->setStyleSheet (
+      QString ("border: %1px solid #d9d9d9; border-radius: %2px; "
+               "background-color: #ffffff;")
+          .arg (DpiUtils::scaled (kInputFrameBorder))
+          .arg (DpiUtils::scaled (kInputFrameRadius)));
+  QVBoxLayout* inputFrameLayout= new QVBoxLayout (inputFrame);
+  inputFrameLayout->setContentsMargins (
+      DpiUtils::scaled (kInputFramePad), DpiUtils::scaled (kInputFramePad),
+      DpiUtils::scaled (kInputFramePad), DpiUtils::scaled (kInputFramePad));
+  inputFrameLayout->setSpacing (0);
+  inputQWidget->setParent (inputFrame);
+  int defaultHeight= DpiUtils::scaled (kInputLineHeight * kInputDefaultLines);
+  inputQWidget->setMinimumHeight (defaultHeight);
+  inputQWidget->setMaximumHeight (defaultHeight);
+  inputFrameLayout->addWidget (inputQWidget);
+  inputAreaLayout->addWidget (inputFrame, 0);
+
+  QTimer* inputHeightTimer= new QTimer (inputFrame);
+  inputHeightTimer->setInterval (100);
+  connect (inputHeightTimer, &QTimer::timeout, this,
+           [this, panel] () { adjust_input_height (panel); });
+  inputHeightTimer->start ();
+
+  QHBoxLayout* btnLayout= new QHBoxLayout ();
+  btnLayout->addStretch ();
+
+  panel->sendButton= new QPushButton ("Send", inputArea);
+  panel->sendButton->setObjectName ("chat-tab-send-btn");
+  panel->sendButton->setFocusPolicy (Qt::NoFocus);
+  panel->sendButton->setCursor (Qt::PointingHandCursor);
+  DpiUtils::applyScaledFont (panel->sendButton, kSendButtonFontPx);
+  panel->sendButton->setStyleSheet (
+      QString ("padding: %1px %2px;")
+          .arg (DpiUtils::scaled (kSendButtonPadY))
+          .arg (DpiUtils::scaled (kSendButtonPadX)));
+  connect (panel->sendButton, &QPushButton::clicked, this,
+           [this, panel] () { handle_send (panel); });
+  btnLayout->addWidget (panel->sendButton);
+  inputAreaLayout->addLayout (btnLayout);
+
+  splitter->addWidget (inputArea);
+  splitter->setStretchFactor (0, 1);
+  splitter->setStretchFactor (1, 0);
+
+  topLayout->addWidget (splitter, 1);
+
+  contentLayout->addWidget (topPanel, 1, Qt::AlignHCenter | Qt::AlignTop);
+  conversationStack_->addWidget (page);
+
+  panel->sidebarButton= new QPushButton ("新会话", conversationListWidget_);
+  panel->sidebarButton->setObjectName ("chat-tab-conversation-btn");
+  panel->sidebarButton->setCheckable (true);
+  panel->sidebarButton->setFocusPolicy (Qt::NoFocus);
+  panel->sidebarButton->setCursor (Qt::PointingHandCursor);
+  DpiUtils::applyScaledFont (panel->sidebarButton, kNavButtonFontPx);
+  panel->sidebarButton->setStyleSheet (
+      QString ("QPushButton { text-align: left; border: 1px solid #d9d9d9; "
+               "border-radius: %1px; padding: %2px %3px; background-color: "
+               "#ffffff; } "
+               "QPushButton:checked { background-color: #e8eefc; "
+               "border-color: #9bb3ff; font-weight: 600; }")
+          .arg (DpiUtils::scaled (6))
+          .arg (DpiUtils::scaled (kNavButtonPadY))
+          .arg (DpiUtils::scaled (kNavButtonPadX)));
+  connect (panel->sidebarButton, &QPushButton::clicked, this,
+           [this, panel] () { activate_conversation (panel); });
+  conversationListLayout_->addWidget (panel->sidebarButton);
+
+  // 如果消息 buffer 非空，进入会话模式
+  if (!is_empty_document_body (msgBody)) {
+    enter_conversation_mode (panel);
+  }
+
+  if (panel->modelLabel) {
+    panel->modelLabel->setText (to_qstring (model));
+  }
+
+  cout << "[chat-persist] restore_conversation: sid=" << sessionId
+       << " panel=" << (void*) panel << " btn=" << (void*) panel->sidebarButton
+       << " page=" << (void*) panel->pageWidget
+       << " stack_count=" << conversationStack_->count () << LF;
+
+  return panel;
 }
 
 /******************************************************************************
@@ -1297,4 +1578,46 @@ qt_chat_tab_new_session (string model) {
       return;
     }
   }
+}
+
+/**
+ * @brief Scheme→C++ 回调：恢复单个聊天会话。
+ */
+void
+qt_chat_tab_restore_session (string sessionId, string title, string model,
+                             string archived) {
+  QWidgetList topWidgets= QApplication::topLevelWidgets ();
+  for (QWidget* top : topWidgets) {
+    QTChatTabWidget* chat= top->findChild<QTChatTabWidget*> ();
+    if (chat) {
+      bool  isArchived= (archived == "true");
+      auto* panel=
+          chat->restore_conversation (sessionId, title, model, isArchived);
+      if (panel) chat->addConversation (panel);
+      return;
+    }
+  }
+}
+
+/**
+ * @brief Scheme→C++ 回调：加载所有聊天会话。
+ */
+void
+qt_chat_tab_load_sessions () {
+  cout << "[chat-persist] qt_chat_tab_load_sessions called" << LF;
+  QWidgetList topWidgets= QApplication::topLevelWidgets ();
+  cout << "[chat-persist] top-level widgets count: " << topWidgets.size ()
+       << LF;
+  for (QWidget* top : topWidgets) {
+    QTChatTabWidget* chat= top->findChild<QTChatTabWidget*> ();
+    if (chat) {
+      cout << "[chat-persist] found QTChatTabWidget, calling loadSessions"
+           << LF;
+      chat->loadSessions ();
+      return;
+    }
+  }
+  cout << "[chat-persist] WARNING: QTChatTabWidget not found in any top-level "
+          "widget"
+       << LF;
 }
