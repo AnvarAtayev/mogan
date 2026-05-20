@@ -659,8 +659,12 @@ edit_interface_rep::compute_env_rects (path p, rectangles& rs, bool recurse) {
                                             sel->rs->item->x2, false);
             }
             if (bis->valid) {
-              rectangles rbis= copy (thicken (bis->rs, 0, 2 * pixel));
-              correct_adjacent (rbis, rsel);
+              // Skip if cells are on different pages. Use un-thickened rects
+              // because thickening could mask the page gap.
+              if (!(bis->rs->item->y1 > sel->rs->item->y2)) {
+                rectangles rbis= copy (thicken (bis->rs, 0, 2 * pixel));
+                correct_adjacent (rbis, rsel);
+              }
             }
           }
 
@@ -672,8 +676,10 @@ edit_interface_rep::compute_env_rects (path p, rectangles& rs, bool recurse) {
                                             sel->rs->item->x2, true);
             }
             if (bis->valid) {
-              rectangles rbis= copy (thicken (bis->rs, 0, 2 * pixel));
-              correct_adjacent (rsel, rbis);
+              if (!(sel->rs->item->y1 > bis->rs->item->y2)) {
+                rectangles rbis= copy (thicken (bis->rs, 0, 2 * pixel));
+                correct_adjacent (rsel, rbis);
+              }
             }
           }
 
