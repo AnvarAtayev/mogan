@@ -42,9 +42,10 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
       zoomCombo_ (nullptr), prevPageBtn_ (nullptr), pageEdit_ (nullptr),
       pageTotalLabel_ (nullptr), nextPageBtn_ (nullptr), zoomInBtn_ (nullptr),
       rectSelectBtn_ (nullptr), rubberBand_ (nullptr), rectSelectMode_ (false),
-      rectSelectDragging_ (false), hintLabel_ (nullptr), pageCount_ (0),
-      hasError_ (false), targetDpi_ (DEFAULT_DPI), zoomFactor_ (1.0),
-      pageAspectRatio_ (0.0), pageBaseWidthPts_ (0.0),
+      rectSelectDragging_ (false), hintLabel_ (nullptr),
+      browseDragging_ (false), browseDragActive_ (false), scroller_ (nullptr),
+      pageCount_ (0), hasError_ (false), targetDpi_ (DEFAULT_DPI),
+      zoomFactor_ (1.0), pageAspectRatio_ (0.0), pageBaseWidthPts_ (0.0),
       zoomDebounceTimer_ (nullptr), resizeDebounceTimer_ (nullptr) {
 
   mainLayout_= new QVBoxLayout (this);
@@ -68,6 +69,36 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
 
   scrollArea_->setWidget (contentWidget_);
   scrollArea_->viewport ()->installEventFilter (this);
+  scrollArea_->viewport ()->setCursor (Qt::OpenHandCursor);
+
+  // QScroller 配置（参考 Okular）
+  scroller_= QScroller::scroller (scrollArea_->viewport ());
+  QScrollerProperties prop;
+  prop.setScrollMetric (QScrollerProperties::DecelerationFactor, 0.3);
+  prop.setScrollMetric (QScrollerProperties::MaximumVelocity, 1.0);
+  prop.setScrollMetric (QScrollerProperties::AcceleratingFlickMaximumTime, 0.2);
+  prop.setScrollMetric (QScrollerProperties::HorizontalOvershootPolicy,
+                        QScrollerProperties::OvershootAlwaysOff);
+  prop.setScrollMetric (QScrollerProperties::VerticalOvershootPolicy,
+                        QScrollerProperties::OvershootAlwaysOff);
+  prop.setScrollMetric (QScrollerProperties::DragStartDistance, 0.0);
+  scroller_->setScrollerProperties (prop);
+
+  // 保持与 QScrollArea 内部一致的步长（Okular 同款 magic value）
+  scrollArea_->verticalScrollBar ()->setSingleStep (20);
+  scrollArea_->horizontalScrollBar ()->setSingleStep (20);
+
+  // 滚动条与 QScroller 同步（Okular 同款）
+  auto syncScroller= [this] () {
+    QScrollBar* hbar= scrollArea_->horizontalScrollBar ();
+    QScrollBar* vbar= scrollArea_->verticalScrollBar ();
+    scroller_->scrollTo (QPoint (hbar->value (), vbar->value ()), 0);
+  };
+  connect (scrollArea_->verticalScrollBar (), &QAbstractSlider::actionTriggered,
+           this, syncScroller, Qt::QueuedConnection);
+  connect (scrollArea_->horizontalScrollBar (),
+           &QAbstractSlider::actionTriggered, this, syncScroller,
+           Qt::QueuedConnection);
 
   mainLayout_->addWidget (scrollArea_);
 
@@ -390,7 +421,7 @@ PDFReaderWidget::onRectSelectToggled (bool checked) {
   if (scrollArea_ && scrollArea_->viewport ()) {
     QWidget* vp= scrollArea_->viewport ();
     vp->setMouseTracking (rectSelectMode_);
-    vp->setCursor (rectSelectMode_ ? Qt::CrossCursor : Qt::ArrowCursor);
+    vp->setCursor (rectSelectMode_ ? Qt::CrossCursor : Qt::OpenHandCursor);
   }
   if (!rectSelectMode_ && rubberBand_) {
     rubberBand_->hide ();
@@ -1039,6 +1070,61 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
         resizeDebounceTimer_->start ();
       }
     }
+    // ============================================================
+    // Browse (hand) tool: default drag-to-scroll behavior
+    // ============================================================
+    else if (!rectSelectMode_ && event->type () == QEvent::MouseButtonPress) {
+      QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
+      if (mouseEvent->button () == Qt::LeftButton) {
+        browseDragging_    = true;
+        browseDragActive_  = false;
+        browseDragStartPos_= mouseEvent->globalPosition ().toPoint ();
+        scroller_->handleInput (QScroller::InputPress, mouseEvent->pos (),
+                                mouseEvent->timestamp ());
+        scrollArea_->viewport ()->setCursor (Qt::ClosedHandCursor);
+#ifdef LIII_DEBUG
+        cout << "Browse press at " << mouseEvent->pos ().x () << ","
+             << mouseEvent->pos ().y () << "\n";
+#endif
+        mouseEvent->accept ();
+        return true;
+      }
+    }
+    else if (!rectSelectMode_ && browseDragging_ &&
+             event->type () == QEvent::MouseMove) {
+      QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
+      int          delta=
+          (mouseEvent->globalPosition ().toPoint () - browseDragStartPos_)
+              .manhattanLength ();
+      if (!browseDragActive_ && delta > QApplication::startDragDistance ()) {
+        browseDragActive_= true;
+#ifdef LIII_DEBUG
+        cout << "Browse drag activated, delta=" << delta << "\n";
+#endif
+      }
+      scroller_->handleInput (QScroller::InputMove, mouseEvent->pos (),
+                              mouseEvent->timestamp ());
+      mouseEvent->accept ();
+      return true;
+    }
+    else if (!rectSelectMode_ && browseDragging_ &&
+             event->type () == QEvent::MouseButtonRelease) {
+      QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
+      if (mouseEvent->button () == Qt::LeftButton) {
+        browseDragging_= false;
+        scrollArea_->viewport ()->setCursor (Qt::OpenHandCursor);
+        scroller_->handleInput (QScroller::InputRelease, mouseEvent->pos (),
+                                mouseEvent->timestamp ());
+#ifdef LIII_DEBUG
+        cout << "Browse release, wasDrag=" << browseDragActive_ << "\n";
+#endif
+        mouseEvent->accept ();
+        return true;
+      }
+    }
+    // ============================================================
+    // Rectangular selection mode
+    // ============================================================
     else if (rectSelectMode_ && event->type () == QEvent::MouseButtonPress) {
       QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
       if (mouseEvent->button () == Qt::LeftButton) {

@@ -218,13 +218,13 @@ private slots:
     QWidget* vp= widget->viewport ();
     QVERIFY (vp != nullptr);
 
-    QCOMPARE (vp->cursor ().shape (), Qt::ArrowCursor);
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
     rectBtn->click ();
     QApplication::processEvents ();
     QCOMPARE (vp->cursor ().shape (), Qt::CrossCursor);
     rectBtn->click ();
     QApplication::processEvents ();
-    QCOMPARE (vp->cursor ().shape (), Qt::ArrowCursor);
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
     delete widget;
   }
 
@@ -340,7 +340,7 @@ private slots:
     QApplication::processEvents ();
 
     QVERIFY (!widget->isRectSelectMode ());
-    QCOMPARE (vp->cursor ().shape (), Qt::ArrowCursor);
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
     delete widget;
   }
 
@@ -385,7 +385,281 @@ private slots:
     QApplication::processEvents ();
 
     QVERIFY (!widget->isRectSelectMode ());
-    QCOMPARE (vp->cursor ().shape (), Qt::ArrowCursor);
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
+
+    delete widget;
+  }
+
+  // ============================================================
+  // Browse (Hand) Tool Tests
+  // ============================================================
+
+  void test_defaultCursorIsOpenHand () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (400, 300);
+    widget->show ();
+    QApplication::processEvents ();
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
+    delete widget;
+  }
+
+  void test_dragScrollsDown () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (200, 100);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+    QApplication::processEvents ();
+
+    QScrollBar* vbar= widget->verticalScrollBar ();
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->maximum () > 0; }, 1000));
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+
+    // 先将滚动条设到中间位置，以便双向验证
+    int midPos= vbar->maximum () / 2;
+    vbar->setValue (midPos);
+    QApplication::processEvents ();
+    int initialPos= vbar->value ();
+
+    // 模拟向下拖动 30px（grab-and-pull：页面向下移动，滚动条值减小）
+    QPoint start (100, 100);
+    QPoint end (100, 130);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove (vp, end);
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, end);
+    QApplication::processEvents ();
+
+    int newPos= vbar->value ();
+    QVERIFY (newPos < initialPos);
+    delete widget;
+  }
+
+  void test_dragCursorChangesToClosedHand () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (400, 300);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+    QApplication::processEvents ();
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
+
+    QPoint start (100, 100);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    QApplication::processEvents ();
+
+    // 零延迟响应：按下后立即显示 ClosedHandCursor
+    QCOMPARE (vp->cursor ().shape (), Qt::ClosedHandCursor);
+
+    QPoint beyondThreshold (
+        start.x (), start.y () + QApplication::startDragDistance () + 2);
+    QTest::mouseMove (vp, beyondThreshold);
+    QApplication::processEvents ();
+
+    // 拖动过程中保持 ClosedHandCursor
+    QCOMPARE (vp->cursor ().shape (), Qt::ClosedHandCursor);
+
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, beyondThreshold);
+    QApplication::processEvents ();
+    delete widget;
+  }
+
+  void test_releaseRestoresOpenHand () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (400, 300);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+    QApplication::processEvents ();
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+
+    QPoint start (100, 100);
+    QPoint end (100, 140);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove (vp, end);
+    QApplication::processEvents ();
+    QCOMPARE (vp->cursor ().shape (), Qt::ClosedHandCursor);
+
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, end);
+    QApplication::processEvents ();
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
+    delete widget;
+  }
+
+  void test_clickDoesNotScroll () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (200, 100);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+    QApplication::processEvents ();
+
+    QScrollBar* vbar= widget->verticalScrollBar ();
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->maximum () > 0; }, 1000));
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+
+    int initialPos= vbar->value ();
+
+    // 零延迟响应下，任何移动都会滚动；
+    // 只有完全不动地按下释放才算单击，不触发滚动
+    QPoint start (100, 100);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, start);
+    QApplication::processEvents ();
+
+    QCOMPARE (vbar->value (), initialPos);
+    delete widget;
+  }
+
+  void test_rectSelectModeOverridesHand () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (400, 300);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+    QApplication::processEvents ();
+
+    QToolButton* rectBtn=
+        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
+    QVERIFY (rectBtn != nullptr);
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+
+    // 默认小手模式
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
+
+    // 进入选择模式
+    rectBtn->click ();
+    QApplication::processEvents ();
+    QCOMPARE (vp->cursor ().shape (), Qt::CrossCursor);
+
+    // 在选择模式下点击不应触发小手拖动
+    QScrollBar* vbar= widget->verticalScrollBar ();
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->maximum () > 0; }, 1000));
+    int initialPos= vbar->value ();
+
+    QPoint start (50, 50);
+    QPoint end (50, 150);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    QTest::mouseMove (vp, end);
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, end);
+    QApplication::processEvents ();
+
+    // 选择模式下是 rubber band 选择，滚动条不应因小手拖动而变化
+    // 但 rubber band 操作本身不滚动，所以值应保持不变
+    QCOMPARE (vbar->value (), initialPos);
+
+    // 退出选择模式后恢复小手
+    rectBtn->click ();
+    QApplication::processEvents ();
+    QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
+
+    delete widget;
+  }
+
+  void test_inertialScrollAfterRelease () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (200, 100);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+    QApplication::processEvents ();
+
+    QScrollBar* vbar= widget->verticalScrollBar ();
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->maximum () > 0; }, 1000));
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+
+    // 先将滚动条设到中间，避免触顶/底
+    int midPos= vbar->maximum () / 2;
+    vbar->setValue (midPos);
+    QApplication::processEvents ();
+
+    // 快速向下拖动 50px（多步模拟高速运动）
+    QPoint start (50, 50);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    for (int i= 1; i <= 5; ++i) {
+      QTest::mouseMove (vp, QPoint (50, 50 + i * 10));
+      QApplication::processEvents ();
+    }
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, QPoint (50, 100));
+    int releasePos= vbar->value ();
+
+    // 释放后等待一小段时间，惯性滚动应使值继续变化
+    QTest::qWait (80);
+    int afterInertia= vbar->value ();
+    QVERIFY (afterInertia != releasePos);
+
+    delete widget;
+  }
+
+  void test_inertialScrollStopsEventually () {
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (200, 100);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
+    QApplication::processEvents ();
+
+    QScrollBar* vbar= widget->verticalScrollBar ();
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->maximum () > 0; }, 1000));
+
+    QWidget* vp= widget->viewport ();
+    QVERIFY (vp != nullptr);
+
+    int midPos= vbar->maximum () / 2;
+    vbar->setValue (midPos);
+    QApplication::processEvents ();
+
+    QPoint start (50, 50);
+    QTest::mousePress (vp, Qt::LeftButton, Qt::NoModifier, start);
+    for (int i= 1; i <= 5; ++i) {
+      QTest::mouseMove (vp, QPoint (50, 50 + i * 10));
+      QApplication::processEvents ();
+    }
+    QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, QPoint (50, 100));
+
+    // 等待足够长的时间让惯性滚动完全停止
+    QTest::qWait (600);
+    int stablePos= vbar->value ();
+
+    // 再等待一帧，值应不再变化
+    QTest::qWait (50);
+    QCOMPARE (vbar->value (), stablePos);
 
     delete widget;
   }

@@ -15,6 +15,7 @@
 #include <QRubberBand>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QScroller>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -79,7 +80,6 @@ private slots:
   void onPageEditingFinished ();
   void updatePageNavigation ();
   void onRectSelectToggled (bool checked);
-
   void keyPressEvent (QKeyEvent* event) override;
 
 private:
@@ -115,6 +115,12 @@ private:
   QPoint       rectSelectStart_;
   bool         rectSelectDragging_;
   QLabel*      hintLabel_;
+
+  // Browse (hand) tool state
+  bool       browseDragging_;
+  QPoint     browseDragStartPos_;
+  bool       browseDragActive_;
+  QScroller* scroller_;
 
   QByteArray pdfData_;
   int        pageCount_;
