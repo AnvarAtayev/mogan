@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDebug>
+#include <QDesktopServices>
 #include <QFile>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -21,6 +22,7 @@
 #include <QScrollBar>
 #include <QSizePolicy>
 #include <QToolButton>
+#include <QUrl>
 #include <QWheelEvent>
 
 #include "MuPDF/mupdf_renderer.hpp"
@@ -46,7 +48,8 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
       browseDragging_ (false), browseDragActive_ (false), scroller_ (nullptr),
       pageCount_ (0), hasError_ (false), targetDpi_ (DEFAULT_DPI),
       zoomFactor_ (1.0), pageAspectRatio_ (0.0), pageBaseWidthPts_ (0.0),
-      zoomDebounceTimer_ (nullptr), resizeDebounceTimer_ (nullptr) {
+      overLink_ (false), zoomDebounceTimer_ (nullptr),
+      resizeDebounceTimer_ (nullptr) {
 
   mainLayout_= new QVBoxLayout (this);
   mainLayout_->setContentsMargins (0, 0, 0, 0);
@@ -68,10 +71,13 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
   pageLayout_->setAlignment (Qt::AlignHCenter);
 
   scrollArea_->setWidget (contentWidget_);
-  scrollArea_->viewport ()->installEventFilter (this);
-  scrollArea_->viewport ()->setCursor (Qt::OpenHandCursor);
 
   // QScroller 配置（参考 Okular）
+  // QScroller::scroller() installs its own eventFilter on the viewport,
+  // which intercepts MouseMove events before our eventFilter can process them
+  // for link hover detection. We manually drive QScroller via handleInput()
+  // in our own eventFilter, so we remove QScroller's automatic eventFilter
+  // to gain full control over the event flow.
   scroller_= QScroller::scroller (scrollArea_->viewport ());
   QScrollerProperties prop;
   prop.setScrollMetric (QScrollerProperties::DecelerationFactor, 0.3);
@@ -83,6 +89,19 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
                         QScrollerProperties::OvershootAlwaysOff);
   prop.setScrollMetric (QScrollerProperties::DragStartDistance, 0.0);
   scroller_->setScrollerProperties (prop);
+
+  // Remove QScroller's eventFilter — we manually forward events via
+  // handleInput()
+  scrollArea_->viewport ()->removeEventFilter (scroller_);
+
+  // Make contentWidget and its children transparent to mouse events so that
+  // all mouse events go directly to the viewport, where our eventFilter handles
+  // link hover/click, drag-to-scroll, and rect selection.
+  contentWidget_->setAttribute (Qt::WA_TransparentForMouseEvents);
+
+  scrollArea_->viewport ()->installEventFilter (this);
+  scrollArea_->viewport ()->setMouseTracking (true);
+  scrollArea_->viewport ()->setCursor (Qt::OpenHandCursor);
 
   // 保持与 QScrollArea 内部一致的步长（Okular 同款 magic value）
   scrollArea_->verticalScrollBar ()->setSingleStep (20);
@@ -420,7 +439,7 @@ PDFReaderWidget::onRectSelectToggled (bool checked) {
   rectSelectMode_= checked;
   if (scrollArea_ && scrollArea_->viewport ()) {
     QWidget* vp= scrollArea_->viewport ();
-    vp->setMouseTracking (rectSelectMode_);
+    vp->setMouseTracking (true);
     vp->setCursor (rectSelectMode_ ? Qt::CrossCursor : Qt::OpenHandCursor);
   }
   if (!rectSelectMode_ && rubberBand_) {
@@ -919,6 +938,8 @@ PDFReaderWidget::loadFromFile (const QString& filePath, int dpi) {
     return false;
   }
 
+  extractPageLinks ();
+
   // 创建所有页面 label（先不渲染，由 rebuildPages 统一处理可见性）
   for (int i= 0; i < pageCount_; ++i) {
     QLabel* label= new QLabel (contentWidget_);
@@ -926,6 +947,7 @@ PDFReaderWidget::loadFromFile (const QString& filePath, int dpi) {
     label->setAutoFillBackground (true);
     label->setBackgroundRole (QPalette::Base);
     label->setStyleSheet ("QLabel { border: 1px solid #cccccc; }");
+    label->setAttribute (Qt::WA_TransparentForMouseEvents);
     pageLayout_->addWidget (label);
   }
 
@@ -946,6 +968,7 @@ PDFReaderWidget::clear () {
   pageAspectRatio_ = 0.0;
   pageBaseWidthPts_= 0.0;
   pageAspectRatios_.clear ();
+  clearPageLinks ();
   pageCache_.clear ();
 
   QLayoutItem* item;
@@ -957,6 +980,166 @@ PDFReaderWidget::clear () {
   }
 
   updatePageNavigation ();
+}
+
+void
+PDFReaderWidget::extractPageLinks () {
+  clearPageLinks ();
+  if (pdfData_.isEmpty () || pageCount_ <= 0) return;
+
+  fz_context* ctx= mupdf_context ();
+  if (!ctx) return;
+
+  fz_document* doc   = nullptr;
+  fz_buffer*   buf   = nullptr;
+  fz_stream*   stream= nullptr;
+
+  fz_var (doc);
+  fz_var (buf);
+  fz_var (stream);
+
+  fz_try (ctx) {
+    buf= fz_new_buffer_from_copied_data (
+        ctx, reinterpret_cast<const unsigned char*> (pdfData_.constData ()),
+        pdfData_.size ());
+    stream= fz_open_buffer (ctx, buf);
+    doc   = fz_open_document_with_stream (ctx, "pdf", stream);
+    if (!doc) fz_throw (ctx, FZ_ERROR_GENERIC, "Failed to open PDF");
+
+    pageLinks_.resize (pageCount_);
+    for (int i= 0; i < pageCount_; ++i) {
+      fz_page* page= fz_load_page (ctx, doc, i);
+      if (!page) continue;
+      fz_link* links= fz_load_links (ctx, page);
+      if (links) {
+        fz_rect pageBounds= fz_bound_page (ctx, page);
+        float   pageW     = pageBounds.x1 - pageBounds.x0;
+        float   pageH     = pageBounds.y1 - pageBounds.y0;
+        for (fz_link* link= links; link; link= link->next) {
+          PdfLink pl;
+          pl.uri = QString::fromUtf8 (link->uri);
+          pl.page= -1;
+          // normalized coordinates
+          // MuPDF link rects and fz_bound_page both use the same coordinate
+          // space, so no Y-flip is needed — just normalize relative to the
+          // page box origin.
+          if (pageW > 0 && pageH > 0) {
+            pl.rect= QRectF ((link->rect.x0 - pageBounds.x0) / pageW,
+                             (link->rect.y0 - pageBounds.y0) / pageH,
+                             (link->rect.x1 - link->rect.x0) / pageW,
+                             (link->rect.y1 - link->rect.y0) / pageH);
+          }
+          // Resolve internal links to page numbers
+          if (pl.uri.startsWith ("#") || pl.uri.startsWith ("#nameddest=") ||
+              pl.uri.startsWith ("#page=")) {
+            float       xp= 0, yp= 0;
+            fz_location loc= fz_resolve_link (ctx, doc, link->uri, &xp, &yp);
+            if (loc.page >= 0) {
+              pl.page= loc.page; // 0-based page index
+            }
+          }
+          pageLinks_[i].append (pl);
+        }
+        fz_drop_link (ctx, links);
+      }
+      fz_drop_page (ctx, page);
+    }
+  }
+  fz_catch (ctx) {
+    qWarning () << "MuPDF link extraction error:" << fz_caught_message (ctx);
+  }
+
+  if (stream) fz_drop_stream (ctx, stream);
+  if (buf) fz_drop_buffer (ctx, buf);
+  if (doc) fz_drop_document (ctx, doc);
+}
+
+void
+PDFReaderWidget::clearPageLinks () {
+  pageLinks_.clear ();
+  currentLink_= PdfLink ();
+  overLink_   = false;
+}
+
+PdfLink
+PDFReaderWidget::linkAtPos (const QPoint& contentPos) const {
+  if (pageLinks_.isEmpty ()) return PdfLink ();
+
+  int childCount= pageLayout_->count ();
+  for (int i= 0; i < childCount && i < pageCount_; ++i) {
+    QLayoutItem* item= pageLayout_->itemAt (i);
+    if (!item) continue;
+    QLabel* label= qobject_cast<QLabel*> (item->widget ());
+    if (!label) continue;
+    QRect labelGeom= label->geometry ();
+    if (!labelGeom.contains (contentPos)) continue;
+
+    if (i < pageLinks_.size () && !pageLinks_[i].isEmpty ()) {
+      QRect  contents= label->contentsRect ();
+      QPoint labelLocal (contentPos.x () - labelGeom.x (),
+                         contentPos.y () - labelGeom.y ());
+      double nx= static_cast<double> (labelLocal.x () - contents.x ()) /
+                 qMax (1, contents.width ());
+      double ny= static_cast<double> (labelLocal.y () - contents.y ()) /
+                 qMax (1, contents.height ());
+      for (const PdfLink& link : pageLinks_[i]) {
+        if (link.rect.contains (nx, ny)) {
+          return link;
+        }
+      }
+    }
+  }
+  return PdfLink ();
+}
+
+void
+PDFReaderWidget::handleLinkClick (const PdfLink& link) {
+  if (link.uri.isEmpty ()) return;
+
+  // Internal link with resolved page number
+  if (link.page >= 0) {
+    goToPage (link.page + 1); // convert 0-based to 1-based
+    Q_EMIT linkClicked (link.uri);
+    return;
+  }
+
+  QUrl url (link.uri);
+  if (url.isValid () && !url.scheme ().isEmpty () && url.scheme () != "file") {
+    QDesktopServices::openUrl (url);
+    Q_EMIT linkClicked (link.uri);
+  }
+  else {
+    Q_EMIT linkClicked (link.uri);
+  }
+}
+
+void
+PDFReaderWidget::updateLinkCursor (const QPoint& contentPos) {
+  if (rectSelectMode_) return;
+
+  PdfLink link= linkAtPos (contentPos);
+  if (!link.uri.isEmpty ()) {
+    currentLink_= link;
+    overLink_   = true;
+    scrollArea_->viewport ()->setCursor (Qt::PointingHandCursor);
+  }
+  else {
+    currentLink_= PdfLink ();
+    overLink_   = false;
+    scrollArea_->viewport ()->setCursor (Qt::OpenHandCursor);
+  }
+}
+
+void
+PDFReaderWidget::setTestLinks (int page, const QVector<PdfLink>& links) {
+  if (page < 0) return;
+  if (page >= pageLinks_.size ()) pageLinks_.resize (page + 1);
+  pageLinks_[page]= links;
+}
+
+bool
+PDFReaderWidget::isOverLink () const {
+  return overLink_;
 }
 
 void
@@ -1019,6 +1202,17 @@ PDFReaderWidget::keyPressEvent (QKeyEvent* event) {
 bool
 PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
   if (watched == scrollArea_->viewport ()) {
+    // Pre-compute viewport and content coordinates for mouse events.
+    QPoint viewportPos, contentPos;
+    bool   isMouseEvent= (event->type () == QEvent::MouseMove ||
+                        event->type () == QEvent::MouseButtonPress ||
+                        event->type () == QEvent::MouseButtonRelease);
+    if (isMouseEvent) {
+      QMouseEvent* me= static_cast<QMouseEvent*> (event);
+      viewportPos    = me->pos ();
+      contentPos=
+          contentWidget_->mapFrom (scrollArea_->viewport (), me->pos ());
+    }
     if (event->type () == QEvent::Wheel) {
       QWheelEvent* wheelEvent= static_cast<QWheelEvent*> (event);
       if (wheelEvent->modifiers () & Qt::ControlModifier) {
@@ -1071,6 +1265,13 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
       }
     }
     // ============================================================
+    // Link hover detection (no button pressed)
+    // ============================================================
+    else if (!rectSelectMode_ && !browseDragging_ &&
+             event->type () == QEvent::MouseMove) {
+      updateLinkCursor (contentPos);
+    }
+    // ============================================================
     // Browse (hand) tool: default drag-to-scroll behavior
     // ============================================================
     else if (!rectSelectMode_ && event->type () == QEvent::MouseButtonPress) {
@@ -1079,13 +1280,9 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
         browseDragging_    = true;
         browseDragActive_  = false;
         browseDragStartPos_= mouseEvent->globalPosition ().toPoint ();
-        scroller_->handleInput (QScroller::InputPress, mouseEvent->pos (),
+        scroller_->handleInput (QScroller::InputPress, viewportPos,
                                 mouseEvent->timestamp ());
         scrollArea_->viewport ()->setCursor (Qt::ClosedHandCursor);
-#ifdef LIII_DEBUG
-        cout << "Browse press at " << mouseEvent->pos ().x () << ","
-             << mouseEvent->pos ().y () << "\n";
-#endif
         mouseEvent->accept ();
         return true;
       }
@@ -1098,11 +1295,11 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
               .manhattanLength ();
       if (!browseDragActive_ && delta > QApplication::startDragDistance ()) {
         browseDragActive_= true;
-#ifdef LIII_DEBUG
-        cout << "Browse drag activated, delta=" << delta << "\n";
-#endif
       }
-      scroller_->handleInput (QScroller::InputMove, mouseEvent->pos (),
+      if (!browseDragActive_) {
+        updateLinkCursor (contentPos);
+      }
+      scroller_->handleInput (QScroller::InputMove, viewportPos,
                               mouseEvent->timestamp ());
       mouseEvent->accept ();
       return true;
@@ -1112,12 +1309,12 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
       QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
       if (mouseEvent->button () == Qt::LeftButton) {
         browseDragging_= false;
-        scrollArea_->viewport ()->setCursor (Qt::OpenHandCursor);
-        scroller_->handleInput (QScroller::InputRelease, mouseEvent->pos (),
+        scroller_->handleInput (QScroller::InputRelease, viewportPos,
                                 mouseEvent->timestamp ());
-#ifdef LIII_DEBUG
-        cout << "Browse release, wasDrag=" << browseDragActive_ << "\n";
-#endif
+        if (!browseDragActive_ && overLink_) {
+          handleLinkClick (currentLink_);
+        }
+        scrollArea_->viewport ()->setCursor (Qt::OpenHandCursor);
         mouseEvent->accept ();
         return true;
       }
@@ -1129,9 +1326,7 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
       QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
       if (mouseEvent->button () == Qt::LeftButton) {
         rectSelectDragging_= true;
-        rectSelectStart_=
-            scrollArea_->viewport ()->mapToGlobal (mouseEvent->pos ());
-        rectSelectStart_= contentWidget_->mapFromGlobal (rectSelectStart_);
+        rectSelectStart_   = contentPos;
         if (!rubberBand_) {
           rubberBand_= new QRubberBand (QRubberBand::Rectangle, contentWidget_);
         }
@@ -1143,13 +1338,10 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
     }
     else if (rectSelectMode_ && rectSelectDragging_ &&
              event->type () == QEvent::MouseMove) {
-      QMouseEvent* mouseEvent= static_cast<QMouseEvent*> (event);
-      QPoint       currentPos= contentWidget_->mapFromGlobal (
-          scrollArea_->viewport ()->mapToGlobal (mouseEvent->pos ()));
-      QRect rect (rectSelectStart_, currentPos);
+      QRect rect (rectSelectStart_, contentPos);
       rect= rect.normalized ();
       rubberBand_->setGeometry (rect);
-      mouseEvent->accept ();
+      static_cast<QMouseEvent*> (event)->accept ();
       return true;
     }
     else if (rectSelectMode_ && rectSelectDragging_ &&
