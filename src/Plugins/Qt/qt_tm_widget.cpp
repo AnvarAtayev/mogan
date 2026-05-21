@@ -1014,6 +1014,8 @@ qt_tm_widget_rep::sync_chat_tab_mode () {
 
     if (!chatContentWidget) {
       chatContentWidget= new QTChatTabWidget (centralwidget ());
+      static_cast<QTChatTabWidget*> (chatContentWidget)
+          ->setParentTmWidget (this);
     }
     static_cast<QTChatTabWidget*> (chatContentWidget)
         ->ensure_new_conversation ();
@@ -1070,10 +1072,26 @@ qt_tm_widget_rep::update_visibility () {
   bool new_auxVisibility   = visibility[11];
   bool new_titleVisibility = visibility[0];
 
-  if (startupTabMode || chatTabMode) {
+  if (startupTabMode) {
     new_mainVisibility  = false;
     new_menuVisibility  = false;
     new_modeVisibility  = false;
+    new_focusVisibility = false;
+    new_userVisibility  = false;
+    new_statusVisibility= false;
+    new_sideVisibility  = false;
+    new_leftVisibility  = false;
+    new_bottomVisibility= false;
+    new_extraVisibility = false;
+    new_auxVisibility   = false;
+    new_tabVisibility   = true;
+    new_titleVisibility = true;
+  }
+
+  if (chatTabMode) {
+    new_mainVisibility  = false;
+    new_menuVisibility  = false;
+    new_modeVisibility  = true;
     new_focusVisibility = false;
     new_userVisibility  = false;
     new_statusVisibility= false;
@@ -2048,7 +2066,6 @@ qt_tm_embedded_widget_rep::write (slot s, blackbox index, widget w) {
     check_type_void (index, s);
     main_widget= w;
   } break;
-    /// FIXME: decide what to do with these for embedded widgets
   case SLOT_MAIN_MENU:
   case SLOT_MODE_ICONS:
   case SLOT_FOCUS_ICONS: {
@@ -2056,10 +2073,11 @@ qt_tm_embedded_widget_rep::write (slot s, blackbox index, widget w) {
     QWidget* p= qwid;
     while (p) {
       if (QTChatTabWidget* chat= qobject_cast<QTChatTabWidget*> (p)) {
-        if (s == SLOT_MAIN_MENU) chat->install_chat_menu_bar (w);
-        else if (s == SLOT_MODE_ICONS) chat->set_chat_mode_icons (w);
-        else if (s == SLOT_FOCUS_ICONS) chat->set_chat_focus_icons (w);
-        return;
+        qt_tm_widget_rep* mainW= chat->parentTmWidget ();
+        if (mainW) {
+          mainW->write (s, index, w);
+          return;
+        }
       }
       p= p->parentWidget ();
     }

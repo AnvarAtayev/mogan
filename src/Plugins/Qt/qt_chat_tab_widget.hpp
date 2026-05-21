@@ -29,9 +29,9 @@ class QSpacerItem;
 class QStackedWidget;
 class QString;
 class QTimer;
-class QToolBar;
 class QVBoxLayout;
 class QEvent;
+class qt_tm_widget_rep;
 
 /**
  * @brief 聊天会话的生成状态。
@@ -312,22 +312,16 @@ public:
   void ensure_new_conversation ();
 
   /**
-   * @brief 为 Chat Tab 安装主菜单栏内容。
-   * @param menuWidget 菜单 widget。
+   * @brief 设置主窗口 widget 指针，用于工具栏转发。
+   * @param tm 主窗口 qt_tm_widget_rep 指针。
    */
-  void install_chat_menu_bar (widget menuWidget);
+  void setParentTmWidget (qt_tm_widget_rep* tm) { parentTmWidget_= tm; }
 
   /**
-   * @brief 设置 Chat Tab 的模式工具栏内容。
-   * @param modeWidget 模式图标 widget。
+   * @brief 获取主窗口 widget 指针。
+   * @return 主窗口 qt_tm_widget_rep 指针。
    */
-  void set_chat_mode_icons (widget modeWidget);
-
-  /**
-   * @brief 设置 Chat Tab 的焦点工具栏内容。
-   * @param focusWidget 焦点图标 widget。
-   */
-  void set_chat_focus_icons (widget focusWidget);
+  qt_tm_widget_rep* parentTmWidget () const { return parentTmWidget_; }
 
   /**
    * @brief 被通知 Scheme 侧生成状态变更。
@@ -384,16 +378,14 @@ private:
   QList<ChatConversationPanel*> conversations_;      ///< 所有会话面板的列表。
   ChatConversationPanel*        activeConversation_; ///< 当前激活的会话。
   ChatSessionManager            sessionManager_;     ///< 会话管理器。
-  bool         sidebarCollapsed_;     ///< 侧边栏当前是否处于收起状态。
-  int          sidebarExpandedWidth_; ///< 侧边栏展开时的宽度（像素）。
-  QToolBar*    chatMenuToolBar_;      ///< Chat Tab 的菜单工具栏。
-  QToolBar*    chatModeToolBar_;      ///< Chat Tab 的模式工具栏。
-  QToolBar*    chatFocusToolBar_;     ///< Chat Tab 的焦点工具栏。
-  bool         multiSelectMode_;      ///< 是否处于多选模式（活跃会话）。
-  bool         archiveSelectMode_;    ///< 是否处于多选模式（归档会话）。
-  QWidget*     multiSelectBar_;       ///< 多选模式下的批量操作栏。
-  QPushButton* batchArchiveBtn_;      ///< 批量归档按钮（归档区多选时隐藏）。
-  QLineEdit*   searchEdit_;           ///< 会话搜索输入框。
+  bool              sidebarCollapsed_;        ///< 侧边栏当前是否处于收起状态。
+  int               sidebarExpandedWidth_;    ///< 侧边栏展开时的宽度（像素）。
+  qt_tm_widget_rep* parentTmWidget_= nullptr; ///< 主窗口指针，用于工具栏转发。
+  bool              multiSelectMode_;   ///< 是否处于多选模式（活跃会话）。
+  bool              archiveSelectMode_; ///< 是否处于多选模式（归档会话）。
+  QWidget*          multiSelectBar_;    ///< 多选模式下的批量操作栏。
+  QPushButton*      batchArchiveBtn_;   ///< 批量归档按钮（归档区多选时隐藏）。
+  QLineEdit*        searchEdit_;        ///< 会话搜索输入框。
   QList<ChatConversationPanel*>
       zombiePanels_; ///< 已删除的会话面板（隐藏但未释放）。
 };
