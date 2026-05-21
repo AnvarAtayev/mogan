@@ -131,7 +131,12 @@
     (if (zero? (run-pdflatex tex-path pdflatex-bin))
         (if (pdf-page-empty? log-path)
             (flush-verbatim "TikZ produced an empty image (0x0 bounding box)")
-            (flush-image pdf-path width height))
+            (let ((final-width width)
+                  (final-height height))
+              (when (and (string=? width "0px") (string=? height "0px"))
+                (set! final-width "0.3par")
+                (set! final-height "0px"))
+              (flush-image pdf-path final-width final-height)))
         (begin
           (flush-verbatim "pdflatex error")
           (flush-verbatim "")))))
