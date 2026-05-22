@@ -114,3 +114,131 @@
 
 (converter latex-tree texmacs-tree
   (:function latex->texmacs))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Post-processing imported LaTeX: insert space between d and differential
+;; variables so they are not merged into a single operator in math mode.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (is-letter-char? c)
+  (and (char? c)
+       (or (and (char>=? c #\a) (char<=? c #\z))
+           (and (char>=? c #\A) (char<=? c #\Z)))))
+
+(define (is-word-boundary-before? s i)
+  (or (= i 0)
+      (not (is-letter-char? (string-ref s (- i 1))))))
+
+(define (is-word-boundary-after? s i)
+  (or (= i (- (string-length s) 1))
+      (not (is-letter-char? (string-ref s (+ i 1))))))
+
+(define (match-differential s i)
+  (and (< i (- (string-length s) 1))
+       (char=? (string-ref s i) #\d)
+       (char=? (string-ref s (+ i 1)) #\*)
+       (let ((rest (substring s (+ i 2) (string-length s))))
+         (cond ((or (string-starts? rest "x")
+                    (string-starts? rest "y")
+                    (string-starts? rest "z")
+                    (string-starts? rest "r"))
+                (cons 1 (substring rest 0 1)))
+               ((string-starts? rest "<rho>")
+                (cons 5 "<rho>"))
+               ((string-starts? rest "<varrho>")
+                (cons 8 "<varrho>"))
+               ((string-starts? rest "<theta>")
+                (cons 7 "<theta>"))
+               ((string-starts? rest "<vartheta>")
+                (cons 10 "<vartheta>"))
+               (else #f)))))
+
+(define (transform-math-string s)
+  (let* ((n (string-length s))
+         (res '()))
+    (let loop ((i 0) (last-idx 0))
+      (cond ((>= i n)
+             (if (null? res) s
+                 (begin
+                   (if (< last-idx n)
+                       (set! res (append res (list (substring s last-idx n)))))
+                   (cons 'concat res))))
+            (else
+             (let ((match (match-differential s i)))
+               (if (and match
+                        (is-word-boundary-before? s i)
+                        (is-word-boundary-after? s (+ i 1 (car match))))
+                   (let* ((match-len (car match))
+                          (var (cdr match)))
+                     (if (> i last-idx)
+                         (set! res (append res (list (substring s last-idx i)))))
+                     (set! res (append res (list "d" " " var)))
+                     (loop (+ i 2 match-len) (+ i 2 match-len)))
+                   (loop (+ i 1) last-idx))))))))
+
+(define (transform-concat-children children)
+  (cond ((null? children) '())
+        ((and (pair? children) (pair? (cdr children)))
+         (let* ((c1 (car children))
+                (c2 (cadr children)))
+           (if (and (string? c1) (string? c2)
+                    (or (string=? c2 "<rho>") (string=? c2 "<varrho>")
+                        (string=? c2 "<theta>") (string=? c2 "<vartheta>"))
+                    (let ((len (string-length c1)))
+                      (and (> len 0)
+                           (char=? (string-ref c1 (- len 1)) #\d)
+                           (or (= len 1)
+                               (not (is-letter-char? (string-ref c1 (- len 2))))))))
+               (let* ((len (string-length c1))
+                      (prefix (if (> len 1) (substring c1 0 (- len 1)) #f))
+                      (spaced-part (if prefix (list prefix "d" " " c2) (list "d" " " c2))))
+                 (append spaced-part (transform-concat-children (cddr children))))
+               (cons (car children) (transform-concat-children (cdr children))))))
+        (else children)))
+
+(define math-environments
+  '(math equation equation* eqnarray eqnarray* align align* multline multline*))
+
+(define (upgrade-latex-differentials-stree t in-math)
+  (cond ((string? t)
+         (if in-math
+             (transform-math-string t)
+             t))
+        ((pair? t)
+         (let* ((head (car t))
+                (next-in-math (or in-math (memq head math-environments))))
+           (if (and next-in-math (eq? head 'concat))
+               (let* ((new-children (map (lambda (x) (upgrade-latex-differentials-stree x #t)) (cdr t)))
+                      (transformed-children (transform-concat-children new-children)))
+                 (cons 'concat transformed-children))
+               (cons head (map (lambda (x) (upgrade-latex-differentials-stree x next-in-math)) (cdr t))))))
+        (else t)))
+
+(define latex->texmacs-original latex->texmacs)
+
+(tm-define (latex->texmacs t)
+  (let* ((res (latex->texmacs-original t))
+         (st (tree->stree res))
+         (new-st (upgrade-latex-differentials-stree st #f)))
+    (stree->tree new-st)))
+
+(define latex-document->texmacs-original latex-document->texmacs)
+
+(tm-define (latex-document->texmacs x . opts)
+  (let* ((res (apply latex-document->texmacs-original (cons x opts)))
+         (st (tree->stree res))
+         (new-st (upgrade-latex-differentials-stree st #f)))
+    (stree->tree new-st)))
+
+;; Re-register converters so that `converter-function` table points
+;; to our wrapper definitions.  The `converter` macro resolves the
+;; function symbol at registration time; simply redefining the symbol
+;; afterwards leaves the old reference in the table.
+(converter latex-tree texmacs-tree
+  (:function latex->texmacs))
+(converter latex-document texmacs-tree
+  (:function-with-options latex-document->texmacs)
+  (:option "latex->texmacs:fallback-on-pictures" "on")
+  (:option "latex->texmacs:source-tracking" "off")
+  (:option "latex->texmacs:conservative" "off")
+  (:option "latex->texmacs:transparent-source-tracking" "off"))
