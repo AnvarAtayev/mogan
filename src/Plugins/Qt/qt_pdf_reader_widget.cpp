@@ -11,13 +11,16 @@
 #include <QClipboard>
 #include <QDebug>
 #include <QDesktopServices>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFrame>
+#include <QGestureEvent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPinchGesture>
 #include <QResizeEvent>
 #include <QScreen>
 #include <QScrollBar>
@@ -25,6 +28,10 @@
 #include <QToolButton>
 #include <QUrl>
 #include <QWheelEvent>
+
+#ifdef Q_OS_MACOS
+#include <QNativeGestureEvent>
+#endif
 
 #include "MuPDF/mupdf_renderer.hpp"
 #include "qt_dpi_utils.hpp"
@@ -37,6 +44,22 @@ namespace {
 constexpr float kRenderOversample= 1.5F;
 constexpr float kMinRenderScale  = 0.1F;
 constexpr float kMaxRenderScale  = 8.0F;
+
+/**
+ * @brief Check if the zoom modifier key is pressed.
+ *
+ * On macOS, the standard zoom modifier is Cmd (MetaModifier).
+ * We also accept Ctrl (ControlModifier) for compatibility.
+ * On other platforms, only Ctrl is accepted.
+ */
+bool
+isZoomModifier (Qt::KeyboardModifiers modifiers) {
+#ifdef Q_OS_MACOS
+  return (modifiers & Qt::MetaModifier) || (modifiers & Qt::ControlModifier);
+#else
+  return modifiers & Qt::ControlModifier;
+#endif
+}
 } // namespace
 
 PDFReaderWidget::PDFReaderWidget (QWidget* parent)
@@ -51,7 +74,9 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
       pageCount_ (0), hasError_ (false), targetDpi_ (DEFAULT_DPI),
       zoomFactor_ (1.0), pageAspectRatio_ (0.0), pageBaseWidthPts_ (0.0),
       overLink_ (false), zoomDebounceTimer_ (nullptr),
-      resizeDebounceTimer_ (nullptr) {
+      resizeDebounceTimer_ (nullptr), gestureSafetyTimer_ (nullptr),
+      inPinchGesture_ (false), blockRender_ (false), pinchStartZoom_ (1.0),
+      renderCallCount_ (0) {
 
   mainLayout_= new QVBoxLayout (this);
   mainLayout_->setContentsMargins (0, 0, 0, 0);
@@ -104,6 +129,7 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
   scrollArea_->viewport ()->installEventFilter (this);
   scrollArea_->viewport ()->setMouseTracking (true);
   scrollArea_->viewport ()->setCursor (Qt::OpenHandCursor);
+  grabGesture (Qt::PinchGesture);
 
   // 保持与 QScrollArea 内部一致的步长（Okular 同款 magic value）
   scrollArea_->verticalScrollBar ()->setSingleStep (20);
@@ -143,6 +169,12 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
   resizeDebounceTimer_->setInterval (RESIZE_DEBOUNCE_MS);
   connect (resizeDebounceTimer_, &QTimer::timeout, this,
            &PDFReaderWidget::rebuildPages);
+
+  gestureSafetyTimer_= new QTimer (this);
+  gestureSafetyTimer_->setSingleShot (true);
+  gestureSafetyTimer_->setInterval (GESTURE_SAFETY_TIMEOUT_MS);
+  connect (gestureSafetyTimer_, &QTimer::timeout, this,
+           &PDFReaderWidget::finishPinchGesture);
 }
 
 PDFReaderWidget::~PDFReaderWidget () {}
@@ -304,6 +336,89 @@ PDFReaderWidget::setupToolBar () {
 void
 PDFReaderWidget::updateZoomDisplay () {
   if (!zoomCombo_) return;
+
+  int     percent= qRound (zoomFactor_ * 100);
+  QString text   = QString::number (percent) + "%";
+
+  bool blocked= zoomCombo_->blockSignals (true);
+  zoomCombo_->setText (text);
+  zoomCombo_->blockSignals (blocked);
+}
+
+void
+PDFReaderWidget::applyZoomToLabels () {
+  int width= pageWidth ();
+  if (width <= 0) return;
+
+  int childCount= pageLayout_->count ();
+  for (int i= 0; i < childCount && i < pageCount_; ++i) {
+    QLayoutItem* item= pageLayout_->itemAt (i);
+    if (!item) continue;
+    QLabel* label= qobject_cast<QLabel*> (item->widget ());
+    if (!label) continue;
+    double aspect= (i < pageAspectRatios_.size ()) ? pageAspectRatios_[i]
+                                                   : pageAspectRatio_;
+    if (aspect <= 0.0) aspect= 1.414;
+    int height= qMax (1, qRound (width * aspect));
+    label->setFixedSize (width, height);
+  }
+}
+
+void
+PDFReaderWidget::startPinchGesture () {
+  if (inPinchGesture_) return;
+  inPinchGesture_= true;
+  blockRender_   = true;
+  pinchStartZoom_= zoomFactor_;
+  if (scroller_) scroller_->stop ();
+  int childCount= pageLayout_->count ();
+  for (int i= 0; i < childCount && i < pageCount_; ++i) {
+    QLayoutItem* item= pageLayout_->itemAt (i);
+    if (!item) continue;
+    QLabel* label= qobject_cast<QLabel*> (item->widget ());
+    if (label) label->setScaledContents (true);
+  }
+}
+
+void
+PDFReaderWidget::finishPinchGesture () {
+  if (!inPinchGesture_) return;
+  inPinchGesture_= false;
+  blockRender_   = false;
+
+  // Sync-render the correctly-sized pixmap before turning off
+  // scaledContents, so the label does not flicker from the old
+  // stretched image back to a mismatched original pixmap.
+  if (!pdfData_.isEmpty () && pageCount_ > 0) rebuildPages ();
+  updateZoomDisplay ();
+
+  int childCount= pageLayout_->count ();
+  for (int i= 0; i < childCount && i < pageCount_; ++i) {
+    QLayoutItem* item= pageLayout_->itemAt (i);
+    if (!item) continue;
+    QLabel* label= qobject_cast<QLabel*> (item->widget ());
+    if (label) label->setScaledContents (false);
+  }
+}
+
+void
+PDFReaderWidget::simulatePinchGesture (Qt::GestureState state,
+                                       double           scaleFactor) {
+  if (state == Qt::GestureStarted) {
+    startPinchGesture ();
+    return;
+  }
+  if (state == Qt::GestureUpdated) {
+    double newZoom= qBound (MIN_ZOOM, pinchStartZoom_ * scaleFactor, MAX_ZOOM);
+    if (qAbs (newZoom - zoomFactor_) > 0.001) {
+      zoomFactor_= newZoom;
+      applyZoomToLabels ();
+    }
+    return;
+  }
+  if (state == Qt::GestureFinished || state == Qt::GestureCanceled) {
+    finishPinchGesture ();
+  }
   int percent= qRound (zoomFactor_ * 100);
   zoomCombo_->setText (QString::number (percent) + "%");
 }
@@ -608,6 +723,11 @@ PDFReaderWidget::pageWidth () const {
 bool
 PDFReaderWidget::renderPageToLabel (int pageNumber, QLabel* label,
                                     int targetWidth) {
+  ++renderCallCount_;
+#ifdef LIII_DEBUG
+  cout << "renderPageToLabel page=" << pageNumber << " width=" << targetWidth
+       << "\n";
+#endif
   // 计算目标高度（优先使用预缓存的宽高比）
   double aspectRatio= pageAspectRatio_;
   if (pageNumber >= 0 && pageNumber < pageAspectRatios_.size ()) {
@@ -807,6 +927,8 @@ PDFReaderWidget::rebuildPages () {
   int viewportHeight= scrollArea_->viewport ()->height ();
   int minY          = scrollY - PRELOAD_MARGIN;
   int maxY          = scrollY + viewportHeight + PRELOAD_MARGIN;
+
+  if (blockRender_) return;
 
   // 第二轮：只渲染可见及预加载范围内的页面
   for (int i= 0; i < childCount && i < pageCount_; ++i) {
@@ -1192,7 +1314,7 @@ PDFReaderWidget::keyPressEvent (QKeyEvent* event) {
     return;
   }
 
-  if (event->modifiers () & Qt::ControlModifier) {
+  if (isZoomModifier (event->modifiers ())) {
     switch (event->key ()) {
     case Qt::Key_Plus:
     case Qt::Key_Equal:
@@ -1214,6 +1336,78 @@ PDFReaderWidget::keyPressEvent (QKeyEvent* event) {
 }
 
 bool
+PDFReaderWidget::event (QEvent* event) {
+  if (event->type () == QEvent::Gesture) {
+    QGestureEvent* gestureEvent= static_cast<QGestureEvent*> (event);
+    if (QPinchGesture* pinch= qobject_cast<QPinchGesture*> (
+            gestureEvent->gesture (Qt::PinchGesture))) {
+      // Handle QPinchGesture on all platforms (including macOS).
+      // Qt 6 maps trackpad pinch to QPinchGesture on macOS as well.
+      if (pinch->state () == Qt::GestureStarted) {
+        startPinchGesture ();
+        gestureSafetyTimer_->start ();
+        gestureEvent->accept (pinch);
+        return true;
+      }
+      if (pinch->changeFlags () & QPinchGesture::ScaleFactorChanged) {
+        double newZoom= qBound (
+            MIN_ZOOM, pinchStartZoom_ * pinch->totalScaleFactor (), MAX_ZOOM);
+        if (qAbs (newZoom - zoomFactor_) > 0.001) {
+          zoomFactor_= newZoom;
+          applyZoomToLabels ();
+        }
+        gestureSafetyTimer_->start ();
+        gestureEvent->accept (pinch);
+        return true;
+      }
+      if (pinch->state () == Qt::GestureFinished ||
+          pinch->state () == Qt::GestureCanceled) {
+        gestureSafetyTimer_->stop ();
+        finishPinchGesture ();
+        gestureEvent->accept (pinch);
+        return true;
+      }
+      gestureEvent->accept (pinch);
+      return true;
+    }
+  }
+#ifdef Q_OS_MACOS
+  if (event->type () == QEvent::NativeGesture) {
+    QNativeGestureEvent* nativeEvent= static_cast<QNativeGestureEvent*> (event);
+    Qt::NativeGestureType gestureType= nativeEvent->gestureType ();
+    // If QPinchGesture is already handling the pinch, ignore native
+    // gesture to avoid double-scaling.
+    if (inPinchGesture_ && (gestureType == Qt::BeginNativeGesture ||
+                            gestureType == Qt::EndNativeGesture ||
+                            gestureType == Qt::ZoomNativeGesture)) {
+      return true;
+    }
+    if (gestureType == Qt::BeginNativeGesture) {
+      startPinchGesture ();
+      gestureSafetyTimer_->start ();
+      return true;
+    }
+    if (gestureType == Qt::EndNativeGesture) {
+      gestureSafetyTimer_->stop ();
+      finishPinchGesture ();
+      return true;
+    }
+    if (gestureType == Qt::ZoomNativeGesture) {
+      if (!inPinchGesture_) startPinchGesture ();
+      gestureSafetyTimer_->start ();
+      double delta= nativeEvent->value ();
+      if (qAbs (delta) > 0.001) {
+        zoomFactor_= qBound (MIN_ZOOM, zoomFactor_ * (1.0 + delta), MAX_ZOOM);
+        applyZoomToLabels ();
+      }
+      return true;
+    }
+  }
+#endif
+  return QWidget::event (event);
+}
+
+bool
 PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
   if (watched == scrollArea_->viewport ()) {
     // Pre-compute viewport and content coordinates for mouse events.
@@ -1229,7 +1423,7 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
     }
     if (event->type () == QEvent::Wheel) {
       QWheelEvent* wheelEvent= static_cast<QWheelEvent*> (event);
-      if (wheelEvent->modifiers () & Qt::ControlModifier) {
+      if (isZoomModifier (wheelEvent->modifiers ())) {
         int delta= wheelEvent->angleDelta ().y ();
         if (delta != 0) {
           double factor= 1.0 + static_cast<double> (delta) / 500.0;
