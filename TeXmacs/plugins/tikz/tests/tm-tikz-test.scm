@@ -1,5 +1,4 @@
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; MODULE      : tm-tikz-test.scm
 ;; DESCRIPTION : TikZ Binary plugin (pdflatex)
@@ -9,8 +8,7 @@
 ;; It comes WITHOUT ANY WARRANTY WHATSOEVER. For details, see the file LICENSE
 ;; in the root directory or <http://www.gnu.org/licenses/gpl-3.0.html>.
 ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (import (scheme base)
   (liii check)
@@ -77,9 +75,9 @@
   ) ;let
 ) ;define
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tests for wrap-tikz-code
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (check
   (wrap-tikz-code "\\documentclass{article}\n\\begin{document}\n\\end{document}")
@@ -141,9 +139,9 @@
   "\\documentclass[tikz]{standalone}\n\\begin{document}\n\\usetikzlibrary{shapes.geometric}\n\n\\end{document}"
 )
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tests for parse-magic-line
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (check (parse-magic-line "%") => (list "0px" "0px"))
 
@@ -159,16 +157,16 @@
 
 (check (parse-magic-line "% -width 0.8par -height") => (list "0.8par" "0px"))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; image-valid? helper
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define (image-valid? path)
   (and (file-exists? path) (> (path-getsize path) 10)))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tests for image-valid?
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define test-empty-path "/tmp/tikz-test-empty.txt")
 
@@ -179,16 +177,16 @@
 (check (image-valid? "/tmp/nonexistent-file-12345.txt") => #f)
 (check (image-valid? test-empty-path) => #f)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; pdf-page-empty? helper
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define (pdf-page-empty? log-path)
+(define (get-pdf-page-size log-path)
   (let ((p (open-input-file log-path)))
     (let loop ()
       (let ((line (read-line p)))
         (if (eof-object? line)
-            (begin (close-input-port p) #t)
+            (begin (close-input-port p) #f)
             (if (string-contains? line "papersize=")
                 (let* ((parts (string-split line #\=))
                        (size-part (cadr parts))
@@ -198,30 +196,63 @@
                        (w (string->number w-str))
                        (h (string->number h-str)))
                   (close-input-port p)
-                  (or (not w) (not h)
-                      (<= w 1.0) (<= h 1.0)))
+                  (if (and w h)
+                      (list w h)
+                      #f))
                 (loop)))))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (pdf-page-empty? log-path)
+  (let ((size (get-pdf-page-size log-path)))
+    (if (not size)
+        #t
+        (let ((w (car size))
+              (h (cadr size)))
+          (and (<= w 0.1) (<= h 0.1))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tests for pdf-page-empty?
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define test-log-empty-path "/tmp/tikz-test-log-empty.log")
 (define test-log-valid-path "/tmp/tikz-test-log-valid.log")
+(define test-log-vertical-path "/tmp/tikz-test-log-vertical.log")
+(define test-log-horizontal-path "/tmp/tikz-test-log-horizontal.log")
+(define test-log-point-path "/tmp/tikz-test-log-point.log")
 
 (with-output-to-file test-log-empty-path
   (lambda ()
-    (display "<special> papersize=0.4pt,0.4pt\n")))
+    (display "<special> papersize=0.0pt,0.0pt\n")))
 
 (with-output-to-file test-log-valid-path
   (lambda ()
     (display "<special> papersize=28.85274pt,28.85274pt\n")))
 
+(with-output-to-file test-log-vertical-path
+  (lambda ()
+    (display "<special> papersize=0.4pt,28.85274pt\n")))
+
+(with-output-to-file test-log-horizontal-path
+  (lambda ()
+    (display "<special> papersize=28.85274pt,0.4pt\n")))
+
+(with-output-to-file test-log-point-path
+  (lambda ()
+    (display "<special> papersize=0.4pt,0.4pt\n")))
+
+(check (get-pdf-page-size test-log-empty-path) => (list 0.0 0.0))
+(check (get-pdf-page-size test-log-valid-path) => (list 28.85274 28.85274))
+(check (get-pdf-page-size test-log-vertical-path) => (list 0.4 28.85274))
+(check (get-pdf-page-size test-log-horizontal-path) => (list 28.85274 0.4))
+(check (get-pdf-page-size test-log-point-path) => (list 0.4 0.4))
+
 (check (pdf-page-empty? test-log-empty-path) => #t)
 (check (pdf-page-empty? test-log-valid-path) => #f)
+(check (pdf-page-empty? test-log-vertical-path) => #f)
+(check (pdf-page-empty? test-log-horizontal-path) => #f)
+(check (pdf-page-empty? test-log-point-path) => #f)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Run all tests
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (check-report "TikZ plugin unit tests")
