@@ -40,6 +40,9 @@ private slots:
   void test_cursor_position_iii ();
   void test_performance ();
   void test_math_performance ();
+  void test_in_unicode_range_cyrillic ();
+  void test_roman_cyrillic_fallback ();
+  void test_sys_chinese_cyrillic ();
 };
 
 void
@@ -186,6 +189,48 @@ TestSmartFont::test_math_performance () {
                     "<tau><upsilon><phi><chi><psi><omega>";
   metric ex;
   fn->get_extents (math_text, ex);
+}
+
+void
+TestSmartFont::test_in_unicode_range_cyrillic () {
+  // Cyrillic 字符不应该被当作 CJK
+  QVERIFY (!in_unicode_range ("<#400>", "cjk"));
+  QVERIFY (!in_unicode_range ("<#4FF>", "cjk"));
+  // Cyrillic 字符应该属于 cyrillic range
+  QVERIFY (in_unicode_range ("<#400>", "cyrillic"));
+  QVERIFY (in_unicode_range ("<#4FF>", "cyrillic"));
+  // Latin 字符不应该属于 cyrillic range
+  QVERIFY (!in_unicode_range ("a", "cyrillic"));
+}
+
+void
+TestSmartFont::test_roman_cyrillic_fallback () {
+  // roman 文档中的 Cyrillic 字符应该 fallback 到 default_chinese_font_name
+  font            fn= smart_font ("roman", "rm", "medium", "right", 10, 600);
+  smart_font_rep* fn_rep= (smart_font_rep*) fn.rep;
+  string          c     = utf8_to_cork ("А");
+  int             nr    = fn_rep->resolve (c);
+  QVERIFY (nr >= 0);
+  string chinese_name= default_chinese_font_name ();
+  if (chinese_name != "roman") {
+    // 确认没有 fallback 到 roman 的 ecrm 字体
+    QVERIFY (!occurs ("ecrm", fn_rep->fn[nr]->res_name));
+  }
+}
+
+void
+TestSmartFont::test_sys_chinese_cyrillic () {
+  // sys-chinese 文档中的 Cyrillic 字符应该正确路由
+  font fn= smart_font ("sys-chinese", "rm", "medium", "right", 10, 600);
+  smart_font_rep* fn_rep= (smart_font_rep*) fn.rep;
+  string          c     = utf8_to_cork ("А");
+  int             nr    = fn_rep->resolve (c);
+  QVERIFY (nr >= 0);
+  string chinese_name= default_chinese_font_name ();
+  if (chinese_name != "roman") {
+    // 确认没有 fallback 到 roman 的 ecrm 字体
+    QVERIFY (!occurs ("ecrm", fn_rep->fn[nr]->res_name));
+  }
 }
 
 QTEST_MAIN (TestSmartFont)

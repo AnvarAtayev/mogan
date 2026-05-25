@@ -397,7 +397,7 @@ is_cjk_punct (string_u8 c) {
   return set->contains (c);
 }
 
-static bool
+bool
 in_unicode_range (string c, string range) {
   string uc= strict_cork_to_utf8 (c);
   if (N (uc) == 0) return false;
@@ -1178,6 +1178,17 @@ smart_font_rep::resolve (string c) {
           maybe_initialize_font (nr);
           return sm->add_char (key, c);
         }
+      }
+    }
+  }
+
+  // Fallback Cyrillic characters to default Chinese font
+  if (range == "cyrillic") {
+    string chinese_name= default_chinese_font_name ();
+    if (chinese_name != "roman") {
+      for (int attempt= 1; attempt <= FONT_ATTEMPTS; attempt++) {
+        int nr= resolve (c, "cyrillic=" * chinese_name, attempt);
+        if (nr >= 0) return nr;
       }
     }
   }
