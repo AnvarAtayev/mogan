@@ -478,6 +478,8 @@ ChatController::ensureNewConversation () {
   sessionManager_.setPanel (sid, panel);
   sessionManager_.setModel (sid, currentModel);
 
+  call ("chat-tab-sync-dark-style!", sid);
+
   if (panel->modelLabel ()) {
     panel->modelLabel ()->setText (to_qstring (currentModel));
   }
@@ -518,6 +520,8 @@ ChatController::getOrCreatePanel (const string& sessionId) {
   if (!panel) return nullptr;
 
   sessionManager_.setPanel (sessionId, panel);
+
+  call ("chat-tab-sync-dark-style!", sessionId);
 
   // 连接 Panel 的信号
   connect (panel, &ChatConversationPanel::sendRequested, this,
