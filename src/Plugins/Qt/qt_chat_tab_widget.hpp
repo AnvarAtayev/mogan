@@ -29,6 +29,7 @@ class QScrollArea;
 class QSpacerItem;
 class QStackedWidget;
 class QTimer;
+class QToolButton;
 class QVBoxLayout;
 class QEvent;
 class qt_tm_widget_rep;
@@ -76,6 +77,7 @@ public:
   tree readInputMessage () const;
 
   QPushButton*  sendButton () const { return sendButton_; }
+  QToolButton*  thinkingButton () const { return thinkingButton_; }
   QLabel*       sessionTitle () const { return sessionTitle_; }
   const string& sessionId () const { return sessionId_; }
   bool          conversationMode () const { return conversationMode_; }
@@ -96,6 +98,7 @@ public:
 
 signals:
   void sendRequested (const string& sessionId);
+  void thinkingToggled (const string& sessionId, bool enabled);
   void inputHeightChanged ();
 
 protected:
@@ -116,6 +119,7 @@ private:
   QWidget*     inputEditorWidget_= nullptr; ///< 输入编辑器容器
   QWidget*     inputQTMWidget_   = nullptr; ///< 输入区 QTMWidget
   QPushButton* sendButton_       = nullptr; ///< 发送/停止按钮
+  QToolButton* thinkingButton_   = nullptr; ///< 推理模式开关
   QSpacerItem* topSpacer_        = nullptr; ///< 欢迎页顶部弹性空间
   widget       messageWidget_;              ///< 消息区 TeXmacs widget
   widget       inputWidget;                 ///< 输入区 TeXmacs widget
