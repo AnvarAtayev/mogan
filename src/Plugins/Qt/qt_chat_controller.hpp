@@ -139,10 +139,23 @@ private:
   void loadSessionContent (ChatConversationPanel* panel);
 
   /**
-   * @brief 将单个会话元数据持久化到 Scheme 层。
-   * @param sessionId 要保存的会话 ID
+   * @brief 导出会话的 message buffer 到磁盘（TMU 格式）。
+   *
+   * 调用 Scheme 的 chat-persist-export-buffer，仅写 buffer 文件，不更新
+   * manifest。 适用于 buffer 内容确实发生变更的场景（发送消息、LLM 生成完成）。
+   * @param sessionId 目标会话 ID
    */
-  void saveOneSession (const string& sessionId);
+  void exportBuffer (const string& sessionId);
+
+  /**
+   * @brief 更新 manifest 中指定会话的元数据条目。
+   *
+   * 调用 Scheme 的 chat-persist-update-manifest，仅写 manifest JSON，不导出
+   * buffer。 适用于归档、恢复等仅元数据变更的场景，避免用空 buffer
+   * 覆盖磁盘文件。
+   * @param sessionId 目标会话 ID
+   */
+  void updateManifest (const string& sessionId);
 
   /**
    * @brief 确保存在一个可用的空白会话。
