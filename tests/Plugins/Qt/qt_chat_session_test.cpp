@@ -61,6 +61,10 @@ private slots:
   void test_messageBufferUrl ();
   void test_inputBufferUrl ();
 
+  // === defaultExpandCount ===
+  void test_createSession_defaultExpandCount ();
+  void test_insertSession_defaultExpandCount ();
+
   // === 会话标题可见性判断 ===
   void test_title_empty_for_new_session ();
   void test_title_nonempty_after_set ();
@@ -377,6 +381,38 @@ TestChatSession::test_inputBufferUrl () {
   url result  = ChatSessionManager::inputBufferUrl ("abc-123");
   url expected= url ("tmfs://chat-input-abc-123");
   QVERIFY (result == expected);
+}
+
+/******************************************************************************
+ * defaultExpandCount
+ ******************************************************************************/
+
+void
+TestChatSession::test_createSession_defaultExpandCount () {
+  ChatSessionManager mgr;
+  string             sid= mgr.createSession ();
+  ChatSession*       s  = mgr.getSession (sid);
+  QVERIFY (s != nullptr);
+  QCOMPARE (s->defaultExpandCount, 5);
+}
+
+void
+TestChatSession::test_insertSession_defaultExpandCount () {
+  ChatSessionManager mgr;
+  ChatSession        s;
+  s.sessionId         = "test-expand";
+  s.title             = "Test";
+  s.model             = "gpt-4";
+  s.state             = ChatState::Idle;
+  s.archived          = false;
+  s.createdAt         = "1234567890";
+  s.defaultExpandCount= 5;
+  s.panel             = nullptr;
+  mgr.insertSession (s);
+
+  ChatSession* found= mgr.getSession ("test-expand");
+  QVERIFY (found != nullptr);
+  QCOMPARE (found->defaultExpandCount, 5);
 }
 
 QTEST_MAIN (TestChatSession)
