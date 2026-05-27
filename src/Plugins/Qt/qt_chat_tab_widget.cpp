@@ -73,6 +73,9 @@ constexpr int kNewChatHoverShadowOffsetY= 2;
 constexpr int kNavButtonPadY            = 8;
 constexpr int kNavButtonPadX            = 8;
 constexpr int kSessionItemSpacing       = 4;
+constexpr int kMoreBtnSize              = 22;
+constexpr int kMoreBtnIconSize          = 12;
+constexpr int kMoreBtnMargin            = 4;
 
 // ---- 侧边栏常量 ----
 constexpr int kNavTitleFontPx      = 11;
@@ -537,6 +540,8 @@ ChatSidebar::ChatSidebar (const QList<SessionDisplayInfo>& sessions,
   conversationListLayout_->setSpacing (DpiUtils::scaled (kSidebarSpacing));
   scrollLayout->addWidget (conversationListWidget_);
 
+  scrollLayout->addStretch ();
+
   // 归档区标题
   archiveHeaderButton_=
       new QPushButton (qt_translate ("Archived (%1)").arg (0), scrollContent);
@@ -549,6 +554,7 @@ ChatSidebar::ChatSidebar (const QList<SessionDisplayInfo>& sessions,
                "padding: %1px %2px; } ")
           .arg (DpiUtils::scaled (kNavTitlePadding))
           .arg (DpiUtils::scaled (kNavButtonPadX)));
+  archiveHeaderButton_->hide ();
   connect (archiveHeaderButton_, &QPushButton::clicked, this, [this] () {
     archiveCollapsed_= !archiveCollapsed_;
     if (archiveListWidget_) archiveListWidget_->setVisible (!archiveCollapsed_);
@@ -562,8 +568,6 @@ ChatSidebar::ChatSidebar (const QList<SessionDisplayInfo>& sessions,
   archiveListLayout_->setSpacing (DpiUtils::scaled (kSidebarSpacing));
   archiveListWidget_->hide ();
   scrollLayout->addWidget (archiveListWidget_);
-
-  scrollLayout->addStretch ();
 
   QScrollArea* scrollArea= new QScrollArea (this);
   scrollArea->setWidgetResizable (true);
@@ -580,8 +584,9 @@ ChatSidebar::ChatSidebar (const QList<SessionDisplayInfo>& sessions,
   for (const SessionDisplayInfo& info : sessions) {
     SidebarItem item= createItem (info.sessionId);
     item.sidebarButton->setText (to_qstring (info.displayTitle));
-    item.sidebarButton->setChecked (info.sessionId == activeSessionId &&
-                                    !info.archived);
+    bool isActive= (info.sessionId == activeSessionId && !info.archived);
+    item.sidebarButton->setChecked (isActive);
+    if (item.moreButton) item.moreButton->setVisible (info.archived);
     item.isArchived= info.archived;
 
     if (info.archived) {
@@ -602,18 +607,17 @@ ChatSidebar::addItem (const string& sessionId, const string& displayTitle) {
 
   SidebarItem item= createItem (sessionId);
   item.sidebarButton->setText (to_qstring (displayTitle));
-  item.sidebarButton->setChecked (true);
   item.isArchived= false;
   conversationListLayout_->insertWidget (0, item.itemWidget);
   items_.insert (sessionId, item);
 
-  // 更新 sessionCache_ 以保持右键菜单数据同步
   SessionDisplayInfo info;
   info.sessionId   = sessionId;
   info.displayTitle= displayTitle;
   info.archived    = false;
   sessionCache_.prepend (info);
-  activeSessionId_= sessionId;
+
+  setActiveItem (sessionId);
 
   updateCountLabels ();
 }
@@ -639,9 +643,8 @@ void
 ChatSidebar::setActiveItem (const string& sessionId) {
   activeSessionId_= sessionId;
   for (auto it= items_.begin (); it != items_.end (); ++it) {
-    if (!it->sidebarButton) continue;
     bool isActive= (it.key () == sessionId && !it->isArchived);
-    it->sidebarButton->setChecked (isActive);
+    if (it->sidebarButton) it->sidebarButton->setChecked (isActive);
   }
 }
 
@@ -655,6 +658,7 @@ ChatSidebar::moveToArchive (const string& sessionId) {
     item.isArchived= true;
     archiveListLayout_->addWidget (item.itemWidget);
     item.sidebarButton->setChecked (false);
+    if (item.moreButton) item.moreButton->show ();
   }
 
   // 更新 sessionCache_ 中的 archived 状态
@@ -678,6 +682,7 @@ ChatSidebar::moveFromArchive (const string& sessionId) {
   if (item.isArchived) {
     item.isArchived= false;
     conversationListLayout_->insertWidget (0, item.itemWidget);
+    if (item.moreButton) item.moreButton->hide ();
   }
 
   // 更新 sessionCache_ 中的 archived 状态
@@ -733,13 +738,15 @@ ChatSidebar::updateCountLabels () {
   if (archiveHeaderButton_) {
     archiveHeaderButton_->setText (
         qt_translate ("Archived (%1)").arg (archivedCount));
-    archiveHeaderButton_->setVisible (true);
+    archiveHeaderButton_->setVisible (archivedCount > 0);
+    if (archivedCount == 0 && archiveListWidget_) archiveListWidget_->hide ();
   }
 }
 
 ChatSidebar::SidebarItem
 ChatSidebar::createItem (const string& sessionId) {
   SidebarItem item;
+  int         moreBtnSize= DpiUtils::scaled (kMoreBtnSize);
 
   item.itemWidget= new QWidget ();
   item.itemWidget->setObjectName ("chat-tab-session-item");
@@ -765,32 +772,61 @@ ChatSidebar::createItem (const string& sessionId) {
   item.sidebarButton->setCheckable (true);
   item.sidebarButton->setFocusPolicy (Qt::NoFocus);
   item.sidebarButton->setCursor (Qt::PointingHandCursor);
+  item.sidebarButton->setSizePolicy (QSizePolicy::Ignored,
+                                     QSizePolicy::Preferred);
   DpiUtils::applyScaledFont (item.sidebarButton, kNavButtonFontPx);
+  int rightPad= moreBtnSize + DpiUtils::scaled (kMoreBtnMargin);
   item.sidebarButton->setStyleSheet (
-      QString ("QPushButton { border: none; border-radius: %1px; padding: %2px "
-               "%3px; }")
+      QString ("QPushButton { border: none; border-radius: %1px; "
+               "padding: %2px %3px %2px %4px; }")
           .arg (DpiUtils::scaled (kConversationBtnRadius))
           .arg (DpiUtils::scaled (kNavButtonPadY))
+          .arg (rightPad)
           .arg (DpiUtils::scaled (kNavButtonPadX)));
+  item.sidebarButton->installEventFilter (this);
   itemLayout->addWidget (item.sidebarButton, 1);
 
-  // clicked 信号：连接一次，不再在 refreshInternal 中反复 disconnect/connect
-  connect (item.sidebarButton, &QPushButton::clicked, this,
-           [this, sid= sessionId] () { emit sessionClicked (sid); });
+  // "..." 更多按钮（在 sidebarButton 内部右侧，仅选中项显示）
+  item.moreButton= new QPushButton (item.sidebarButton);
+  item.moreButton->setObjectName ("chat-tab-more-btn");
+  item.moreButton->setFocusPolicy (Qt::NoFocus);
+  item.moreButton->setCursor (Qt::PointingHandCursor);
+  item.moreButton->setIcon (QIcon (":llm-chat/ellipsis.svg"));
+  item.moreButton->setIconSize (QSize (DpiUtils::scaled (kMoreBtnIconSize),
+                                       DpiUtils::scaled (kMoreBtnIconSize)));
+  item.moreButton->setFixedSize (moreBtnSize, moreBtnSize);
+  item.moreButton->setStyleSheet (
+      QString ("QPushButton { border: none; border-radius: %1px; "
+               "background: transparent; padding: 0px; }"
+               "QPushButton:hover { background: rgba(0,0,0,0.08); }")
+          .arg (moreBtnSize / 2));
+  item.moreButton->hide ();
+  item.itemWidget->setAttribute (Qt::WA_Hover);
+  item.itemWidget->installEventFilter (this);
 
-  // 右键菜单：连接一次，执行时从 sessionCache_ 查找当前状态
-  item.sidebarButton->setContextMenuPolicy (Qt::CustomContextMenu);
+  // clicked 信号：已选中时保持选中状态，不重复触发
+  connect (item.sidebarButton, &QPushButton::clicked, this,
+           [this, sid= sessionId, btn= item.sidebarButton] () {
+             if (sid == activeSessionId_) {
+               btn->setChecked (true);
+               return;
+             }
+             emit sessionClicked (sid);
+           });
+
+  // "..." 按钮菜单：点击弹出操作菜单
   connect (
-      item.sidebarButton, &QPushButton::customContextMenuRequested, this,
-      [this, sid= sessionId] (const QPoint& pos) {
-        QPushButton* senderBtn= qobject_cast<QPushButton*> (sender ());
-        bool         archived = false;
+      item.moreButton, &QPushButton::clicked, this, [this, sid= sessionId] () {
+        bool archived= false;
         for (const auto& info : sessionCache_) {
           if (info.sessionId == sid) {
             archived= info.archived;
             break;
           }
         }
+
+        QPushButton* btn= items_.value (sid).moreButton;
+        if (!btn) return;
 
         QMenu         menu;
         QList<string> checked= getCheckedSessionIds ();
@@ -802,7 +838,8 @@ ChatSidebar::createItem (const string& sessionId) {
           }
           menu.addAction (
               qt_translate ("Delete selected (%1)").arg (checked.size ()));
-          QAction* chosen= menu.exec (senderBtn->mapToGlobal (pos));
+          QAction* chosen=
+              menu.exec (btn->mapToGlobal (btn->rect ().bottomLeft ()));
           if (!chosen) return;
           QString txt= chosen->text ();
           if (txt.startsWith (qt_translate ("Archive selected"))) {
@@ -820,7 +857,8 @@ ChatSidebar::createItem (const string& sessionId) {
           menu.addSeparator ();
           QAction* multiSelectAction=
               menu.addAction (qt_translate ("Multi-select"));
-          QAction* chosen= menu.exec (senderBtn->mapToGlobal (pos));
+          QAction* chosen=
+              menu.exec (btn->mapToGlobal (btn->rect ().bottomLeft ()));
           if (chosen == renameAction) {
             emit renameRequested (sid, "");
           }
@@ -896,6 +934,40 @@ ChatSidebar::exitMultiSelectMode () {
 const string&
 ChatSidebar::activeSessionId () const {
   return activeSessionId_;
+}
+
+bool
+ChatSidebar::eventFilter (QObject* watched, QEvent* event) {
+  if (event->type () == QEvent::Resize) {
+    for (auto it= items_.constBegin (); it != items_.constEnd (); ++it) {
+      if (it->sidebarButton == watched && it->moreButton) {
+        QRect cr= it->sidebarButton->contentsRect ();
+        int   bw= it->moreButton->width ();
+        int   bh= it->moreButton->height ();
+        it->moreButton->move (cr.right () - bw -
+                                  DpiUtils::scaled (kMoreBtnMargin),
+                              cr.top () + (cr.height () - bh) / 2);
+        break;
+      }
+    }
+  }
+  else if (event->type () == QEvent::HoverEnter) {
+    for (auto it= items_.constBegin (); it != items_.constEnd (); ++it) {
+      if (it->itemWidget == watched && it->moreButton) {
+        it->moreButton->show ();
+        break;
+      }
+    }
+  }
+  else if (event->type () == QEvent::HoverLeave) {
+    for (auto it= items_.constBegin (); it != items_.constEnd (); ++it) {
+      if (it->itemWidget == watched && it->moreButton) {
+        it->moreButton->setVisible (it->isArchived);
+        break;
+      }
+    }
+  }
+  return QWidget::eventFilter (watched, event);
 }
 
 QList<string>
