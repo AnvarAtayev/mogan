@@ -13,6 +13,7 @@
 
 (texmacs-module (texmacs menus preferences-widgets)
   (:use (texmacs menus preferences-menu)
+        (texmacs texmacs tm-files)
         (language locale)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -115,7 +116,6 @@ pretty-val : string
   ("shared" "Multiple documents share window"))
 
 (define-preference-names "gui theme"
-  ("default" "Default")
   ("liii" "Liii")
   ("liii-night" "Liii Dark"))
 
@@ -156,18 +156,13 @@ pretty-val : string
             "18em"))
     (item (text "User interface theme:")
       (enum (set-pretty-preference* "gui theme" answer)
-            '("Default" "Liii" "Liii Dark")
+            '("Liii" "Liii Dark")
             (get-pretty-preference "gui theme")
             "18em"))
     (item (text "Completion style:")
       (enum (set-pretty-preference "completion style" answer)
             '("Popup" "Inline")
             (get-pretty-preference "completion style")
-            "18em"))
-    (item (text "Auto backup:")
-      (enum (set-preference "autobackup" (string-downcase answer))
-            '("On" "Off")
-            (tmstring-upcase-first (get-preference "autobackup"))
             "18em"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -632,7 +627,10 @@ pretty-val : string
   (aligned
     (meti (hlist // (text "Expand beamer slides"))
       (toggle (set-boolean-preference "texmacs->pdf:expand slides" answer)
-              (get-boolean-preference "texmacs->pdf:expand slides"))))
+              (get-boolean-preference "texmacs->pdf:expand slides")))
+    (meti (hlist // (text "Use external pdf viewer"))
+      (toggle (set-boolean-preference "use external pdf viewer" answer)
+              (get-boolean-preference "use external pdf viewer"))))
   (assuming (supports-native-pdf?)
     (aligned
       (item (text "Pdf version number:")
@@ -712,12 +710,24 @@ pretty-val : string
 ;; Other
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define autosave-enabled-label "On")
+(define autosave-disabled-label "Off")
+
+(tm-define (autosave-preferences-list)
+  (list autosave-enabled-label autosave-disabled-label))
+
+(tm-define (get-autosave-preference-label)
+  (if (== (get-preference "autosave") "0")
+      autosave-disabled-label
+      autosave-enabled-label))
+
+(tm-define (set-autosave-preference-label label)
+  (set-preference "autosave"
+                  (if (== label autosave-disabled-label) "0" "120")))
+
 (define-preference-names "autosave"
-  ("5" "5 sec")
-  ("30" "30 sec")
-  ("120" "120 sec")
-  ("300" "300 sec")
-  ("0" "Disable"))
+  ("120" "On")
+  ("0" "Off"))
 
 (define-preference-names "security"
   ("accept no scripts" "Accept no scripts")
@@ -793,10 +803,20 @@ pretty-val : string
 (tm-widget (misc-preferences-widget)
   (aligned
     (item (text "Automatically save:")
-      (enum (set-pretty-preference "autosave" answer)
-            '("5 sec" "30 sec" "120 sec" "300 sec" "Disable")
-            (get-pretty-preference "autosave")
+      (enum (set-autosave-preference-label answer)
+            (autosave-preferences-list)
+            (get-autosave-preference-label)
             "12em"))
+    (item (text "Auto backup:")
+      (hlist
+        (enum (set-preference "autobackup" (string-downcase answer))
+              '("On" "Off")
+              (tmstring-upcase-first (get-preference "autobackup"))
+              "12em")
+        //                                     
+        (explicit-buttons
+          ((eval (auto-backup-button-label))
+           (open-auto-backup-location)))))
     (item (text "Security:")
       (enum (set-pretty-preference "security" answer)
             '("Accept no scripts" "Prompt on scripts" "Accept all scripts")

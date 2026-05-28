@@ -222,7 +222,7 @@ qt_chooser_widget_rep::set_type (const string& _type) {
     nameFilters << to_qstring (translate ("All Format") * " (*)");
   }
   else if (_type == "action_open") {
-    mainNameFilter+= " (*.tmu *.tm *.ts *.tp)";
+    mainNameFilter+= " (*.tmu *.tm *.ts *.tp *.pdf)";
     //" (*.scala *.sc *.sbt *.pants *.ltx *.sty *.cls *.tex *.bib *.rawbib *.jl
     //*.js *.java *.sld *.ss *.tmu *.txt *.py *.json *.html *.hh *.cpp *cc *hpp
     //*.scm *.elv *.md *.sh *.csv)"
@@ -240,7 +240,7 @@ qt_chooser_widget_rep::set_type (const string& _type) {
     nameFilters << to_qstring (translate ("Java files") * " (*.java)");
     nameFilters << to_qstring (translate ("Scheme files") *
                                " (*.ss *.sld *.scm)");
-    nameFilters << to_qstring (translate ("Latex files") *
+    nameFilters << to_qstring (translate ("LaTeX files") *
                                " (*.ltx *.sty *.tex *.bib *.rawbib *.cls)");
     nameFilters << to_qstring (translate ("Web files") *
                                " (*.html *.xhtml *.htm)");

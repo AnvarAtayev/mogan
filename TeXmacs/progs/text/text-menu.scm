@@ -16,6 +16,7 @@
         (text text-structure)
         (generic document-menu)
         (prog prog-menu)
+        (generic format-edit)
         (generic document-style)
         (various comment-edit)
         (various comment-widgets)))
@@ -644,10 +645,10 @@
       ;;(make-with "font-series" "bold"))
       ((check (balloon (icon "tm_bold.xpm") "Write bold text")
               "v" (inside-bold?))
-       (make-with "font-series" "bold"))
+       (toggle-bold))
       ((check (balloon (icon "tm_italic.xpm") "Write italic text")
               "v" (inside-italic?))
-       (make-with "font-shape" "italic"))
+       (toggle-italic))
       ((check (balloon (icon "tm_underline.xpm") "Write underline")
               "v" (inside-underline?))
        (make 'underline))
@@ -658,9 +659,9 @@
        (mark-text)))
   (if (or (not (style-has? "std-markup-dtd")) (in-source?))
       ((balloon (icon "tm_italic.xpm") "Write italic text")
-       (make-with "font-shape" "italic"))
+       (toggle-italic))
       ((balloon (icon "tm_bold.xpm") "Write bold text")
-       (make-with "font-series" "bold")))
+       (toggle-bold)))
   (=> (balloon (icon "tm_color.xpm") "Select a foreground color")
       (link color-menu)))
 
@@ -964,8 +965,6 @@
           ((in? l '(section section*)) "section-title-style")
           ((in? l '(subsection subsection*)) "subsection-title-style")
           ((in? l '(subsubsection subsubsection*)) "subsubsection-title-style")
-          ((in? l '(paragraph paragraph*)) "paragraph-title-style")
-          ((in? l '(subparagraph subparagraph*)) "subparagraph-title-style")
           (else #f))))
 
 (tm-define (focus-has-preferences? t)
@@ -1275,11 +1274,11 @@
 
 (tm-define (standard-options l)
   (:require (in? l (numbered-unnumbered-append '(small-figure big-figure))))
-  (list "figure-captions-above"))
+  (list "figure-captions-above" "number-long-article"))
 
 (tm-define (standard-options l)
   (:require (in? l (numbered-unnumbered-append '(small-table big-table))))
-  (list "table-captions-above"))
+  (list "table-captions-above" "number-long-article"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Detached notes

@@ -5,6 +5,23 @@
         <file>ocr-button/right-align.svg</file>
         <file>ocr-button/ocr.svg</file>
 
+        <file>tabpage/add.svg</file>
+        <file>tabpage/close.svg</file>
+
+        <file>startup-tab/new-file.svg</file>
+        <file>startup-tab/open-file.svg</file>
+
+        <file>pdf-reader/next.svg</file>
+        <file>pdf-reader/previous.svg</file>
+        <file>pdf-reader/minus.svg</file>
+        <file>pdf-reader/open.svg</file>
+        <file>pdf-reader/screenshot.svg</file>
+
+        <file>llm-chat/send.svg</file>
+        <file>llm-chat/sidebar.svg</file>
+        <file>llm-chat/addchat.svg</file>
+        <file>llm-chat/cancel.svg</file>
+        <file>llm-chat/ellipsis.svg</file>
 
         <!-- dark theme -->
         <file>ocr-button/left-align-white.svg</file>
@@ -12,7 +29,20 @@
         <file>ocr-button/right-align-white.svg</file>
         <file>ocr-button/ocr-white.svg</file>
 
+        <file>tabpage/add-white.svg</file>
+        <file>tabpage/close-white.svg</file>
+
+        <file>startup-tab/new-file-white.svg</file>
+        <file>startup-tab/open-file-white.svg</file>
+
+        <file>pdf-reader/next-white.svg</file>
+        <file>pdf-reader/previous-white.svg</file>
+        <file>pdf-reader/minus-white.svg</file>
+        <file>pdf-reader/open-white.svg</file>
+        <file>pdf-reader/screenshot-white.svg</file>
+
         <!-- tutorial -->
-        <file>tutorial/test.gif</file>
+        <file>tutorial/ocr-tutorial.gif</file>
+        <file>tutorial/magic-paste-tutorial.gif</file>
     </qresource>
 </RCC>

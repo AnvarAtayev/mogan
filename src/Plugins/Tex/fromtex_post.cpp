@@ -9,7 +9,6 @@
  * in the root directory or <http://www.gnu.org/licenses/gpl-3.0.html>.
  ******************************************************************************/
 
-#include "LaTeX_Preview/latex_preview.hpp"
 #include "Tex/convert_tex.hpp"
 #include "Tex/tex.hpp"
 #include "converter.hpp"
@@ -42,7 +41,6 @@ extern bool textm_natbib;
 tree   kill_space_invaders (tree t);
 tree   set_special_fonts (tree t, string lan);
 tree   filter_preamble (tree t);
-tree   latex_fallback_on_pictures (string s, tree t);
 tree   parsed_latex_to_tree (tree t);
 tree   latex_command_to_tree (tree t);
 bool   is_var_compound (tree t, string s);
@@ -450,6 +448,8 @@ finalize_pmatrix (tree t) {
         else if (u[i][0] == "aligned")
           parse_pmatrix (r, u, i, "", "", "tabular*");
         else if (u[i][0] == "stack") parse_pmatrix (r, u, i, "", "", "stack");
+        else if (u[i][0] == "subarray")
+          parse_pmatrix (r, u, i, "", "", "stack");
         else if (u[i][0] == "matrix")
           parse_pmatrix (r, u, i, "", "", "tabular*");
         else if (u[i][0] == "pmatrix")
@@ -2396,7 +2396,7 @@ latex_to_tree (tree t0) {
   // cout << "\n\nt3= " << t3 << "\n\n";
   tree t4= finalize_document (t3);
   // cout << "\n\nt4= " << t4 << "\n\n";
-  tree t5= is_document ? finalize_preamble (t4, style) : t4;
+  tree t5= finalize_preamble (t4, style);
   // cout << "\n\nt5= " << t5 << "\n\n";
   tree t6= handle_matches (t5);
   // cout << "\n\nt6= " << t6 << "\n\n";
@@ -2477,8 +2477,7 @@ latex_document_to_tree (string s, bool as_pic) {
   command_arity->extend ();
   command_def->extend ();
   tree t= parse_latex_document (s, true, as_pic);
-  if (as_pic) t= latex_fallback_on_pictures (s, t);
-  r= latex_to_tree (t);
+  r     = latex_to_tree (t);
   command_type->shorten ();
   command_arity->shorten ();
   command_def->shorten ();

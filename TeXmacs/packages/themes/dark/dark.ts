@@ -84,9 +84,9 @@
 
   <assign|generic-error-color|#c00000>
 
-  <assign|generic-prompt-color|brown>
+  <assign|generic-prompt-color|#4d6cff>
 
-  <assign|generic-input-color|#c0c0ff>
+  <assign|generic-input-color|#9fb8ff>
 
   <assign|defined-color|#4a71a1>
 
@@ -123,6 +123,12 @@
   <assign|version-notice-bg-color|#6b5600>
 
   <assign|version-notice-fg-color|#fff4cc>
+
+  <assign|script-status-color|#2b2f4d>
+
+  <assign|script-status-background-color|#2b2f4d>
+
+  <assign|script-status-font-color|#cfe0ff>
 
   \;
 </body>

@@ -12,7 +12,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (texmacs-module (texmacs menus main-menu)
-  (:use (utils library cursor)))
+  (:use (utils library cursor)
+        (texmacs menus edit-menu)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Main dynamic, extensible or user defined submenus
@@ -67,7 +68,7 @@
   (if (project-attached?) (=> "Project" (link project-menu)))
   (if (with-versioning-tool?)
       (=> "Version" (link version-menu)))
-  (=> "View" (link view-menu))
+  (=> "View::menu" (link view-menu))
   (=> "Go" (link go-menu))
   (if (detailed-menus?) (=> "Tools" (link tools-menu)))
   (if (with-database-tool?)
@@ -105,8 +106,17 @@
   ("Focus mode" (toggle-focus-mode)))
 
 (tm-menu (texmacs-popup-menu)
-  (:require (focus-mode?))
+  (:require (and (focus-mode?) (not (simplest-mode?))))
   (link focus-popup-menu)
+  ---
+  (former))
+
+(menu-bind simplest-popup-menu
+  ("Simplest mode" (toggle-simplest-mode)))
+
+(tm-menu (texmacs-popup-menu)
+  (:require (simplest-mode?))
+  (link simplest-popup-menu)
   ---
   (former))
 
@@ -142,7 +152,7 @@
       (-> "Part" (link document-part-menu)))
   (if (project-attached?) (=> "Project" (link project-menu)))
   (if (with-versioning-tool?) (-> "Version" (link version-menu)))
-  (-> "View" (link view-menu))
+  (-> "View::menu" (link view-menu))
   (-> "Go" (link go-menu))
   (if (detailed-menus?) (-> "Tools" (link tools-menu)))
   (if (with-database-tool?) (-> "Data" (link db-menu)))

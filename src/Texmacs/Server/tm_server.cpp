@@ -27,8 +27,10 @@
 #include "s7_blackbox.hpp"
 #include "socket_notifier.hpp"
 #include "sys_utils.hpp"
+#include "tm_configure.hpp"
 #include "tm_link.hpp"
 #include "tm_sys_utils.hpp"
+#include "tmfs_url.hpp"
 #include <moebius/drd/drd_std.hpp>
 #include <s7_tm.hpp>
 
@@ -56,7 +58,7 @@ init_app (app_type app) {
       tm_init_file= "$TEXMACS_PATH/progs/init-draw.scm";
     }
     else if (app == app_type::RESEARCH) {
-      tm_init_file= "$TEXMACS_PATH/progs/init-research.scm";
+      tm_init_file= "$TEXMACS_PATH/progs/" STEM_INIT_FILE;
     }
   }
   exec_file (materialize (tm_init_file));
@@ -333,8 +335,8 @@ tm_server_rep::restart () {
   if (!args.isEmpty ()) args.removeFirst ();
 
   for (int i= 0; i < N (buffers); i++) {
-    string file_path= as_string (buffers[i]);
-    args << to_qstring (file_path);
+    if (is_rooted_tmfs (buffers[i])) continue;
+    args << to_qstring (as_string (buffers[i]));
   }
 
   QProcess::startDetached (QApplication::applicationFilePath (), args);

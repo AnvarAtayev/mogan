@@ -31,7 +31,6 @@
 #include <QObject>
 #include <QPushButton>
 #include <QResource>
-#include <QSettings>
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
@@ -42,17 +41,23 @@
 #include "config.h"
 #include "scheme.hpp"
 
+#include "qt_chat_controller.hpp"
 #include "qt_gui.hpp"
+#include "qt_pdf_reader_widget.hpp"
 #include "qt_picture.hpp"
 #include "qt_renderer.hpp"
-#include "qt_startup_tab_widget.hpp"
 #include "qt_tm_widget.hpp"
 #include "qt_utilities.hpp"
+
+#if !IS_COMMUNITY
+#include "telemetry.hpp"
+#endif
 
 #include "QTMGuiHelper.hpp" // needed to connect()
 #include "QTMInteractiveInputHelper.hpp"
 #include "QTMInteractivePrompt.hpp"
 #include "QTMOAuth.hpp"
+#include "QTMStartupTabWidget.hpp"
 #include "QTMStyle.hpp" // qtstyle()
 #include "QTMTabPage.hpp"
 #include "QTMWindow.hpp"
@@ -77,6 +82,16 @@ extern bool             texmacs_started;
 static bool
 is_startup_tab_file (const string& file) {
   return file == "tmfs://startup-tab";
+}
+
+/**
+ * @brief 判断给定文件路径是否指向聊天标签页 buffer。
+ * @param file 文件路径字符串。
+ * @return 若文件为 \c tmfs://chat-tab 则返回 true。
+ */
+static bool
+is_chat_tab_file (const string& file) {
+  return file == "tmfs://chat-tab";
 }
 
 static bool
@@ -165,7 +180,9 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
       membershipPeriodLabel (nullptr), membershipTitleLabel (nullptr),
       loginActionButton (nullptr), logoutButton (nullptr), m_userId (""),
       m_memberType (""), m_currentScmNotificationItem (""),
-      startupContentWidget (nullptr), startupTabMode (false) {
+      startupContentWidget (nullptr), startupTabMode (false),
+      pdfViewerWidget (nullptr), pdfTabMode (false), currentPdfPath (""),
+      lastLoadedPdfPath (""), chatContentWidget (nullptr), chatTabMode (false) {
   type= texmacs_widget;
 
   main_widget= concrete (::glue_widget (true, true, 1, 1));
@@ -225,20 +242,38 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
     mw->setMenuWidget (outBar);
   };
 
-  double scale         = DpiUtils::scaleFactor ();
-  int    titleBarHeight= int (32 * scale);
-  int    buttonWidth   = int (46 * scale);
-  int    buttonHeight  = int (32 * scale);
-  int    iconBaseSize  = int (12 * scale);
-  int    macosiconSize = int (20 * scale);
+  double scale          = DpiUtils::scaleFactor ();
+  int    titleBarHeight = int (42 * scale);
+  int    buttonWidth    = int (60 * scale);
+  int    buttonHeight   = int (42 * scale);
+  int    vipbuttonWidth = int (90 * scale);
+  int    vipbuttonHeight= int (32 * scale);
+  int    iconBaseSize   = int (16 * scale);
 
 #if defined(Q_OS_MAC)
   // 无边框布局（macOS）- 只显示登录按钮
   Q_INIT_RESOURCE (styles);
   QWK::WindowBar* windowBar= nullptr;
   windowAgent              = nullptr;
-  setupWindowBar (windowBar, windowAgent, /*minHeight*/ 20,
-                  /*setSafeArea*/ true);
+  setupWindowBar (windowBar, windowAgent, titleBarHeight, true);
+
+  if (windowBar && windowAgent) {
+    int nativeTitleBarHeight=
+        windowAgent->windowAttribute ("title-bar-height").toInt ();
+    if (nativeTitleBarHeight <= 0) nativeTitleBarHeight= titleBarHeight;
+
+    auto* sysBtnArea = new QWidget (windowBar);
+    int   sysBtnWidth= int (80 * scale);
+    sysBtnArea->setFixedSize (sysBtnWidth, nativeTitleBarHeight);
+    sysBtnArea->setObjectName ("system-button-area");
+
+    // Use a small fixed offset instead of vertical centering to match
+    // native macOS title-bar button placement more closely.
+    int yOffset= DpiUtils::scaled (1);
+    sysBtnArea->move (0, yOffset);
+
+    windowAgent->setSystemButtonArea (sysBtnArea);
+  }
 #elif defined(Q_OS_WIN) || defined(Q_OS_LINUX)
   // 无边框布局（Windows / Linux），并使用 /styles 资源中的图标
   Q_INIT_RESOURCE (styles);
@@ -250,17 +285,6 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   windowBar->setFixedHeight (titleBarHeight);
 
   // 系统按钮（图标来自 3rdparty/qwindowkitty/src/styles/styles.qrc）
-  auto iconBtn= new QWK::WindowButton (windowBar);
-  iconBtn->setFlat (true);
-  iconBtn->setFocusPolicy (Qt::NoFocus);
-  iconBtn->setIcon (QIcon (":/app/stem.png"));
-  iconBtn->setObjectName ("icon-button");
-  iconBtn->setIconSize (QSize (int (30 * scale), int (30 * scale)));
-  windowBar->setIconButton (iconBtn);
-  iconBtn->setAttribute (Qt::WA_TransparentForMouseEvents, true);
-  iconBtn->setCursor (Qt::ArrowCursor);
-  iconBtn->setContextMenuPolicy (Qt::NoContextMenu);
-
   auto pinBtn= new QWK::WindowButton (windowBar);
   pinBtn->setCheckable (true);
   pinBtn->setFlat (true);
@@ -348,11 +372,7 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   loginButton->setFocusPolicy (Qt::NoFocus);
   loginButton->setSizePolicy (QSizePolicy::Fixed, QSizePolicy::Fixed);
   loginButton->setFixedSize (buttonWidth, buttonHeight);
-#if defined(Q_OS_MAC)
-  loginButton->setIconSize (QSize (macosiconSize, macosiconSize));
-#else
   loginButton->setIconSize (QSize (iconBaseSize, iconBaseSize));
-#endif
   loginButton->setIconNormal (QIcon (":/window-bar/login.svg"));
   loginButton->setObjectName ("login-button");
   loginButton->setProperty ("system-button", true);
@@ -382,50 +402,54 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
                       [this] () { checkLocalTokenAndLogin (); });
   }
 
-  // VIP升级会员按钮 - 放在登录按钮右侧（只在商业版显示）
+  // VIP升级会员按钮 - 放在登录按钮左侧（只在商业版显示）
   vipButton= new QPushButton (windowBar);
   vipButton->setObjectName ("vip-button");
-  vipButton->setText ("  " + qt_translate ("Upgrade VIP"));
+  vipButton->setText (qt_translate ("Upgrade VIP"));
   vipButton->setProperty ("system-button", true);
   vipButton->setFocusPolicy (Qt::NoFocus);
   vipButton->setSizePolicy (QSizePolicy::Fixed, QSizePolicy::Fixed);
-  vipButton->setFixedHeight (buttonHeight - 8);
+  vipButton->setFixedSize (vipbuttonWidth, vipbuttonHeight);
   vipButton->setCursor (Qt::PointingHandCursor);
-
-  // 设置醒目的样式 - 金色/橙色渐变，圆角，闪电图标
-  vipButton->setStyleSheet ("QPushButton#vip-button {"
-                            "  background: qlineargradient(x1:0, y1:0, x2:1, "
-                            "y2:0, stop:0 #FFD700, stop:1 #FFA500);"
-                            "  border: none;"
-                            "  border-radius: 12px;"
-                            "  color: #8B4513;"
-                            "  font-weight: bold;"
-                            "  font-size: 12px;"
-                            "  padding: 0 14px 0 8px;"
-                            "}"
-                            "QPushButton#vip-button:hover {"
-                            "  background: qlineargradient(x1:0, y1:0, x2:1, "
-                            "y2:0, stop:0 #FFE135, stop:1 #FFB347);"
-                            "}"
-                            "QPushButton#vip-button:pressed {"
-                            "  background: qlineargradient(x1:0, y1:0, x2:1, "
-                            "y2:0, stop:0 #FFC125, stop:1 #FF8C00);"
-                            "}");
+  vipButton->setStyleSheet (
+      QString ("QPushButton#vip-button { border-radius: %1px; font-size: %2px; "
+               "margin-right: %3px; }")
+          .arg (DpiUtils::scaled (12))
+          .arg (DpiUtils::scaled (12))
+          .arg (DpiUtils::scaled (4)));
 
   // 设置闪电图标
   vipButton->setIcon (QIcon (":/window-bar/vip-lightning.svg"));
-  vipButton->setIconSize (QSize (16, 16));
+  vipButton->setIconSize (QSize (DpiUtils::scaled (20), DpiUtils::scaled (20)));
 
   windowBar->setVipButton (vipButton);
   if (windowAgent) {
     windowAgent->setHitTestVisible (vipButton, true);
   }
 
-  // 点击事件：跳转到会员购买页面
+  // 点击事件：跳转到会员购买页面（未登录时先触发登录）
   QObject::connect (vipButton, &QPushButton::clicked, [this] () {
-    string pricingUrl=
-        as_string (call ("account-oauth2-config", "pricing-url"));
-    QDesktopServices::openUrl (QUrl (to_qstring (pricingUrl)));
+    if (is_community_stem ()) {
+      string pricingUrl=
+          as_string (call ("account-oauth2-config", "click-return-liii-url"));
+      QDesktopServices::openUrl (QUrl (to_qstring (pricingUrl)));
+      return;
+    }
+
+    if (is_server_started ()) {
+      tm_server_rep* server=
+          dynamic_cast<tm_server_rep*> (get_server ().operator->());
+      if (server && server->getAccount () &&
+          server->getAccount ()->isLoggedIn ()) {
+#if !IS_COMMUNITY
+        telemetry_track ("VIP_CLICK", "'((\"mode\" . \"upgrade\"))");
+#endif
+        openRenewalPage ();
+      }
+      else {
+        checkLocalTokenAndLogin ();
+      }
+    }
   });
 
   // 初始设置VIP按钮可见性：商业版且（未登录或普通用户/体验会员）时显示
@@ -590,12 +614,8 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   // NOTICE: setFixedHeight must be after setIconSize
   // TODO: the size of the toolbar should be calculated dynamically
   {
-    double scale       = retina_scale;
-    int    h           = (int) floor (36 * scale + 0.5);
-    int    tabRowHeight= h;
-#ifdef Q_OS_MAC
-    tabRowHeight= (int) floor (30 * scale + 0.5);
-#endif
+    int h           = DpiUtils::scaled (32);
+    int tabRowHeight= DpiUtils::scaled (38);
 
     // 工具栏高度相等
     mainToolBar->setFixedHeight (h);
@@ -618,7 +638,7 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   // The main layout
 
   QVBoxLayout* bl= new QVBoxLayout (cw);
-  bl->setContentsMargins (0, 1, 0, 0);
+  bl->setContentsMargins (0, 0, 0, 0);
   bl->setSpacing (0);
   cw->setLayout (bl);
   QWidget* q= main_widget->as_qwidget (); // force creation of QWidget
@@ -812,46 +832,6 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   else {
     std_error << "qt_tm_widget_rep: server not started, cannot connect ";
   }
-
-  // 恢复窗口状态和几何信息
-  restoreSettings ();
-}
-
-void
-qt_tm_widget_rep::restoreSettings () {
-  /* 恢复工具栏和窗口状态
-   * mainWindowState: 恢复主窗口的工具栏、菜单栏、状态栏等UI元素的状态
-   *                  包括工具栏的位置、是否可见、停靠状态等，以及菜单栏的展开状态
-   * mainWindowGeometry: 恢复主窗口的几何信息
-   *                     包括窗口的位置(x,y坐标)、大小(宽度、高度)、是否最大化/最小化等状态
-   * restoreState() - 恢复工具栏和停靠窗口的状态
-   * restoreGeometry() - 恢复窗口的几何信息（位置、大小等） */
-
-  /* 获取用户配置路径，用于存储窗口状态设置文件 */
-  string config_path= concretize (head (get_tm_preference_path ()));
-  if (config_path != "") {
-    /* 使用用户自定义的配置路径创建QSettings对象
-     * 配置文件格式为INI格式，便于用户手动编辑 */
-    QSettings settings (to_qstring (config_path * "/qtwindows.ini"),
-                        QSettings::IniFormat);
-
-    /* 从配置文件中读取窗口几何信息并恢复
-     * geometry包含窗口的位置、大小、最大化/最小化状态等 */
-    QByteArray geometry= settings.value ("mainWindowGeometry").toByteArray ();
-    if (!geometry.isEmpty ()) mainwindow ()->restoreGeometry (geometry);
-
-    /* 从配置文件中读取窗口状态信息并恢复
-     * state包含工具栏、停靠窗口的位置、可见性、停靠状态等 */
-    QByteArray state= settings.value ("mainWindowState").toByteArray ();
-    if (!state.isEmpty ()) mainwindow ()->restoreState (state);
-  }
-  else {
-    QSettings  settings ("LiiiNetwork", STEM_NAME);
-    QByteArray geometry= settings.value ("mainWindowGeometry").toByteArray ();
-    if (!geometry.isEmpty ()) mainwindow ()->restoreGeometry (geometry);
-    QByteArray state= settings.value ("mainWindowState").toByteArray ();
-    if (!state.isEmpty ()) mainwindow ()->restoreState (state);
-  }
 }
 
 qt_tm_widget_rep::~qt_tm_widget_rep () {
@@ -865,6 +845,15 @@ qt_tm_widget_rep::~qt_tm_widget_rep () {
   // delete startup content widget
   if (startupContentWidget) {
     delete startupContentWidget;
+  }
+
+  // delete pdf viewer widget
+  if (pdfViewerWidget) {
+    delete pdfViewerWidget;
+  }
+  /// delete chat content widget
+  if (chatContentWidget) {
+    delete chatContentWidget;
   }
 }
 
@@ -943,27 +932,97 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
   if (startupTabMode) {
     // Show Backstage/Startup view
     hide_widget_from_layout (editorWidget, layout);
+    hide_widget_from_layout (pdfViewerWidget, layout);
+    hide_widget_from_layout (chatContentWidget, layout);
 
     update_visibility ();
 
     if (!startupContentWidget) {
-      startupContentWidget= new QTStartupTabWidget (centralwidget ());
+      startupContentWidget= new QTMStartupTabWidget (centralwidget ());
     }
     show_widget_in_layout (startupContentWidget, layout);
     startupContentWidget->setFocus (Qt::OtherFocusReason);
   }
-  else {
-    // Show normal editor view
+  else if (pdfTabMode) {
+    // Show PDF viewer
+    hide_widget_from_layout (editorWidget, layout);
     hide_widget_from_layout (startupContentWidget, layout);
-    show_widget_in_layout (editorWidget, layout);
+    hide_widget_from_layout (chatContentWidget, layout);
 
     update_visibility ();
 
-    if (scrollarea ())
-      scrollarea ()->surface ()->setSizePolicy (QSizePolicy::Fixed,
-                                                QSizePolicy::Fixed);
-    url currentView= get_current_view_safe ();
-    if (!is_none (currentView)) send_keyboard_focus (abstract (main_widget));
+    if (!pdfViewerWidget) {
+      pdfViewerWidget= new PDFReaderWidget (centralwidget ());
+    }
+    show_widget_in_layout (pdfViewerWidget, layout);
+    pdfViewerWidget->setFocus (Qt::OtherFocusReason);
+
+    // Load PDF if path changed
+    if (!currentPdfPath.isEmpty () && currentPdfPath != lastLoadedPdfPath) {
+      pdfViewerWidget->loadFromFile (currentPdfPath);
+      lastLoadedPdfPath= currentPdfPath;
+    }
+  }
+  else {
+    // Show normal editor view (unless chat tab mode is active)
+    hide_widget_from_layout (startupContentWidget, layout);
+    hide_widget_from_layout (pdfViewerWidget, layout);
+    if (!chatTabMode) {
+      show_widget_in_layout (editorWidget, layout);
+
+      update_visibility ();
+
+      if (scrollarea ())
+        scrollarea ()->surface ()->setSizePolicy (QSizePolicy::Fixed,
+                                                  QSizePolicy::Fixed);
+      url currentView= get_current_view_safe ();
+      if (!is_none (currentView)) send_keyboard_focus (abstract (main_widget));
+    }
+  }
+}
+
+/**
+ * @brief 同步聊天标签页控件的可见性。
+ *
+ * 当 \ref chatTabMode 激活时，隐藏编辑器、启动页和 PDF
+ * 阅读器，然后显示 \ref chatContentWidget（按需创建）。
+ * 否则隐藏聊天控件，并在启动标签页模式未激活时恢复普通编辑器视图。
+ */
+void
+qt_tm_widget_rep::sync_chat_tab_mode () {
+  QWidget* editorWidget= main_widget->qwid;
+  QLayout* layout      = centralwidget ()->layout ();
+  if (!layout) return;
+
+  if (chatTabMode) {
+    // Show Chat tab view
+    hide_widget_from_layout (editorWidget, layout);
+    hide_widget_from_layout (startupContentWidget, layout);
+    hide_widget_from_layout (pdfViewerWidget, layout);
+
+    update_visibility ();
+
+    if (!chatContentWidget) {
+      chatContentWidget=
+          get_chat_controller ()->createView (centralwidget (), this);
+    }
+    show_widget_in_layout (chatContentWidget, layout);
+    chatContentWidget->setFocus (Qt::OtherFocusReason);
+  }
+  else {
+    // Show normal editor view only when no special tab mode is active
+    hide_widget_from_layout (chatContentWidget, layout);
+    if (!startupTabMode && !pdfTabMode) {
+      show_widget_in_layout (editorWidget, layout);
+
+      update_visibility ();
+
+      if (scrollarea ())
+        scrollarea ()->surface ()->setSizePolicy (QSizePolicy::Fixed,
+                                                  QSizePolicy::Fixed);
+      url currentView= get_current_view_safe ();
+      if (!is_none (currentView)) send_keyboard_focus (abstract (main_widget));
+    }
   }
 }
 
@@ -1003,6 +1062,38 @@ qt_tm_widget_rep::update_visibility () {
   if (startupTabMode) {
     new_mainVisibility  = false;
     new_menuVisibility  = false;
+    new_modeVisibility  = false;
+    new_focusVisibility = false;
+    new_userVisibility  = false;
+    new_statusVisibility= false;
+    new_sideVisibility  = false;
+    new_leftVisibility  = false;
+    new_bottomVisibility= false;
+    new_extraVisibility = false;
+    new_auxVisibility   = false;
+    new_tabVisibility   = true;
+    new_titleVisibility = true;
+  }
+
+  if (chatTabMode) {
+    new_mainVisibility  = false;
+    new_menuVisibility  = false;
+    new_modeVisibility  = true;
+    new_focusVisibility = false;
+    new_userVisibility  = false;
+    new_statusVisibility= false;
+    new_sideVisibility  = false;
+    new_leftVisibility  = false;
+    new_bottomVisibility= false;
+    new_extraVisibility = false;
+    new_auxVisibility   = false;
+    new_tabVisibility   = true;
+    new_titleVisibility = true;
+  }
+
+  if (pdfTabMode) {
+    new_mainVisibility  = false;
+    new_menuVisibility  = true;
     new_modeVisibility  = false;
     new_focusVisibility = false;
     new_userVisibility  = false;
@@ -1266,7 +1357,13 @@ qt_tm_widget_rep::send (slot s, blackbox val) {
     if (DEBUG_QT_WIDGETS) debug_widgets << "\tFile: " << file << LF;
     mainwindow ()->setWindowFilePath (utf8_to_qstring (file));
     startupTabMode= is_startup_tab_file (file);
+    pdfTabMode    = is_pdf_tab_file (file);
+    if (pdfTabMode) {
+      currentPdfPath= utf8_to_qstring (file);
+    }
+    chatTabMode= is_chat_tab_file (file);
     sync_startup_tab_mode ();
+    sync_chat_tab_mode ();
   } break;
   case SLOT_POSITION: {
     check_type<coord2> (val, s);
@@ -1956,11 +2053,24 @@ qt_tm_embedded_widget_rep::write (slot s, blackbox index, widget w) {
     check_type_void (index, s);
     main_widget= w;
   } break;
-    /// FIXME: decide what to do with these for embedded widgets
   case SLOT_MAIN_MENU:
-  case SLOT_MAIN_ICONS:
   case SLOT_MODE_ICONS:
-  case SLOT_FOCUS_ICONS:
+  case SLOT_FOCUS_ICONS: {
+    if (!qwid) as_qwidget ();
+    QWidget* p= qwid;
+    while (p) {
+      if (QTChatTabWidget* chat= qobject_cast<QTChatTabWidget*> (p)) {
+        qt_tm_widget_rep* mainW= chat->parentTmWidget ();
+        if (mainW) {
+          mainW->write (s, index, w);
+          return;
+        }
+      }
+      p= p->parentWidget ();
+    }
+    qt_widget_rep::write (s, index, w);
+  } break;
+  case SLOT_MAIN_ICONS:
   case SLOT_USER_ICONS:
   case SLOT_SIDE_TOOLS:
   case SLOT_LEFT_TOOLS:
@@ -2045,13 +2155,8 @@ qt_tm_widget_rep::setupLoginDialog (QWK::LoginDialog* loginDialog) {
   infoLayout->setSpacing (4);
 
   // 登出按钮 - 登录成功后显示（使用图标）
-  const double logoutScale= DpiUtils::scaleFactor ();
-#if defined(Q_OS_MAC)
-  const int logoutIconSize= int (30 * logoutScale);
-#else
-  const int logoutIconSize= int (20 * logoutScale);
-#endif
-  logoutButton= new QPushButton ();
+  const int logoutIconSize= DpiUtils::scaled (20);
+  logoutButton            = new QPushButton ();
   logoutButton->setObjectName ("logout-button");
   logoutButton->setIcon (QIcon (":/window-bar/logout.svg"));
   logoutButton->setToolTip (qt_translate ("Logout"));
@@ -2206,6 +2311,9 @@ qt_tm_widget_rep::setupLoginDialog (QWK::LoginDialog* loginDialog) {
     else {
       // 打开会员购买/续费链接
       qDebug ("打开会员购买/续费链接");
+#if !IS_COMMUNITY
+      telemetry_track ("VIP_CLICK", "'((\"mode\" . \"activate\"))");
+#endif
       openRenewalPage ();
     }
   });
@@ -2421,7 +2529,8 @@ qt_tm_widget_rep::fetchUserInfo (const QString& token, bool showDialog) {
             m_userId          = userData["id"].toVariant ().toString ();
             QString userName  = userData["username"].toString ("liii");
             QString avatarText= userData["username"].toString ("liii").left (4);
-            QString accountEmail= userData["email"].toString ("liii@lii.pro");
+            QString accountEmail=
+                userData["email"].toString (qt_translate ("Email not set"));
             QString memberType=
                 userData["memberType"].toString ("Regular User");
             QString periodLabel=
@@ -2490,13 +2599,6 @@ qt_tm_widget_rep::updateLoginButtonState (bool           isLoggedIn,
   if (!isLoggedIn) {
     label= qt_translate ("Not logged in");
   }
-#if defined(Q_OS_MAC)
-  loginButton->setIconSize (
-      QSize (DpiUtils::scaled (20), DpiUtils::scaled (20)));
-#else
-  loginButton->setIconSize (
-      QSize (DpiUtils::scaled (12), DpiUtils::scaled (12)));
-#endif
   // 已登录时不设置文字，只显示图标
 
   QFontMetrics  metrics (loginButton->font ());
@@ -2513,10 +2615,9 @@ qt_tm_widget_rep::updateLoginButtonState (bool           isLoggedIn,
   const int iconTextSpacing= visibleText.isEmpty () ? 0 : DpiUtils::scaled (6);
   const int iconWidth      = loginButton->iconSize ().width ();
   const int textWidth      = metrics.horizontalAdvance (visibleText);
-  const int minWidth=
-      isLoggedIn ? DpiUtils::scaled (46) : DpiUtils::scaled (96);
+  const int minWidth       = DpiUtils::scaled (60);
   const int maxWidth=
-      isLoggedIn ? DpiUtils::scaled (46) : DpiUtils::scaled (120);
+      isLoggedIn ? DpiUtils::scaled (60) : DpiUtils::scaled (120);
   const int rawDesiredWidth=
       iconWidth + iconTextSpacing + textWidth + horizontalPadding;
   const int desiredWidth= qBound (minWidth, rawDesiredWidth, maxWidth);

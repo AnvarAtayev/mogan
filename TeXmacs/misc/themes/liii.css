@@ -109,11 +109,6 @@ QWK--WindowBar>QAbstractButton#close-button:pressed {
 }
 
 QWK--WindowBar>QAbstractButton#login-button {
-  color: #2c2c2c;
-  font-size: 12px;
-  font-weight: 500;
-  margin-right: 8px;
-  padding: 0 10px 0 6px;
   qproperty-iconNormal: url(":/window-bar/login.svg");
 }
 
@@ -125,6 +120,22 @@ QWK--WindowBar>QAbstractButton#login-button[login-state="not-logged-in"] {
 /* 已登录状态 - 使用常规颜色 */
 QWK--WindowBar>QAbstractButton#login-button[login-state="logged-in"] {
   color: #2c2c2c;
+}
+
+/* VIP升级按钮 */
+QWK--WindowBar>QPushButton#vip-button {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #215a6a, stop:1 #2791ad);
+  border: none;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+QWK--WindowBar>QPushButton#vip-button:hover {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2a6f82, stop:1 #30a5c5);
+}
+
+QWK--WindowBar>QPushButton#vip-button:pressed {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1a4652, stop:1 #1e7a94);
 }
 
 /****************************************************************************
@@ -350,14 +361,9 @@ QDockWidget::title {
 ****************************************************************************/
 /* Tab Page 基础样式 */
 QTMTabPage {
-  padding: 8px 12px;
   color: #000000;
   background-color: transparent;
   border: 1px solid transparent;
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
 }
 
 QTMTabPage:hover {
@@ -368,64 +374,84 @@ QTMTabPage:hover {
 QTMTabPage:checked {
   background-color: #FFFFFF;
   border: 1px solid #CFCFCF;
-  border-bottom: none;
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
 }
 
-QTMTabPage QToolButton#tabpage-close-button {
+QTMTabPage QPushButton#tabpage-close-button {
   background-color: transparent;
   border: none;
-  padding: 0;
-  margin-left: 6px;
-  border-radius: 4px;
-  min-width: 20px;
-  min-height: 20px;
-  max-width: 20px;
-  max-height: 20px;
+  qproperty-iconNormal: url(":/tabpage/close.svg");
+  qproperty-iconHovered: url(":/tabpage/close-white.svg");
 }
 
-QTMTabPage QToolButton#tabpage-close-button[platform="mac"] {
-  min-width: 16px;
-  min-height: 16px;
-  max-width: 16px;
-  max-height: 16px;
-  font-size: 12pt;
-}
-
-QTMTabPage QToolButton#tabpage-close-button:hover {
+QTMTabPage QPushButton#tabpage-close-button:hover {
   background-color: #E81123;
-  color: #FFFFFF;
 }
 
-QTMTabPage QToolButton#tabpage-close-button:pressed {
+QTMTabPage QPushButton#tabpage-close-button:pressed {
   background-color: #C50F1F;
 }
 
-QTMTabPageContainer QToolButton#add-tab-button {
+QTMTabPageContainer QPushButton#add-tab-button {
   background-color: transparent;
   border: none;
-  color: #2c2c2c;
-  font-weight: bold;
-  border-radius: 6px;
-  padding: 0;
-  font-size: 12pt;
+  qproperty-iconNormal: url(":/tabpage/add.svg");
 }
 
-QTMTabPageContainer QToolButton#add-tab-button[platform="mac"] {
-  min-width: 20px;
-  min-height: 20px;
-  max-width: 20px;
-  max-height: 20px;
-  font-size: 11pt;
-}
-
-QTMTabPageContainer QToolButton#add-tab-button:hover {
+QTMTabPageContainer QPushButton#add-tab-button:hover {
   background-color: rgba(0, 0, 0, 0.08);
 }
 
-QTMTabPageContainer QToolButton#add-tab-button:pressed {
+QTMTabPageContainer QPushButton#add-tab-button:pressed {
   background-color: rgba(0, 0, 0, 0.12);
+}
+
+/****************************************************************************
+* PDF Reader 工具栏按钮样式
+****************************************************************************/
+QToolButton#pdf-zoom-out-btn {
+  qproperty-icon: url(":/pdf-reader/minus.svg");
+}
+
+QToolButton#pdf-zoom-in-btn {
+  qproperty-icon: url(":/tabpage/add.svg");
+}
+
+QToolButton#pdf-prev-btn {
+  qproperty-icon: url(":/pdf-reader/previous.svg");
+}
+
+QToolButton#pdf-next-btn {
+  qproperty-icon: url(":/pdf-reader/next.svg");
+}
+
+QToolButton#pdf-screenshot-btn {
+  qproperty-icon: url(":/pdf-reader/screenshot.svg");
+}
+
+QToolButton#pdf-zoom-out-btn:hover,
+QToolButton#pdf-zoom-in-btn:hover,
+QToolButton#pdf-prev-btn:hover,
+QToolButton#pdf-next-btn:hover,
+QToolButton#pdf-screenshot-btn:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+QToolButton#pdf-zoom-out-btn:pressed,
+QToolButton#pdf-zoom-in-btn:pressed,
+QToolButton#pdf-prev-btn:pressed,
+QToolButton#pdf-next-btn:pressed,
+QToolButton#pdf-screenshot-btn:pressed {
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+QWidget#pdf-reader-tool-bar {
+  background: #f3f3f3;
+}
+
+QLineEdit#pdf-page-edit {
+  background: #ffffff;
+  border: 1px solid #d0d0d0;
+  border-radius: 2px;
 }
 
 /****************************************************************************
@@ -488,7 +514,7 @@ QComboBox::drop-down {
 }
 
 QComboBox::down-arrow {
-  border-image: url($TEXMACS_PATH/misc/pixmaps/modern/tm_down_arrow.png) 0 0 0 0 stretch stretch;
+  image: url(":/pdf-reader/open.svg");
   width: 12px;
   height: 12px;
   margin-top: 4px;
@@ -1020,7 +1046,7 @@ QPushButton#startup-tab-nav-btn {
   color: #ffffff;
   background-color: transparent;
   border: none;
-  text-align: left;
+  text-align: center;
 }
 
 QPushButton#startup-tab-nav-btn:hover {
@@ -1047,13 +1073,7 @@ QPushButton#startup-tab-quit-btn:hover {
 
 /* 右侧内容区 */
 QWidget#startup-tab-content {
-  background-color: #ffffff;
-}
-
-/* 页面标题 */
-QLabel#startup-tab-page-title {
-  font-weight: bold;
-  color: #215a6a;
+  background-color: #f3f3f3;
 }
 
 /* 页面描述文字 */
@@ -1061,26 +1081,9 @@ QLabel#startup-tab-page-desc {
   color: #666666;
 }
 
-/* 分类按钮 */
-QPushButton#startup-tab-category-btn {
-  background: transparent;
-  border: none;
-  color: #666666;
-}
-
-QPushButton#startup-tab-category-btn:hover {
-  background: #F0F0F0;
-  color: #333333;
-}
-
-QPushButton#startup-tab-category-btn:checked {
-  background: #215a6a;
-  color: white;
-}
-
 /* 模板网格容器 */
 QWidget#startup-tab-grid {
-  background-color: #ffffff;
+  background-color: #f3f3f3;
 }
 
 /* 模板缩略图卡片 */
@@ -1125,12 +1128,6 @@ QLabel#startup-tab-template-info {
 
 QLabel#startup-tab-template-thumbnail {
   background: #f5f5f5;
-  border: 1px solid #dddddd;
-}
-
-QLabel#startup-tab-template-thumbnail[thumbnailLoaded="true"] {
-  background: transparent;
-  border: none;
 }
 
 /* Startup tab - file page */
@@ -1171,6 +1168,7 @@ QLabel#startup-tab-recent-name {
 }
 
 QWidget#style-card {
+  background-color: #ffffff;
   border: 1px solid #cfcfcf;
   border-radius: 8px;
 }
@@ -1184,7 +1182,33 @@ QLabel#style-card-icon {
   font-weight: 700;
 }
 
+QLabel#style-card-icon-new {
+  border-image: url(":/startup-tab/new-file.svg") 0 0 0 0 stretch stretch;
+}
+
+QLabel#style-card-icon-open {
+  border-image: url(":/startup-tab/open-file.svg") 0 0 0 0 stretch stretch;
+}
+
 QLabel#style-card-name {
+  color: #2b3b45;
+}
+
+QFrame#style-card-frame {
+  border: 1px solid #cfcfcf;
+  background-color: #ffffff;
+}
+
+QFrame#style-card-frame:hover {
+  border: 1px solid #2791ad;
+}
+
+QLabel#style-card-thumbnail {
+  background: #f5f5f5;
+}
+
+QLabel#style-card-title {
+  background-color: #ffffff;
   color: #2b3b45;
 }
 
@@ -1213,26 +1237,164 @@ QLabel#pdf-preview-label {
 }
 
 /****************************************************************************
-* Settings Page Tab Widget 样式
-* 统一跨平台样式，类似模板中心分类按钮
+* LLM Chat Tab 样式
 ****************************************************************************/
-QTabWidget#settings-tab-widget::pane {
-  border: none;
-  background: transparent;
+
+/* 侧边栏 */
+QWidget#chat-tab-sidebar,
+QWidget#chat-tab-sidebar-normal,
+QWidget#chat-tab-header,
+QLabel#chat-tab-nav-title,
+QLabel#chat-tab-conversation-count,
+QWidget#chat-tab-multi-select-bar,
+QWidget#chat-tab-session-item QWidget,
+QWidget#chat-tab-scroll-content,
+QWidget#chat-tab-archive-header,
+QWidget#chat-tab-conversation-list,
+QWidget#chat-tab-archive-list {
+  background-color: #f5f5f5;
 }
 
-QTabWidget#settings-tab-widget QTabBar::tab {
-  background: transparent;
-  color: #666666;
-  border: none;
+/* 右侧内容区 */
+QWidget#chat-tab-content,
+QWidget#chat-tab-conversation-page {
+  background-color: #ffffff;
 }
 
-QTabWidget#settings-tab-widget QTabBar::tab:hover {
-  background: #F0F0F0;
+/* 导航标题 */
+QLabel#chat-tab-nav-title {
+  color: #000000;
+}
+
+/* 收缩按钮 */
+QPushButton#chat-tab-collapse-btn {
+  background-color: #e8e8e8;
+}
+QPushButton#chat-tab-collapse-btn:hover {
+  background-color: #d0d0d0;
+}
+
+/* 新建聊天按钮 */
+QPushButton#chat-tab-new-btn {
+  text-align: center;
+  border: none;
+  background-color: #ffffff;
   color: #333333;
 }
 
-QTabWidget#settings-tab-widget QTabBar::tab:selected {
-  background: #215a6a;
-  color: white;
+/* 会话计数标签 */
+QLabel#chat-tab-conversation-count {
+  color: #666666;
+}
+
+/* 搜索框 */
+QLineEdit#chat-tab-search-edit {
+  background-color: #ffffff;
+}
+
+/* 多选操作栏按钮 */
+QPushButton#chat-tab-cancel-select-btn,
+QPushButton#chat-tab-select-all-btn,
+QPushButton#chat-tab-batch-archive-btn,
+QPushButton#chat-tab-batch-delete-btn {
+  background-color: #ffffff;
+  border-color: #cccccc;
+}
+
+/* 归档区标题按钮 */
+QPushButton#chat-tab-archive-header {
+  text-align: left;
+  border: none;
+  font-weight: bold;
+  color: #666666;
+}
+QPushButton#chat-tab-archive-header:hover {
+  color: #333333;
+}
+
+/* 浮球容器 */
+QWidget#chat-tab-floating-container {
+  background-color: #e8e8e8;
+}
+
+/* 浮球按钮 */
+QPushButton#chat-tab-floating-expand-btn,
+QPushButton#chat-tab-floating-new-btn {
+  background-color: transparent;
+}
+QPushButton#chat-tab-floating-expand-btn:hover,
+QPushButton#chat-tab-floating-new-btn:hover {
+  background-color: #d0d0d0;
+}
+
+/* 模型标签 */
+QLabel#chat-tab-model-label {
+  color: #888888;
+  background-color: #f0f0f0;
+}
+
+/* 消息框 */
+QWidget#chat-tab-message-frame {
+  background-color: #ffffff;
+}
+
+/* 输入区滚动条 */
+QAbstractScrollArea#chat-tab-input-area QScrollBar:vertical {
+  background: transparent;
+}
+QAbstractScrollArea#chat-tab-input-area QScrollBar::handle:vertical {
+  background: #c8c8c8;
+}
+QAbstractScrollArea#chat-tab-input-area QScrollBar::handle:vertical:hover {
+  background: #a0a0a0;
+}
+
+/* 输入框框架 */
+QWidget#chat-tab-input-frame {
+  background-color: #ffffff;
+  border: 1px solid #e0e0e0;
+}
+QWidget#chat-tab-input-frame:hover {
+  border: 1px solid #808080;
+}
+QWidget#chat-tab-input-frame[hasFocus="true"] {
+  border: 1px solid #808080;
+}
+
+/* 发送按钮 */
+QPushButton#chat-tab-send-btn {
+  background-color: transparent;
+  border: none;
+}
+QPushButton#chat-tab-send-btn:hover {
+  background-color: #f0f0f0;
+}
+QPushButton#chat-tab-send-btn:pressed {
+  background-color: #e0e0e0;
+}
+
+/* 选择复选框 */
+QCheckBox#chat-tab-select-checkbox::indicator:checked {
+  background-color: #4a90d9;
+}
+QCheckBox#chat-tab-select-checkbox::indicator:unchecked {
+  background-color: #ffffff;
+}
+
+/* 会话项容器 */
+QWidget#chat-tab-session-item {
+  background-color: #f5f5f5;
+}
+
+/* 会话按钮 */
+QPushButton#chat-tab-conversation-btn {
+  text-align: left;
+  background-color: #ffffff;
+}
+QPushButton#chat-tab-conversation-btn:hover {
+  background-color: #f0f0f0;
+}
+QPushButton#chat-tab-conversation-btn:checked {
+  font-weight: 600;
+  background-color: #e8eefc;
 }

@@ -143,7 +143,25 @@
 (tm-define (toggle-focus-mode)
   (:synopsis "Toggle focus mode.")
   (:check-mark "v" focus-mode?)
+  (if (and (not (focus-mode?)) (simplest-mode?))
+      (toggle-simplest-mode))
   (toggle-visible-header))
+
+(define saved-simplest-state '(#t #t))
+
+(tm-define (toggle-simplest-mode)
+  (:synopsis "Toggle simplest mode.")
+  (:check-mark "v" simplest-mode?)
+  (if (and (not (simplest-mode?)) (focus-mode?))
+      (toggle-focus-mode))
+  (if (simplest-mode?)
+      (begin
+        (show-icon-bar 1 (car saved-simplest-state))
+        (show-icon-bar 2 (cadr saved-simplest-state)))
+      (begin
+        (set! saved-simplest-state (list (visible-icon-bar? 1) (visible-icon-bar? 2)))
+        (show-icon-bar 1 #f)
+        (show-icon-bar 2 #f))))
 
 (define saved-informative-flags "default")
 

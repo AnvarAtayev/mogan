@@ -46,10 +46,6 @@ void mac_fix_paths ();
 
 #ifdef QTTEXMACS
 #include "Qt/QTMApplication.hpp"
-#if defined(Q_OS_LINUX)
-#include "Qt/screenshot_tool.hpp"
-#endif
-#include "qhotkey/qhotkey.h"
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QKeySequence>
@@ -135,12 +131,6 @@ immediate_options (int argc, char** argv) {
     }
     else if (s == "-delete-plugin-cache")
       remove (get_tm_cache_path () * url ("plugin_cache.scm"));
-    else if (s == "-delete-server-data")
-      system ("rm -rf", url ("$TEXMACS_HOME_PATH/server"));
-    else if (s == "-delete-databases") {
-      system ("rm -rf", url ("$TEXMACS_HOME_PATH/system/database"));
-      system ("rm -rf", url ("$TEXMACS_HOME_PATH/users"));
-    }
 #ifdef QTTEXMACS
     else if (s == "-headless") headless_mode= true;
 #endif
@@ -193,13 +183,9 @@ main (int argc, char** argv) {
   windows_delayed_refresh (1000000000);
   immediate_options (argc, argv);
   load_user_preferences ();
-  string theme= get_user_preference ("gui theme", "default");
+  string theme= get_user_preference ("gui theme", "liii");
 
-#if defined(OS_MACOS) && !defined(__arm64__)
-  if (theme == "default") theme= "";
-#else
   if (theme == "default") theme= "liii";
-#endif
   if (theme == "light")
     tm_style_sheet= "$TEXMACS_PATH/misc/themes/standard-light.css";
   else if (theme == "dark")
@@ -268,20 +254,6 @@ main (int argc, char** argv) {
     // it this really necessary? Should be set in the metadata.
     qtmapp->set_window_icon ("/misc/images/stem-512.png");
     init_style_sheet (qtmapp);
-
-#if defined(Q_OS_LINUX)
-    // Setup screenshot tool with global hotkey (Linux only)
-    ScreenshotTool* screenshotTool= new ScreenshotTool (nullptr);
-    if (QHotkey::isPlatformSupported ()) {
-      QHotkey* hotkey= new QHotkey (QKeySequence ("Ctrl+Alt+X"), true, qtmapp);
-      QObject::connect (hotkey, &QHotkey::activated, qApp, [screenshotTool] () {
-        screenshotTool->startCapture ();
-      });
-    }
-    else {
-      qWarning ("Global hotkeys are not supported on this platform");
-    }
-#endif
   }
 #endif
 
