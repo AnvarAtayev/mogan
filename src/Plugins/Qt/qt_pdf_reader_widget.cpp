@@ -76,8 +76,8 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
       zoomFactor_ (1.0), pageAspectRatio_ (0.0), pageBaseWidthPts_ (0.0),
       overLink_ (false), zoomDebounceTimer_ (nullptr),
       resizeDebounceTimer_ (nullptr), gestureSafetyTimer_ (nullptr),
-      inPinchGesture_ (false), blockRender_ (false), pinchStartZoom_ (1.0),
-      renderCallCount_ (0) {
+      inPinchGesture_ (false), blockRender_ (false), autoFitApplied_ (false),
+      pinchStartZoom_ (1.0), renderCallCount_ (0) {
 
   mainLayout_= new QVBoxLayout (this);
   mainLayout_->setContentsMargins (0, 0, 0, 0);
@@ -169,7 +169,7 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
   resizeDebounceTimer_->setSingleShot (true);
   resizeDebounceTimer_->setInterval (RESIZE_DEBOUNCE_MS);
   connect (resizeDebounceTimer_, &QTimer::timeout, this,
-           &PDFReaderWidget::rebuildPages);
+           &PDFReaderWidget::onResizeDebounced);
 
   gestureSafetyTimer_= new QTimer (this);
   gestureSafetyTimer_->setSingleShot (true);
@@ -344,6 +344,70 @@ PDFReaderWidget::updateZoomDisplay () {
   bool blocked= zoomCombo_->blockSignals (true);
   zoomCombo_->setText (text);
   zoomCombo_->blockSignals (blocked);
+}
+
+void
+PDFReaderWidget::onResizeDebounced () {
+  // 当窗口离开半屏贴靠状态时，重置自动适配标志，
+  // 以便下次贴靠到左/右半屏时仍能触发 Fit Width
+  if (autoFitApplied_) {
+    QScreen* screen= this->screen ();
+    if (!screen) screen= QApplication::primaryScreen ();
+    if (screen) {
+      QRect screenGeo= screen->availableGeometry ();
+      int   screenW  = screenGeo.width ();
+      QRect winGeo   = window ()->frameGeometry ();
+      int   halfWidth= screenW / 2;
+      int   tolerance= qMax (20, screenW / 20);
+      if (qAbs (winGeo.width () - halfWidth) > tolerance) {
+        autoFitApplied_= false;
+      }
+    }
+  }
+
+  if (!maybeAutoFitWidth ()) {
+    rebuildPages ();
+  }
+}
+
+bool
+PDFReaderWidget::maybeAutoFitWidth () {
+  if (autoFitApplied_) return false;
+  if (pdfData_.isEmpty () || pageCount_ <= 0) return false;
+  if (pageBaseWidthPts_ <= 0) return false;
+  if (isMaximized () || isFullScreen ()) return false;
+
+  QScreen* screen= this->screen ();
+  if (!screen) screen= QApplication::primaryScreen ();
+  if (!screen) return false;
+
+  QRect screenGeo= screen->availableGeometry ();
+  int   screenW  = screenGeo.width ();
+  int   screenH  = screenGeo.height ();
+  QRect winGeo   = window ()->frameGeometry ();
+
+  // 判断是否贴靠到左半屏或右半屏：
+  // 1. 宽度约等于屏幕宽度的一半
+  // 2. 高度约等于屏幕可用高度
+  // 3. 窗口左边缘贴近屏幕左边缘（左半屏）或
+  //    窗口右边缘贴近屏幕右边缘（右半屏）
+  int halfWidth      = screenW / 2;
+  int widthTolerance = qMax (20, screenW / 20);
+  int heightTolerance= qMax (40, screenH / 20);
+
+  if (qAbs (winGeo.width () - halfWidth) > widthTolerance) return false;
+  if (qAbs (winGeo.height () - screenH) > heightTolerance) return false;
+
+  bool snappedLeft = qAbs (winGeo.x () - screenGeo.x ()) <= 10;
+  bool snappedRight= qAbs ((winGeo.x () + winGeo.width ()) -
+                           (screenGeo.x () + screenGeo.width ())) <= 10;
+
+  if (snappedLeft || snappedRight) {
+    fitWidth ();
+    autoFitApplied_= true;
+    return true;
+  }
+  return false;
 }
 
 void
@@ -976,6 +1040,7 @@ PDFReaderWidget::rebuildPages () {
 bool
 PDFReaderWidget::loadFromFile (const QString& filePath, int dpi) {
   clear ();
+  autoFitApplied_= false;
 
   targetDpi_= dpi;
   hasError_ = false;
@@ -1089,6 +1154,7 @@ PDFReaderWidget::loadFromFile (const QString& filePath, int dpi) {
   }
 
   pageLayout_->addStretch (1);
+  maybeAutoFitWidth ();
   rebuildPages ();
   contentWidget_->adjustSize ();
   updateZoomDisplay ();
@@ -1105,6 +1171,7 @@ PDFReaderWidget::clear () {
   pageAspectRatio_ = 0.0;
   pageBaseWidthPts_= 0.0;
   pageAspectRatios_.clear ();
+  autoFitApplied_= false;
   clearPageLinks ();
   pageCache_.clear ();
 
