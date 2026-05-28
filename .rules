@@ -1,0 +1,73 @@
+# Development Guidelines
+
+## C++ Code Standards
+
+1. **Do not use the standard C++ library**: Mogan uses its own C++ infrastructure (e.g., lolly/moebius libraries). Internal types (`string`, `list`, `array`, `tree`, `path`, etc.) have custom implementations that are incompatible with `std::`.
+2. **Use the project's built-in `cout` for output**: Debug output should use the global `cout` (type `tm_ostream`), not `std::cout`. Use the `LF` macro or `"\n"` for newlines — do not use `std::endl`.
+3. **Containers do not support modern C++ features**: Custom containers (e.g., `rectangles`, `list`) do not support range-based for loops. Use traditional iterators or `is_nil()`/`next` traversal instead.
+4. **Use project functions for type conversion**: Custom types (e.g., `path`) have no standard `operator<<` overload — convert with `as_string()` before printing.
+
+### Debug Logging
+
+1. **Temporary debugging**: Wrap global `cout` (`tm_ostream`) with `#ifdef LIII_DEBUG` / `#endif`. This macro is only defined in debug builds; the entire block is stripped by the compiler in release builds:
+   ```cpp
+   #ifdef LIII_DEBUG
+   cout << "Assign " << p << ", " << u << " in " << st << "\n";
+   #endif
+   ```
+
+2. **Standard debug streams**: Use the project's predefined debug output streams (e.g., `debug_std`, `debug_typeset`, `debug_boot`, `debug_edit`) together with macro switches like `DEBUG_STD`, `DEBUG_AUTO`, which can be enabled/disabled via external config:
+   ```cpp
+   if (DEBUG_STD) debug_boot << "Loading welcome message...\n";
+   ```
+
+3. **Performance debugging**: Use `bench_start` / `bench_end` for timing:
+   ```cpp
+   bench_start ("my_task");
+   // ... code ...
+   bench_end ("my_task");
+   ```
+
+## Branch Naming Rules
+
+Branch format: `username/200_27/xxx`
+
+- `username`: developer's username
+- `200_27`: project identifier
+- `xxx`: feature description or task number
+
+Examples:
+- `da/200_27/xmake_debug`
+- `da/200_27/fix_pdf_rendering`
+
+## Commit Guidelines
+
+1. Each PR must have at least two commits:
+   - First commit: update the `devel/xxxx.md` task document
+   - Subsequent commits: code changes
+2. **Run `gf fmt --changed-since=main` before committing** to format any changed `.scm` files
+3. Keep commit messages clear and concise, format: `[number] brief description`
+
+## Code Push Rules
+
+1. If the remote is GitHub, use the `gh` command to push and create a PR
+2. If the remote is Gitee, push directly with `git push`
+3. Ensure code passes local tests before pushing
+4. Keep commit messages clear and concise
+
+## C++ Unit Tests
+
+1. All `tests/**_test.cpp` files are automatically recognized by xmake as test targets
+2. Build: `xmake b xxx_test`
+3. Run: `xmake r xxx_test`
+
+## Build Commands
+
+Main project build: `xmake b stem`
+
+## Workflow
+
+1. Create a new branch off the main branch
+2. Name the branch according to the convention
+3. Push directly with `git push` when development is complete
+4. No need to use the GitHub CLI tool
