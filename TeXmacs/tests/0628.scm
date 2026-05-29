@@ -1,7 +1,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; MODULE      : 0628.scm
-;; DESCRIPTION : Tests for bold calligraph* (mathscr) latex export
+;; DESCRIPTION : Tests for frame/framed export and mdframed LaTeX import mapping
 ;; COPYRIGHT   : (C) 2026  Jack Yansong Li
 ;;
 ;; This software falls under the GNU general public license version 3 or later.
@@ -33,11 +33,26 @@
   ) ;with
 ) ;define
 
+(define (test-mdframed-import)
+  (let* ((tex-content (string-replace (string-load "$TEXMACS_PATH/tests/tex/0628_mdframed_import.tex")
+                        "\r\n"
+                        "\n"
+                      ) ;string-replace
+         ) ;tex-content
+         (parsed (parse-latex tex-content))
+        ) ;
+    (check (tree->stree (latex->texmacs parsed))
+      =>
+      '(document (mdframed (document "hello")))
+    ) ;check
+  ) ;let*
+) ;define
 
-(define (test_0628)
+(tm-define (test_0628)
   (check (export-as-latex-and-load "0628.tmu")
     =>
     (load-latex "0628_frame_export.tex")
   ) ;check
+  (test-mdframed-import)
   (check-report)
-) ;define
+) ;tm-define
