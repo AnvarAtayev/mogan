@@ -43,6 +43,7 @@
 #include <QScrollBar>
 #include <QSpacerItem>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QVariantAnimation>
@@ -387,6 +388,22 @@ ChatConversationPanel::count_input_lines (tree body) {
   return N (body);
 }
 
+static int
+count_visual_input_lines (QTMWidget* editor, int lineHeight) {
+  if (!editor || lineHeight <= 0 || !editor->isVisible ()) return 1;
+
+  qt_simple_widget_rep* tmEditor= editor->tm_widget ();
+  if (!tmEditor) return 1;
+
+  if (the_gui) the_gui->force_update ();
+
+  edit_interface_rep* ed= dynamic_cast<edit_interface_rep*> (tmEditor);
+  if (!ed) return 1;
+
+  int contentH= to_qsize (0, ed->get_total_height (false)).height ();
+  return qMax (1, (contentH + lineHeight - 1) / lineHeight);
+}
+
 bool
 ChatConversationPanel::should_block_readonly_event (QObject* watched,
                                                     QEvent*  event) {
@@ -436,8 +453,10 @@ ChatConversationPanel::eventFilter (QObject* watched, QEvent* event) {
       }
     }
   }
-  if (event->type () == QEvent::KeyRelease) {
-    adjust_input_height ();
+  if (event->type () == QEvent::KeyRelease ||
+      event->type () == QEvent::InputMethod || event->type () == QEvent::Drop) {
+    if (watched->property ("chat_panel").value<void*> () == this)
+      schedule_input_height_adjust ();
   }
   if (event->type () == QEvent::FocusIn || event->type () == QEvent::FocusOut) {
     if (watched->property ("chat_panel").value<void*> () == this) {
@@ -454,26 +473,38 @@ ChatConversationPanel::eventFilter (QObject* watched, QEvent* event) {
 }
 
 void
+ChatConversationPanel::schedule_input_height_adjust () {
+  if (inputHeightAdjustScheduled_) return;
+  inputHeightAdjustScheduled_= true;
+  QTimer::singleShot (0, this, [this] () {
+    inputHeightAdjustScheduled_= false;
+    adjust_input_height ();
+  });
+}
+
+void
 ChatConversationPanel::adjust_input_height () {
-  if (!inputEditorWidget_) return;
+  if (!inputEditorWidget_ || !inputQTMWidget_) return;
   QWidget* frame= inputEditorWidget_->parentWidget ();
   if (!frame) return;
 
-  tree body    = readInputMessage ();
-  int  docLines= count_input_lines (body);
+  int lineH      = DpiUtils::scaled (kInputLineHeight);
+  int docLines   = count_input_lines (readInputMessage ());
+  int visualLines= count_visual_input_lines (inputQTMWidget_, lineH);
 
-  int targetLines= qMax (kInputDefaultLines, docLines + 1);
+#ifdef LIII_DEBUG
+  cout << "adjust_input_height: docLines= " << docLines
+       << ", visualLines= " << visualLines << "\n";
+#endif
+
+  int targetLines= qMax (kInputDefaultLines, qMax (docLines, visualLines));
   targetLines    = qMin (targetLines, kInputMaxLines);
   int targetFrameH=
       DpiUtils::scaled (kInputLineHeight * targetLines) + fixedFrameExtra_;
 
   if (frame->height () != targetFrameH) {
-    bool wasEnabled= frame->updatesEnabled ();
-    frame->setUpdatesEnabled (false);
-    inputEditorWidget_->setUpdatesEnabled (false);
     frame->setFixedHeight (targetFrameH);
-    inputEditorWidget_->setUpdatesEnabled (true);
-    frame->setUpdatesEnabled (wasEnabled);
+    emit inputHeightChanged ();
   }
 }
 
