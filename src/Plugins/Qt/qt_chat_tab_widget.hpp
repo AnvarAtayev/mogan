@@ -32,6 +32,8 @@ class QTimer;
 class QToolButton;
 class QVBoxLayout;
 class QEvent;
+class QTMWidget;
+class QTMStateToolButton;
 class qt_tm_widget_rep;
 
 /**
@@ -96,6 +98,14 @@ public:
    */
   static int count_input_lines (tree body);
 
+  /**
+   * @brief 判断只读控件是否应拦截该事件。
+   * @param watched 事件目标对象（需带有 chat_message_readonly 属性）
+   * @param event   待判断的事件
+   * @return 应拦截返回 true，放行返回 false
+   */
+  static bool should_block_readonly_event (QObject* watched, QEvent* event);
+
 signals:
   void sendRequested (const string& sessionId);
   void thinkingToggled (const string& sessionId, bool enabled);
@@ -108,22 +118,25 @@ protected:
 private:
   /// 构建面板 UI 布局
   void setup_ui ();
+  /// 在当前事件处理完成后更新输入区高度，避免读取到旧排版结果
+  void schedule_input_height_adjust ();
   /// 根据内容动态调整输入区高度
   void adjust_input_height ();
 
-  string       sessionId_;                  ///< 所属会话 ID
-  bool         conversationMode_ = false;   ///< 是否已进入对话模式
-  QLabel*      welcomeTitle_     = nullptr; ///< 欢迎页标题
-  QLabel*      sessionTitle_     = nullptr; ///< 会话标题标签
-  QWidget*     messageFrame_     = nullptr; ///< 消息区域容器
-  QWidget*     inputEditorWidget_= nullptr; ///< 输入编辑器容器
-  QWidget*     inputQTMWidget_   = nullptr; ///< 输入区 QTMWidget
-  QPushButton* sendButton_       = nullptr; ///< 发送/停止按钮
-  QToolButton* thinkingButton_   = nullptr; ///< 推理模式开关
-  QSpacerItem* topSpacer_        = nullptr; ///< 欢迎页顶部弹性空间
-  widget       messageWidget_;              ///< 消息区 TeXmacs widget
-  widget       inputWidget;                 ///< 输入区 TeXmacs widget
-  int          fixedFrameExtra_= 0;         ///< 输入框额外高度（边框等）
+  string       sessionId_;                         ///< 所属会话 ID
+  bool         conversationMode_ = false;          ///< 是否已进入对话模式
+  QLabel*      welcomeTitle_     = nullptr;        ///< 欢迎页标题
+  QLabel*      sessionTitle_     = nullptr;        ///< 会话标题标签
+  QWidget*     messageFrame_     = nullptr;        ///< 消息区域容器
+  QWidget*     inputEditorWidget_= nullptr;        ///< 输入编辑器容器
+  QTMWidget*   inputQTMWidget_   = nullptr;        ///< 输入区 QTMWidget
+  QPushButton* sendButton_       = nullptr;        ///< 发送/停止按钮
+  QToolButton* thinkingButton_   = nullptr;        ///< 推理模式开关
+  QSpacerItem* topSpacer_        = nullptr;        ///< 欢迎页顶部弹性空间
+  widget       messageWidget_;                     ///< 消息区 TeXmacs widget
+  widget       inputWidget;                        ///< 输入区 TeXmacs widget
+  int          fixedFrameExtra_           = 0;     ///< 输入框额外高度（边框等）
+  bool         inputHeightAdjustScheduled_= false; ///< 是否已有待执行的高度更新
 };
 
 /**
@@ -322,14 +335,30 @@ public:
   ChatSidebar* sidebar () const { return sidebar_; }
   QPushButton* newChatButton () const { return newChatButton_; }
   QPushButton* floatingNewChatButton () const { return floatingNewChatBtn_; }
+  QPushButton* closeSidebarButton () const { return closeSidebarBtn_; }
   QList<ChatConversationPanel*>& conversations () { return conversations_; }
   ChatConversationPanel*         activeConversation () const {
     return activeConversation_;
   }
+  void setSidebarCollapsed (bool collapsed);
+  bool isSidebarCollapsed () const { return sidebarCollapsed_; }
+  bool isSidebarWidgetVisible () const {
+    return sidebarWidget_ != nullptr && sidebarWidget_->isVisible ();
+  }
+  bool isFloatingContainerVisible () const {
+    return floatingBtnContainer_ != nullptr &&
+           floatingBtnContainer_->isVisible ();
+  }
+  /**
+   * @brief 直接设置内部侧边栏显隐（dock 模式使用，不触发浮动按钮）。
+   */
+  void setSidebarVisible (bool visible);
+  void setCloseSidebarButtonVisible (bool visible);
 
 signals:
   void cancelRequested (const string& sessionId);
   void newChatRequested ();
+  void closeSidebarRequested ();
 
 protected:
   /// 键盘事件处理（Ctrl+N 新建会话等）
@@ -357,6 +386,7 @@ private:
   QPushButton*    floatingNewChatBtn_  = nullptr; ///< 浮动新建按钮
   QWidget*        floatingBtnContainer_= nullptr; ///< 浮动按钮容器
   QPushButton*    newChatButton_       = nullptr; ///< 侧边栏新建按钮
+  QPushButton*    closeSidebarBtn_     = nullptr; ///< 对话区域关闭侧边栏按钮
   QWidget*        sidebarNormalContent_= nullptr; ///< 侧边栏常规内容区
   QStackedWidget* conversationStack_   = nullptr; ///< 会话面板堆栈
 

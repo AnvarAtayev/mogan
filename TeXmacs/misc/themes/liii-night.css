@@ -1401,8 +1401,8 @@ QWidget#centralWidget QPushButton#chat-tab-floating-new-btn:hover {
 
 /* 模型标签 */
 QWidget#centralWidget QLabel#chat-tab-model-label {
-  color: #aaaaaa;
-  background-color: #3a3a3a;
+  color: #ffffff;
+  background-color: transparent;
 }
 
 /* 消息框 */
@@ -1433,13 +1433,30 @@ QWidget#centralWidget QWidget#chat-tab-input-frame[hasFocus="true"] {
   border: 1px solid #6a6a6a;
 }
 
+QWidget#centralWidget QToolButton#chat-tab-thinking-btn {
+  color: #ffffff;
+  border: 1px solid #ffffff;
+  background: transparent;
+  qproperty-iconNormal: url(":/llm-chat/thinking-white.svg");
+  qproperty-iconChecked: url(":/llm-chat/thinking.svg");
+  qproperty-iconHovered: url(":/llm-chat/thinking-white.svg");
+}
+QWidget#centralWidget QToolButton#chat-tab-thinking-btn:checked {
+  background: #ffffff;
+  color: #215a6a;
+}
+QWidget#centralWidget QToolButton#chat-tab-thinking-btn:hover {
+  background: rgba(255,255,255,0.15);
+  color: #ffffff;
+}
+
 /* 发送按钮 */
 QWidget#centralWidget QPushButton#chat-tab-send-btn {
-  background-color: transparent;
-  border: none;
+  background-color: #ffffff;
+  border: 1px solid #215a6a;
 }
 QWidget#centralWidget QPushButton#chat-tab-send-btn:hover {
-  background-color: #6c6c6c;
+  background-color: #7a7a7a;
 }
 QWidget#centralWidget QPushButton#chat-tab-send-btn:pressed {
   background-color: #8e8e8e;

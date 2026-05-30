@@ -11,6 +11,7 @@
 
 #include "qt_chat_tab_widget.hpp"
 #include "QTMGuiHelper.hpp"
+#include "QTMStateToolButton.hpp"
 #include "QTMStyle.hpp"
 #include "QTMWidget.hpp"
 #include "edit_interface.hpp"
@@ -42,6 +43,7 @@
 #include <QScrollBar>
 #include <QSpacerItem>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QVariantAnimation>
@@ -57,6 +59,7 @@ constexpr int kSidebarMarginY           = 16;
 constexpr int kSidebarSpacing           = 8;
 constexpr int kNavChatFontPx            = 22;
 constexpr int kNavButtonFontPx          = 13;
+constexpr int kSessionTitleFontPx       = 18;
 constexpr int kToggleBtnSize            = 40;
 constexpr int kToggleIconSize           = 20;
 constexpr int kFloatingBtnMarginX       = 12;
@@ -149,19 +152,17 @@ ChatConversationPanel::setup_ui () {
   sessionTitle_= new QLabel ("", topPanel);
   sessionTitle_->setObjectName ("chat-tab-model-label");
   sessionTitle_->setAlignment (Qt::AlignCenter);
-  DpiUtils::applyScaledFont (sessionTitle_, kNavButtonFontPx);
-  sessionTitle_->setStyleSheet (
-      QString ("padding: 2px %1px; border-radius: %2px;")
-          .arg (DpiUtils::scaled (kNavButtonPadX))
-          .arg (DpiUtils::scaled (kModelLabelRadius)));
-  sessionTitle_->setMinimumHeight (DpiUtils::scaled (kModelLabelMinHeight));
+  DpiUtils::applyScaledFont (sessionTitle_, kSessionTitleFontPx);
   topLayout->addWidget (sessionTitle_, 0, Qt::AlignHCenter);
 
   // Message area
-  url msgBufUrl = ChatSessionManager::messageBufferUrl (sessionId_);
-  messageWidget_= texmacs_input_widget (
-      tree (DOCUMENT, ""), compound (kChatEmbeddedStyle, tuple ("generic")),
-      msgBufUrl);
+  qreal chatZoom = DpiUtils::scaled (100) / 100.0;
+  url   msgBufUrl= ChatSessionManager::messageBufferUrl (sessionId_);
+  messageWidget_ = texmacs_input_widget (
+      tree (WITH, "font", "sys-chinese", "zoom-factor", as_string (chatZoom),
+             tree (DOCUMENT, "")),
+      compound (kChatEmbeddedStyle, tuple ("generic")), msgBufUrl);
+  set_zoom_factor (messageWidget_, chatZoom);
 
   QWidget* messageQWidget= concrete (messageWidget_)->as_qwidget ();
   messageFrame_          = new QWidget (topPanel);
@@ -182,6 +183,11 @@ ChatConversationPanel::setup_ui () {
       msgArea->setVerticalScrollBarPolicy (Qt::ScrollBarAsNeeded);
       msgArea->viewport ()->setBackgroundRole (QPalette::Base);
     }
+    QTMWidget* msgEditor= messageQWidget->findChild<QTMWidget*> ();
+    if (msgEditor) {
+      msgEditor->setProperty ("chat_message_readonly", true);
+      msgEditor->installEventFilter (this);
+    }
   }
   messageFrameLayout->addWidget (messageQWidget);
   messageFrame_->hide ();
@@ -196,8 +202,10 @@ ChatConversationPanel::setup_ui () {
 
   url inBufUrl= ChatSessionManager::inputBufferUrl (sessionId_);
   inputWidget = texmacs_input_widget (
-      tree (WITH, "par-par-sep", "0.05fn", tree (DOCUMENT, "")),
+      tree (WITH, "par-par-sep", "0.05fn", "font", "sys-chinese", "zoom-factor",
+             as_string (chatZoom), tree (DOCUMENT, "")),
       compound (kChatEmbeddedStyle, tuple ("generic")), inBufUrl);
+  set_zoom_factor (inputWidget, chatZoom);
   QWidget* inputQWidget= concrete (inputWidget)->as_qwidget ();
   inputEditorWidget_   = inputQWidget;
 
@@ -244,28 +252,31 @@ ChatConversationPanel::setup_ui () {
   btnLayout->addStretch ();
 
   // Thinking toggle button
-  thinkingButton_= new QToolButton (inputFrame);
+  int thinkingBtnH= DpiUtils::scaled (kSendButtonSize);
+  thinkingButton_ = new QTMStateToolButton (inputFrame);
   thinkingButton_->setObjectName ("chat-tab-thinking-btn");
   thinkingButton_->setCheckable (true);
   thinkingButton_->setChecked (false);
   thinkingButton_->setFocusPolicy (Qt::NoFocus);
   thinkingButton_->setCursor (Qt::PointingHandCursor);
   thinkingButton_->setToolTip (tr ("Deep Reasoning"));
-  thinkingButton_->setIcon (QIcon (":llm-chat/thinking.svg"));
-  thinkingButton_->setIconSize (QSize (DpiUtils::scaled (kToggleIconSize),
-                                       DpiUtils::scaled (kToggleIconSize)));
-  thinkingButton_->setFixedSize (DpiUtils::scaled (kToggleBtnSize),
-                                 DpiUtils::scaled (kToggleBtnSize));
+  thinkingButton_->setIconSize (QSize (DpiUtils::scaled (kSendIconSize),
+                                       DpiUtils::scaled (kSendIconSize)));
+  thinkingButton_->setText (qt_translate ("Deep Reasoning"));
+  thinkingButton_->setToolButtonStyle (Qt::ToolButtonTextBesideIcon);
+  thinkingButton_->setFixedHeight (thinkingBtnH);
+  thinkingButton_->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Fixed);
+  int thinkingFontPx= DpiUtils::scaled (12);
   thinkingButton_->setStyleSheet (
-      QString ("QToolButton { border: none; border-radius: %1px; background: "
-               "transparent; }"
-               "QToolButton:checked { background: rgba(59,130,246,0.15); }"
-               "QToolButton:hover { background: rgba(0,0,0,0.06); }")
-          .arg (DpiUtils::scaled (4)));
+      QString ("QToolButton { border-radius: %1px; padding: 2px 2px 2px 6px; "
+               "margin: 0px; font-size: %2px; }")
+          .arg (thinkingBtnH / 2)
+          .arg (thinkingFontPx));
   connect (thinkingButton_, &QToolButton::toggled, this, [this] (bool checked) {
     emit thinkingToggled (sessionId_, checked);
   });
   btnLayout->addWidget (thinkingButton_);
+  btnLayout->addSpacing (DpiUtils::scaled (kSidebarSpacing));
 
   // Send button
   sendButton_= new QPushButton (inputFrame);
@@ -273,7 +284,7 @@ ChatConversationPanel::setup_ui () {
   sendButton_->setFocusPolicy (Qt::NoFocus);
   sendButton_->setCursor (Qt::PointingHandCursor);
   sendButton_->setIcon (QIcon (":llm-chat/send.svg"));
-  int sendIconSize= DpiUtils::scaled (kSendIconSize);
+  int sendIconSize= DpiUtils::scaled (kSendButtonSize);
   sendButton_->setIconSize (QSize (sendIconSize, sendIconSize));
   sendButton_->setFixedSize (DpiUtils::scaled (kSendButtonSize),
                              DpiUtils::scaled (kSendButtonSize));
@@ -377,8 +388,59 @@ ChatConversationPanel::count_input_lines (tree body) {
   return N (body);
 }
 
+static int
+count_visual_input_lines (QTMWidget* editor, int lineHeight) {
+  if (!editor || lineHeight <= 0 || !editor->isVisible ()) return 1;
+
+  qt_simple_widget_rep* tmEditor= editor->tm_widget ();
+  if (!tmEditor) return 1;
+
+  if (the_gui) the_gui->force_update ();
+
+  edit_interface_rep* ed= dynamic_cast<edit_interface_rep*> (tmEditor);
+  if (!ed) return 1;
+
+  int contentH= to_qsize (0, ed->get_total_height (false)).height ();
+  return qMax (1, (contentH + lineHeight - 1) / lineHeight);
+}
+
+bool
+ChatConversationPanel::should_block_readonly_event (QObject* watched,
+                                                    QEvent*  event) {
+  if (!watched->property ("chat_message_readonly").toBool ()) return false;
+  QEvent::Type t= event->type ();
+  if (t == QEvent::InputMethod) return true;
+  if (t == QEvent::KeyPress) {
+    QKeyEvent*            ke  = static_cast<QKeyEvent*> (event);
+    Qt::KeyboardModifiers mods= ke->modifiers ();
+    bool has_modifier         = mods & (Qt::ControlModifier | Qt::MetaModifier);
+    if (has_modifier) {
+      int key= ke->key ();
+      // 只放行允许的快捷键：复制(C)、全选(A)、搜索(F)
+      if (key == Qt::Key_C || key == Qt::Key_A || key == Qt::Key_F)
+        return false;
+      return true;
+    }
+    return true;
+  }
+  if (t == QEvent::KeyRelease) {
+    QKeyEvent*            ke  = static_cast<QKeyEvent*> (event);
+    Qt::KeyboardModifiers mods= ke->modifiers ();
+    bool has_modifier         = mods & (Qt::ControlModifier | Qt::MetaModifier);
+    if (has_modifier) {
+      int key= ke->key ();
+      if (key == Qt::Key_C || key == Qt::Key_A || key == Qt::Key_F)
+        return false;
+      return true;
+    }
+    return true;
+  }
+  return false;
+}
+
 bool
 ChatConversationPanel::eventFilter (QObject* watched, QEvent* event) {
+  if (should_block_readonly_event (watched, event)) return true;
   if (event->type () == QEvent::KeyPress) {
     QKeyEvent* keyEvent= static_cast<QKeyEvent*> (event);
     if ((keyEvent->key () == Qt::Key_Return ||
@@ -391,8 +453,10 @@ ChatConversationPanel::eventFilter (QObject* watched, QEvent* event) {
       }
     }
   }
-  if (event->type () == QEvent::KeyRelease) {
-    adjust_input_height ();
+  if (event->type () == QEvent::KeyRelease ||
+      event->type () == QEvent::InputMethod || event->type () == QEvent::Drop) {
+    if (watched->property ("chat_panel").value<void*> () == this)
+      schedule_input_height_adjust ();
   }
   if (event->type () == QEvent::FocusIn || event->type () == QEvent::FocusOut) {
     if (watched->property ("chat_panel").value<void*> () == this) {
@@ -409,26 +473,38 @@ ChatConversationPanel::eventFilter (QObject* watched, QEvent* event) {
 }
 
 void
+ChatConversationPanel::schedule_input_height_adjust () {
+  if (inputHeightAdjustScheduled_) return;
+  inputHeightAdjustScheduled_= true;
+  QTimer::singleShot (0, this, [this] () {
+    inputHeightAdjustScheduled_= false;
+    adjust_input_height ();
+  });
+}
+
+void
 ChatConversationPanel::adjust_input_height () {
-  if (!inputEditorWidget_) return;
+  if (!inputEditorWidget_ || !inputQTMWidget_) return;
   QWidget* frame= inputEditorWidget_->parentWidget ();
   if (!frame) return;
 
-  tree body    = readInputMessage ();
-  int  docLines= count_input_lines (body);
+  int lineH      = DpiUtils::scaled (kInputLineHeight);
+  int docLines   = count_input_lines (readInputMessage ());
+  int visualLines= count_visual_input_lines (inputQTMWidget_, lineH);
 
-  int targetLines= qMax (kInputDefaultLines, docLines + 1);
+#ifdef LIII_DEBUG
+  cout << "adjust_input_height: docLines= " << docLines
+       << ", visualLines= " << visualLines << "\n";
+#endif
+
+  int targetLines= qMax (kInputDefaultLines, qMax (docLines, visualLines));
   targetLines    = qMin (targetLines, kInputMaxLines);
   int targetFrameH=
       DpiUtils::scaled (kInputLineHeight * targetLines) + fixedFrameExtra_;
 
   if (frame->height () != targetFrameH) {
-    bool wasEnabled= frame->updatesEnabled ();
-    frame->setUpdatesEnabled (false);
-    inputEditorWidget_->setUpdatesEnabled (false);
     frame->setFixedHeight (targetFrameH);
-    inputEditorWidget_->setUpdatesEnabled (true);
-    frame->setUpdatesEnabled (wasEnabled);
+    emit inputHeightChanged ();
   }
 }
 
@@ -1221,7 +1297,7 @@ QTChatTabWidget::removePanel (ChatConversationPanel* panel) {
 
   if (sidebar_) sidebar_->removeItem (panel->sessionId ());
 
-  delete panel;
+  panel->deleteLater ();
 }
 
 /******************************************************************************
@@ -1324,6 +1400,27 @@ QTChatTabWidget::setup_right_content (QHBoxLayout* mainLayout) {
 
   mainLayout->addWidget (content, 1);
 
+  // 对话区域左上角关闭侧边栏按钮（dock 模式使用）
+  closeSidebarBtn_= new QPushButton (content);
+  closeSidebarBtn_->setObjectName ("chat-tab-close-sidebar-btn");
+  closeSidebarBtn_->setFocusPolicy (Qt::NoFocus);
+  closeSidebarBtn_->setCursor (Qt::PointingHandCursor);
+  closeSidebarBtn_->setIcon (QIcon (":llm-chat/sidebar.svg"));
+  closeSidebarBtn_->setIconSize (QSize (DpiUtils::scaled (kToggleIconSize),
+                                        DpiUtils::scaled (kToggleIconSize)));
+  closeSidebarBtn_->setFixedSize (DpiUtils::scaled (kToggleBtnSize),
+                                  DpiUtils::scaled (kToggleBtnSize));
+  closeSidebarBtn_->setStyleSheet (
+      QString ("QPushButton { border: none; border-radius: %1px; "
+               "background: transparent; }"
+               "QPushButton:hover { background: rgba(0,0,0,0.08); }")
+          .arg (DpiUtils::scaled (kToggleBtnSize / 2)));
+  closeSidebarBtn_->move (DpiUtils::scaled (kFloatingBtnMarginX),
+                          DpiUtils::scaled (kFloatingBtnMarginY));
+  connect (closeSidebarBtn_, &QPushButton::clicked, this,
+           [this] () { emit closeSidebarRequested (); });
+  closeSidebarBtn_->hide ();
+
   // 浮球按钮容器
   QWidget* floatingContainer= new QWidget (this);
   floatingContainer->setObjectName ("chat-tab-floating-container");
@@ -1396,6 +1493,26 @@ QTChatTabWidget::toggle_sidebar () {
     }
     sidebarCollapsed_= true;
   }
+}
+
+void
+QTChatTabWidget::setSidebarCollapsed (bool collapsed) {
+  if (sidebarCollapsed_ == collapsed) return;
+  toggle_sidebar ();
+}
+
+void
+QTChatTabWidget::setSidebarVisible (bool visible) {
+  if (!sidebarWidget_) return;
+  sidebarWidget_->setVisible (visible);
+  sidebarCollapsed_= !visible;
+  // dock 模式下不需要浮动按钮，始终隐藏
+  if (floatingBtnContainer_) floatingBtnContainer_->hide ();
+}
+
+void
+QTChatTabWidget::setCloseSidebarButtonVisible (bool visible) {
+  if (closeSidebarBtn_) closeSidebarBtn_->setVisible (visible);
 }
 
 /******************************************************************************

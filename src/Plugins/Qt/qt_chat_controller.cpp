@@ -17,9 +17,11 @@
 #include "scheme.hpp"
 
 #include <QApplication>
+#include <QDir>
 #include <QFileDialog>
 #include <QLabel>
 #include <QPushButton>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QToolButton>
 
@@ -245,9 +247,9 @@ ChatController::onDeleteRequested (const QList<string>& sessionIds) {
     ChatConversationPanel* panel=
         static_cast<ChatConversationPanel*> (s->panel);
 
+    call ("chat-tab-cancel", sid);
     call ("chat-persist-delete-one", sid);
     call ("chat-tab-session-destroy", sid);
-    view_->sidebar ()->removeItem (sid);
     sessionManager_.removeSession (sid);
 
     if (panel) view_->removePanel (panel);
@@ -333,10 +335,19 @@ ChatController::onExportRequested (const string& sessionId) {
   ChatSession* s= sessionManager_.getSession (sessionId);
   if (!s) return;
 
+  QString docsDir=
+      QStandardPaths::writableLocation (QStandardPaths::DocumentsLocation);
+  if (docsDir.isEmpty ()) {
+    docsDir= QStandardPaths::writableLocation (QStandardPaths::HomeLocation);
+  }
+  docsDir= QDir (docsDir).filePath ("LiiiSTEM");
+  if (!QDir (docsDir).exists ()) QDir ().mkpath (docsDir);
+
   QString defaultName= is_empty (s->title) ? QString ("export.tmu")
                                            : to_qstring (s->title) + ".tmu";
+  QString defaultPath= QDir (docsDir).filePath (defaultName);
   QString targetPath = QFileDialog::getSaveFileName (
-      nullptr, qt_translate ("Export Conversation"), defaultName,
+      nullptr, qt_translate ("Export Conversation"), defaultPath,
       qt_translate ("TMU Files (*.tmu)"));
   if (targetPath.isEmpty ()) return;
 
@@ -352,10 +363,22 @@ ChatController::onNewChatRequested () {
 void
 ChatController::onRenameRequested (const string& sessionId,
                                    const string& newTitle) {
+  string curActiveId= view_->sidebar ()->activeSessionId ();
   sessionManager_.setTitle (sessionId, newTitle);
   string displayTitle= getSessionDisplayTitle (sessionId);
   view_->sidebar ()->updateItemTitle (sessionId, displayTitle);
-  view_->sidebar ()->setActiveItem (sessionId);
+  view_->sidebar ()->setActiveItem (curActiveId);
+
+  ChatSession* s= sessionManager_.getSession (sessionId);
+  if (s && s->panel) {
+    ChatConversationPanel* panel=
+        static_cast<ChatConversationPanel*> (s->panel);
+    if (panel->sessionTitle ()) {
+      panel->sessionTitle ()->setText (to_qstring (newTitle));
+      panel->sessionTitle ()->show ();
+    }
+  }
+
   updateManifest (sessionId);
 }
 
