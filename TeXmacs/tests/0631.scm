@@ -1,258 +1,24 @@
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; MODULE      : init-latex.scm
-;; DESCRIPTION : setup latex converters
-;; COPYRIGHT   : (C) 2003  Joris van der Hoeven
+;; MODULE      : 0631.scm
+;; DESCRIPTION : Integration tests for PR 0631 LaTeX Table Import and Extreme Cases
+;; COPYRIGHT   : (C) 2026 Sisyphus
 ;;
 ;; This software falls under the GNU general public license version 3 or later.
 ;; It comes WITHOUT ANY WARRANTY WHATSOEVER. For details, see the file LICENSE
 ;; in the root directory or <http://www.gnu.org/licenses/gpl-3.0.html>.
 ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(texmacs-module (data latex))
+(import (liii check))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; LaTeX format
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(check-set-mode! 'report-failed)
 
-(define (latex-recognizes-at? s pos)
-  (set! pos (format-skip-spaces s pos))
-  (cond ((format-test? s pos "\\document") #t)
-        ((format-test? s pos "\\usepackage") #t)
-        ((format-test? s pos "\\input") #t)
-        ((format-test? s pos "\\includeonly") #t)
-        ((format-test? s pos "\\chapter") #t)
-        ((format-test? s pos "\\appendix") #t)
-        ((format-test? s pos "\\section") #t)
-        ((format-test? s pos "\\begin") #t)
-        (else #f)
-  ) ;cond
-) ;define
-
-(define (latex-recognizes? s)
-  (and (string? s) (latex-recognizes-at? s 0))
-) ;define
-
-(define-format latex
-  (:name "LaTeX")
-  (:suffix "tex")
-  (:recognize latex-recognizes?)
-) ;define-format
-
-(define-format latex-class (:name "LaTeX class") (:suffix "ltx" "sty" "cls"))
-
-(define-preferences ("texmacs->latex:transparent-tracking" "on" noop))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; TeXmacs->LaTeX
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(lazy-define (convert latex texout) serialize-latex)
-(lazy-define (convert latex tmtex) texmacs->latex)
-
-(converter texmacs-stree
-  latex-stree
-  (:function-with-options texmacs->latex)
-  (:option "texmacs->latex:source-tracking" "off")
-  (:option "texmacs->latex:conservative" "on")
-  (:option "texmacs->latex:transparent-source-tracking" "on")
-  (:option "texmacs->latex:attach-tracking-info" "on")
-  (:option "texmacs->latex:replace-style" "on")
-  (:option "texmacs->latex:expand-macros" "on")
-  (:option "texmacs->latex:expand-user-macros" "off")
-  (:option "texmacs->latex:indirect-bib" "off")
-  (:option "texmacs->latex:use-macros" "on")
-  (:option "texmacs->latex:encoding" "ascii")
-) ;converter
-
-(converter latex-stree latex-document (:function serialize-latex))
-
-(converter latex-stree latex-snippet (:function serialize-latex))
-
-(tm-define (texmacs->latex-document x opts)
-  (serialize-latex (texmacs->latex (tm->stree x) opts))
-) ;tm-define
-
-(converter texmacs-stree
-  latex-document
-  (:function-with-options conservative-texmacs->latex)
-  ;; (:function-with-options tracked-texmacs->latex)
-  (:option "texmacs->latex:source-tracking" "off")
-  (:option "texmacs->latex:conservative" "on")
-  (:option "texmacs->latex:transparent-source-tracking" "on")
-  (:option "texmacs->latex:attach-tracking-info" "on")
-  (:option "texmacs->latex:replace-style" "on")
-  (:option "texmacs->latex:expand-macros" "on")
-  (:option "texmacs->latex:expand-user-macros" "off")
-  (:option "texmacs->latex:indirect-bib" "off")
-  (:option "texmacs->latex:use-macros" "on")
-  (:option "texmacs->latex:encoding" "ascii")
-) ;converter
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; LaTeX -> TeXmacs
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(tm-define (latex-document->texmacs x . opts)
-  (if (list-1? opts) (set! opts (car opts)))
-  (with as-pic
-    (== (get-preference "latex->texmacs:fallback-on-pictures") "on")
-    (conservative-latex->texmacs x as-pic)
+(define (load-latex path)
+  (with path
+    (string-append "$TEXMACS_PATH/tests/tex/" path)
+    (string-replace (string-load path) "\r\n" "\n")
   ) ;with
-) ;tm-define
-
-(converter latex-document latex-tree (:function parse-latex-document))
-
-(converter latex-snippet latex-tree (:function parse-latex))
-
-(converter latex-document
-  texmacs-tree
-  (:function-with-options latex-document->texmacs)
-  (:option "latex->texmacs:fallback-on-pictures" "on")
-  (:option "latex->texmacs:source-tracking" "off")
-  (:option "latex->texmacs:conservative" "off")
-  (:option "latex->texmacs:transparent-source-tracking" "off")
-) ;converter
-
-(converter latex-class-document
-  texmacs-tree
-  (:function latex-class-document->texmacs)
-) ;converter
-
-(converter latex-tree texmacs-tree (:function latex->texmacs))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Post-processing imported LaTeX: insert space between d and differential
-;; variables so they are not merged into a single operator in math mode.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(define (is-letter-char? c)
-  (and (char? c)
-    (or (and (char>=? c #\a) (char<=? c #\z)) (and (char>=? c #\A) (char<=? c #\Z)))
-  ) ;and
-) ;define
-
-(define (is-word-boundary-before? s i)
-  (or (= i 0) (not (is-letter-char? (string-ref s (- i 1)))))
-) ;define
-
-(define (is-word-boundary-after? s i)
-  (or (= i (- (string-length s) 1))
-    (not (is-letter-char? (string-ref s (+ i 1))))
-  ) ;or
-) ;define
-
-(define (match-differential s i)
-  (and (< i (- (string-length s) 1))
-    (char=? (string-ref s i) #\d)
-    (char=? (string-ref s (+ i 1)) #\*)
-    (let ((rest (substring s (+ i 2) (string-length s))))
-      (cond ((or (string-starts? rest "x")
-               (string-starts? rest "y")
-               (string-starts? rest "z")
-               (string-starts? rest "r")
-             ) ;or
-             (cons 1 (substring rest 0 1))
-            ) ;
-            ((string-starts? rest "<rho>") (cons 5 "<rho>"))
-            ((string-starts? rest "<varrho>") (cons 8 "<varrho>"))
-            ((string-starts? rest "<theta>") (cons 7 "<theta>"))
-            ((string-starts? rest "<vartheta>") (cons 10 "<vartheta>"))
-            (else #f)
-      ) ;cond
-    ) ;let
-  ) ;and
-) ;define
-
-(define (transform-math-string s)
-  (let* ((n (string-length s)) (res '()))
-    (let loop
-      ((i 0) (last-idx 0))
-      (cond ((>= i n)
-             (if (null? res)
-               s
-               (begin
-                 (if (< last-idx n) (set! res (append res (list (substring s last-idx n)))))
-                 (cons 'concat res)
-               ) ;begin
-             ) ;if
-            ) ;
-            (else (let ((match (match-differential s i)))
-                    (if (and match
-                          (is-word-boundary-before? s i)
-                          (is-word-boundary-after? s (+ i 1 (car match)))
-                        ) ;and
-                      (let* ((match-len (car match)) (var (cdr match)))
-                        (if (> i last-idx) (set! res (append res (list (substring s last-idx i)))))
-                        (set! res (append res (list "d" " " var)))
-                        (loop (+ i 2 match-len) (+ i 2 match-len))
-                      ) ;let*
-                      (loop (+ i 1) last-idx)
-                    ) ;if
-                  ) ;let
-            ) ;else
-      ) ;cond
-    ) ;let
-  ) ;let*
-) ;define
-
-(define (transform-concat-children children)
-  (cond ((null? children) '())
-        ((and (pair? children) (pair? (cdr children)))
-         (let* ((c1 (car children)) (c2 (cadr children)))
-           (if (and (string? c1)
-                 (string? c2)
-                 (or (string=? c2 "<rho>")
-                   (string=? c2 "<varrho>")
-                   (string=? c2 "<theta>")
-                   (string=? c2 "<vartheta>")
-                 ) ;or
-                 (let ((len (string-length c1)))
-                   (and (> len 0)
-                     (char=? (string-ref c1 (- len 1)) #\d)
-                     (or (= len 1) (not (is-letter-char? (string-ref c1 (- len 2)))))
-                   ) ;and
-                 ) ;let
-               ) ;and
-             (let* ((len (string-length c1))
-                    (prefix (if (> len 1) (substring c1 0 (- len 1)) #f))
-                    (spaced-part (if prefix (list prefix "d" " " c2) (list "d" " " c2)))
-                   ) ;
-               (append spaced-part (transform-concat-children (cddr children)))
-             ) ;let*
-             (cons (car children) (transform-concat-children (cdr children)))
-           ) ;if
-         ) ;let*
-        ) ;
-        (else children)
-  ) ;cond
-) ;define
-
-(define math-environments
-  '(math equation equation* eqnarray eqnarray* align align* multline multline*)
-) ;define
-
-(define (upgrade-latex-differentials-stree t in-math)
-  (cond ((string? t) (if in-math (transform-math-string t) t))
-        ((pair? t)
-         (let* ((head (car t)) (next-in-math (or in-math (memq head math-environments))))
-           (if (and next-in-math (eq? head 'concat))
-             (let* ((new-children (map (lambda (x) (upgrade-latex-differentials-stree x #t)) (cdr t))
-                    ) ;new-children
-                    (transformed-children (transform-concat-children new-children))
-                   ) ;
-               (cons 'concat transformed-children)
-             ) ;let*
-             (cons head
-               (map (lambda (x) (upgrade-latex-differentials-stree x next-in-math)) (cdr t))
-             ) ;cons
-           ) ;if
-         ) ;let*
-        ) ;
-        (else t)
-  ) ;cond
 ) ;define
 
 (define (has-cwith-property? options
@@ -301,6 +67,58 @@
                 value-pred
               ) ;has-cwith-property?
         ) ;else
+  ) ;cond
+) ;define
+
+(define (has-cwith-in-tree? x row-start row-end col-start col-end property value-pred)
+  (cond ((null? x) #f)
+        ((and (pair? x) (eq? (car x) 'tformat))
+         (or (has-cwith-property? (cdr x)
+               row-start
+               row-end
+               col-start
+               col-end
+               property
+               value-pred
+             ) ;has-cwith-property?
+           (let loop-children
+             ((children (cdr x)))
+             (cond ((null? children) #f)
+                   ((has-cwith-in-tree? (car children)
+                      row-start
+                      row-end
+                      col-start
+                      col-end
+                      property
+                      value-pred
+                    ) ;has-cwith-in-tree?
+                    #t
+                   ) ;
+                   (else (loop-children (cdr children)))
+             ) ;cond
+           ) ;let
+         ) ;or
+        ) ;
+        ((pair? x)
+         (or (has-cwith-in-tree? (car x)
+               row-start
+               row-end
+               col-start
+               col-end
+               property
+               value-pred
+             ) ;has-cwith-in-tree?
+           (has-cwith-in-tree? (cdr x)
+             row-start
+             row-end
+             col-start
+             col-end
+             property
+             value-pred
+           ) ;has-cwith-in-tree?
+         ) ;or
+        ) ;
+        (else #f)
   ) ;cond
 ) ;define
 
@@ -619,42 +437,91 @@
   ) ;cond
 ) ;define
 
-(define latex->texmacs-original latex->texmacs)
-
-(tm-define (latex->texmacs t)
-  (let* ((res (latex->texmacs-original t))
-         (st (tree->stree res))
-         (new-st1 (upgrade-latex-differentials-stree st #f))
-         (new-st2 (transform-three-line-tables new-st1))
-         (new-st (transform-multirow new-st2))
+(define (stree-contains? x target)
+  (cond ((null? x) #f)
+        ((equal? x target) #t)
+        ((pair? x)
+         (or (stree-contains? (car x) target) (stree-contains? (cdr x) target))
         ) ;
-    (stree->tree new-st)
-  ) ;let*
-) ;tm-define
+        (else #f)
+  ) ;cond
+) ;define
 
-(define latex-document->texmacs-original latex-document->texmacs)
-
-(tm-define (latex-document->texmacs x . opts)
-  (let* ((res (apply latex-document->texmacs-original (cons x opts)))
-         (st (tree->stree res))
-         (new-st1 (upgrade-latex-differentials-stree st #f))
-         (new-st2 (transform-three-line-tables new-st1))
-         (new-st (transform-multirow new-st2))
+(define (test-latex-table-import)
+  (display "Testing 45 extreme cases of LaTeX table import...\n")
+  (let* ((latex-content (load-latex "0631_table_import.tex"))
+         (parsed (parse-latex-document latex-content))
+         (texmacs-tree (latex->texmacs parsed))
+         (st (tree->stree texmacs-tree))
         ) ;
-    (stree->tree new-st)
-  ) ;let*
-) ;tm-define
 
-;; Re-register converters so that `converter-function` table points
-;; to our wrapper definitions.  The `converter` macro resolves the
-;; function symbol at registration time; simply redefining the symbol
-;; afterwards leaves the old reference in the table.
-(converter latex-tree texmacs-tree (:function latex->texmacs))
-(converter latex-document
-  texmacs-tree
-  (:function-with-options latex-document->texmacs)
-  (:option "latex->texmacs:fallback-on-pictures" "on")
-  (:option "latex->texmacs:source-tracking" "off")
-  (:option "latex->texmacs:conservative" "off")
-  (:option "latex->texmacs:transparent-source-tracking" "off")
-) ;converter
+    (display "Verifying specific table properties in converted tree...\n")
+
+    ;; Verify that the document parsed successfully
+    (check (null? st) => #f)
+
+    ;; 1. Check three-line-table support
+    ;; The booktabs toprule/midrule/bottomrule tables should be converted to 'three-line-table
+    (check (stree-contains? st 'three-line-table) => #t)
+
+    ;; 2. Check basic tabular format (like 'tabular or 'tabular*)
+    (check (stree-contains? st 'tabular*) => #t)
+
+    ;; 3. Check for specific cell contents to ensure no content was lost during parsing
+    (check (stree-contains? st "Span Three Columns") => #t)
+    (check (stree-contains? st "Span Two Right") => #t)
+    (check (stree-contains? st "Row Span") => #t)
+    (check (stree-contains? st "MultiRowCol") => #t)
+    (check (stree-contains? st "Fixed Width Row") => #t)
+    (check (stree-contains? st "Solo") => #t)
+    (check (stree-contains? st "Left text") => #t)
+
+    ;; 4. Check for nested tabular environments
+    (check (stree-contains? st "Outer cell") => #t)
+    (check (stree-contains? st "Inner 1") => #t)
+
+    ;; 5. Check for math mode cell preservation
+    (check (stree-contains? st "<alpha>*<beta>") => #t)
+
+    ;; 6. Check for float environments and captions
+    (check (stree-contains? st 'big-table) => #t)
+    (check (stree-contains? st "Test Caption") => #t)
+    (check (stree-contains? st "tab:test_label") => #t)
+
+    ;; 7. Check multirow resolution and cleanliness
+    ;; There must be NO undefined multirow macro in the final tree
+    (check (stree-contains? st 'multirow) => #f)
+    ;; Check new extreme cases of multirow combined/nested
+    (check (stree-contains? st "DualHeader") => #t)
+    (check (stree-contains? st "Multi 1") => #t)
+    (check (stree-contains? st "Span Four Rows") => #t)
+    (check (stree-contains? st "Combined MultiRowCol Width") => #t)
+    (check (stree-contains? st "Extreme Nested Combined") => #t)
+
+    ;; 8. Check column width extraction from p{width} specifications
+    (check (has-cwith-in-tree? st
+             "1"
+             "-1"
+             "1"
+             "1"
+             "cell-width"
+             (lambda (v) (equal? v "3cm"))
+           ) ;has-cwith-in-tree?
+      =>
+      #t
+    ) ;check
+    (check (has-cwith-in-tree? st
+             "1"
+             "-1"
+             "2"
+             "2"
+             "cell-width"
+             (lambda (v) (equal? v "4.5cm"))
+           ) ;has-cwith-in-tree?
+      =>
+      #t
+    ) ;check
+  ) ;let*
+) ;define
+
+(tm-define (test_0631) (test-latex-table-import) (check-report))
