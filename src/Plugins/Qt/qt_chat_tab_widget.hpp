@@ -114,6 +114,8 @@ signals:
 protected:
   /// 事件过滤器：拦截 Enter 键触发发送
   bool eventFilter (QObject* watched, QEvent* event) override;
+  /// 欢迎模式下按容器高度比例调整顶部偏移
+  void resizeEvent (QResizeEvent* event) override;
 
 private:
   /// 构建面板 UI 布局

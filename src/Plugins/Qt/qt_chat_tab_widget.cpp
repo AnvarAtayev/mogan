@@ -137,8 +137,7 @@ ChatConversationPanel::setup_ui () {
   contentLayout->setContentsMargins (0, DpiUtils::scaled (kContentMarginY), 0,
                                      DpiUtils::scaled (kContentMarginY));
   contentLayout->setSpacing (DpiUtils::scaled (kContentSpacing));
-  topSpacer_= new QSpacerItem (0, DpiUtils::scaled (kWelcomeTopOffsetY),
-                               QSizePolicy::Minimum, QSizePolicy::Fixed);
+  topSpacer_= new QSpacerItem (0, 0, QSizePolicy::Minimum, QSizePolicy::Fixed);
   contentLayout->addSpacerItem (topSpacer_);
 
   QWidget*     topPanel = new QWidget (this);
@@ -315,9 +314,8 @@ void
 ChatConversationPanel::enterConversationMode () {
   if (conversationMode_) return;
 
-  conversationMode_    = true;
-  const int startOffset= DpiUtils::scaled (kWelcomeTopOffsetY);
-  const int endOffset  = DpiUtils::scaled (kConversationTopOffsetY);
+  conversationMode_  = true;
+  const int endOffset= DpiUtils::scaled (kConversationTopOffsetY);
 
   if (messageFrame_) {
     QGraphicsOpacityEffect* messageEffect=
@@ -354,6 +352,20 @@ ChatConversationPanel::enterConversationMode () {
   if (topSpacer_ && layout ()) {
     topSpacer_->changeSize (0, endOffset, QSizePolicy::Minimum,
                             QSizePolicy::Fixed);
+    layout ()->invalidate ();
+    layout ()->activate ();
+  }
+}
+
+void
+ChatConversationPanel::resizeEvent (QResizeEvent* event) {
+  QWidget::resizeEvent (event);
+  if (conversationMode_ || !topSpacer_) return;
+  int targetOffset= height () * 2 / 7 - DpiUtils::scaled (kContentMarginY);
+  if (targetOffset < 0) targetOffset= 0;
+  topSpacer_->changeSize (0, targetOffset, QSizePolicy::Minimum,
+                          QSizePolicy::Fixed);
+  if (layout ()) {
     layout ()->invalidate ();
     layout ()->activate ();
   }

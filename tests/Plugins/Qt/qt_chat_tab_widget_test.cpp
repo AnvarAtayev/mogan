@@ -9,12 +9,14 @@
 #include "Qt/qt_utilities.hpp"
 #include "base.hpp"
 #include <QInputMethodEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QWheelEvent>
+#include <QWidget>
 #include <QtTest/QtTest>
 
 using namespace moebius;
