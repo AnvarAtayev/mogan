@@ -11,6 +11,7 @@
 
 #include "qt_chat_controller.hpp"
 #include "qt_chat_tab_widget.hpp"
+#include "qt_floating_search_bar.hpp"
 
 #include "new_buffer.hpp"
 #include "s7_tm.hpp"
@@ -138,6 +139,12 @@ ChatController::createView (QWidget* parent, qt_tm_widget_rep* tm) {
       call ("chat-tab-session-select-model", s->model);
     }
   }
+
+  // 6. 注册浮动搜索栏的 parent provider
+  qt_floating_search_set_parent_provider ([this] () -> QWidget* {
+    if (!view_) return nullptr;
+    return view_->contentWidget ();
+  });
 
   return view_;
 }
@@ -450,6 +457,9 @@ void
 ChatController::activateSession (const string& sessionId) {
   if (!view_) return;
 
+  // 切换 session 时隐藏悬浮搜索栏
+  qt_floating_search_bar_show (view_->contentWidget (), false);
+
   ChatConversationPanel* panel= getOrCreatePanel (sessionId);
   if (!panel) return;
 
@@ -704,4 +714,20 @@ qt_chat_tab_restore_session (string sessionId, string title, string model,
   bool isThinking = (thinking == "enabled");
   get_chat_controller ()->restoreSessionMeta (
       sessionId, title, model, isArchived, createdAt, expandCount, isThinking);
+}
+
+string
+ChatController::activeSessionMessageBufferUrl () const {
+  if (!view_) return "";
+  ChatSidebar* sidebar= view_->sidebar ();
+  if (!sidebar) return "";
+  string activeId= sidebar->activeSessionId ();
+  if (is_empty (activeId)) return "";
+  url msgBufUrl= ChatSessionManager::messageBufferUrl (activeId);
+  return as_string (msgBufUrl);
+}
+
+string
+qt_chat_tab_active_message_buffer_url () {
+  return get_chat_controller ()->activeSessionMessageBufferUrl ();
 }

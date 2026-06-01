@@ -526,6 +526,49 @@ function main()
                     "int",
                     "string"
                 }
+            },
+            {
+                scm_name = "qt-chat-tab-active-message-buffer-url",
+                cpp_name = "qt_chat_tab_active_message_buffer_url",
+                ret_type = "string",
+                arg_list = {}
+            },
+
+            {
+                scm_name = "qt-floating-search",
+                cpp_name = "qt_floating_search",
+                ret_type = "void",
+                arg_list = {
+                    "string"
+                }
+            },
+            {
+                scm_name = "qt-floating-search-init",
+                cpp_name = "qt_floating_search_init",
+                ret_type = "void",
+                arg_list = {
+                    "string",
+                    "string"
+                }
+            },
+            {
+                scm_name = "qt-floating-search-set-match-info",
+                cpp_name = "qt_floating_search_set_match_info",
+                ret_type = "void",
+                arg_list = {
+                    "int",
+                    "int"
+                }
+            },
+            {
+                scm_name = "qt-floating-search-set-callbacks",
+                cpp_name = "qt_floating_search_set_callbacks",
+                ret_type = "void",
+                arg_list = {
+                    "string",
+                    "string",
+                    "string"
+                }
             }
         }
     }

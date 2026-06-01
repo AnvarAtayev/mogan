@@ -25,6 +25,11 @@
         <file>llm-chat/thinking.svg</file>
         <file>llm-chat/thinking-white.svg</file>
 
+        <file>floating-search/down.svg</file>
+        <file>floating-search/up.svg</file>
+        <file>floating-search/text-mode.svg</file>
+        <file>floating-search/math-mode.svg</file>
+
         <!-- dark theme -->
         <file>ocr-button/left-align-white.svg</file>
         <file>ocr-button/middle-align-white.svg</file>
@@ -42,6 +47,11 @@
         <file>pdf-reader/minus-white.svg</file>
         <file>pdf-reader/open-white.svg</file>
         <file>pdf-reader/screenshot-white.svg</file>
+
+        <file>floating-search/down-white.svg</file>
+        <file>floating-search/up-white.svg</file>
+        <file>floating-search/text-mode-white.svg</file>
+        <file>floating-search/math-mode-white.svg</file>
 
         <!-- tutorial -->
         <file>tutorial/ocr-tutorial.gif</file>
