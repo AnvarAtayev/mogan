@@ -49,6 +49,8 @@
 #include "qt_tm_widget.hpp"
 #include "qt_utilities.hpp"
 
+bool in_presentation_mode ();
+
 #if !IS_COMMUNITY
 #include "telemetry.hpp"
 #endif
@@ -173,18 +175,19 @@ QTMInteractiveInputHelper::commit (int result) {
 
 qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
     : qt_window_widget_rep (new QTMWindow (0), "popup", _quit), helper (this),
-      prompt (NULL), full_screen (false), menuToolBarVisibleCache (false),
-      titleBarVisibleCache (false), scmNotificationBar (nullptr),
-      loginButton (nullptr), vipButton (nullptr), m_loginDialog (nullptr),
-      avatarLabel (nullptr), nameLabel (nullptr), accountIdLabel (nullptr),
-      membershipPeriodLabel (nullptr), membershipTitleLabel (nullptr),
-      loginActionButton (nullptr), logoutButton (nullptr), m_userId (""),
-      m_memberType (""), m_currentScmNotificationItem (""),
-      startupContentWidget (nullptr), startupTabMode (false),
-      pdfViewerWidget (nullptr), pdfTabMode (false), currentPdfPath (""),
-      lastLoadedPdfPath (""), chatContentWidget (nullptr), chatTabMode (false),
-      chatSideDock (nullptr), chatSidebarToggleBtn (nullptr),
-      chatSidebarMode (false), chatSidebarModeMemory_ (false) {
+      prompt (NULL), full_screen (false), is_presentation (false),
+      menuToolBarVisibleCache (false), titleBarVisibleCache (false),
+      scmNotificationBar (nullptr), loginButton (nullptr), vipButton (nullptr),
+      m_loginDialog (nullptr), avatarLabel (nullptr), nameLabel (nullptr),
+      accountIdLabel (nullptr), membershipPeriodLabel (nullptr),
+      membershipTitleLabel (nullptr), loginActionButton (nullptr),
+      logoutButton (nullptr), m_userId (""), m_memberType (""),
+      m_currentScmNotificationItem (""), startupContentWidget (nullptr),
+      startupTabMode (false), pdfViewerWidget (nullptr), pdfTabMode (false),
+      currentPdfPath (""), lastLoadedPdfPath (""), chatContentWidget (nullptr),
+      chatTabMode (false), chatSideDock (nullptr),
+      chatSidebarToggleBtn (nullptr), chatSidebarMode (false),
+      chatSidebarModeMemory_ (false) {
   type= texmacs_widget;
 
   main_widget= concrete (::glue_widget (true, true, 1, 1));
@@ -2094,8 +2097,9 @@ void set_standard_style_sheet (QWidget* w);
 
 void
 qt_tm_widget_rep::set_full_screen (bool flag) {
-  full_screen = flag;
-  QWidget* win= mainwindow ()->window ();
+  bool was_presentation= is_presentation;
+  full_screen          = flag;
+  QWidget* win         = mainwindow ()->window ();
   if (win) {
     if (flag) {
       QPalette pal;
@@ -2126,18 +2130,34 @@ qt_tm_widget_rep::set_full_screen (bool flag) {
         titleBarVisibleCache= tb && tb->isVisible ();
         if (tb) tb->setVisible (false);
       }
-      bool is_slide_style= false;
-      try {
-        is_slide_style= as_bool (call ("in-presentation?"));
-      } catch (...) {
-        is_slide_style= false;
+      if (in_presentation_mode ()) {
+        is_presentation          = true;
+        QTMScrollView* scrollView= scrollarea ();
+        if (scrollView) {
+          QWidget* viewport= scrollView->viewport ();
+          if (viewport) {
+            QPalette vpal;
+            vpal.setColor (QPalette::Shadow, QColor (0, 0, 0));
+            vpal.setColor (QPalette::Mid, QColor (0, 0, 0));
+            viewport->setPalette (vpal);
+            viewport->setBackgroundRole (QPalette::Shadow);
+          }
+        }
+        if (chatSidebarToggleBtn) chatSidebarToggleBtn->hide ();
       }
-      bool           is_presentation_mode= !visibility[0];
-      QTMScrollView* scrollView          = scrollarea ();
-      if (scrollView && is_presentation_mode && is_slide_style) {
-        QWidget* viewport= scrollView->viewport ();
-        if (viewport) {
-          viewport->setBackgroundRole (QPalette::Shadow);
+      else if (was_presentation) {
+        is_presentation          = false;
+        QColor         bgcol     = to_qcolor (tm_background);
+        QTMScrollView* scrollView= scrollarea ();
+        if (scrollView) {
+          QWidget* viewport= scrollView->viewport ();
+          if (viewport) {
+            QPalette vpal;
+            vpal.setColor (QPalette::Mid, bgcol);
+            vpal.setColor (QPalette::Shadow, bgcol);
+            viewport->setPalette (vpal);
+            viewport->setBackgroundRole (QPalette::Mid);
+          }
         }
       }
     }
@@ -2164,19 +2184,20 @@ qt_tm_widget_rep::set_full_screen (bool flag) {
         QWidget* tb= windowAgent->titleBar ();
         if (tb) tb->setVisible (titleBarVisibleCache);
       }
-      bool is_slide_style= false;
-      try {
-        is_slide_style= as_bool (call ("in-presentation?"));
-      } catch (...) {
-        is_slide_style= false;
-      }
-      QTMScrollView* scrollView= scrollarea ();
-      if (scrollView && is_slide_style) {
-        QWidget* viewport= scrollView->viewport ();
-        if (viewport) {
-          viewport->setBackgroundRole (QPalette::Mid);
+      if (was_presentation) {
+        QTMScrollView* scrollView= scrollarea ();
+        if (scrollView) {
+          QWidget* viewport= scrollView->viewport ();
+          if (viewport) {
+            QPalette vpal;
+            vpal.setColor (QPalette::Mid, bgcol);
+            vpal.setColor (QPalette::Shadow, bgcol);
+            viewport->setPalette (vpal);
+            viewport->setBackgroundRole (QPalette::Mid);
+          }
         }
       }
+      is_presentation= false;
 #ifdef UNIFIED_TOOLBAR
       if (use_unified_toolbar) {
         mainwindow ()->centralWidget ()->layout ()->setContentsMargins (0, 1, 0,
