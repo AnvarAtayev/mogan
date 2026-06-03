@@ -231,7 +231,13 @@ pretty-val : string
       (enum (set-pretty-preference "cyrillic input method" answer)
             '("None" "Translit" "Jcuken" "Yawerty")
             (get-pretty-preference "cyrillic input method")
-            "15em")))
+            "15em"))
+    (assuming (os-macos?)
+      (item (text "Keyboard shortcut style:")
+        (enum (set-pretty-preference* "keyboard shortcut style" answer)
+              '("Text" "Symbol")
+              (get-pretty-preference "keyboard shortcut style")
+              "15em"))))
   ====== ======
   (bold (text "Remote controllers with keyboard simulation"))
   ======
