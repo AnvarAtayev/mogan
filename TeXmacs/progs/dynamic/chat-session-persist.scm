@@ -55,7 +55,8 @@
 
 (tm-define (chat-persist-make-entry sid title model archived created-at . opts)
   (let ((thinking (if (and (pair? opts) (car opts)) (car opts) "disabled"))
-        (entry (string->njson "{}")))
+        (entry (string->njson "{}"))
+       ) ;
     (njson-set! entry "sessionId" sid)
     (njson-set! entry "title" title)
     (njson-set! entry "model" model)
@@ -95,32 +96,8 @@
   (let* ((in-buf (chat-tab-session->input-buffer session-id))
          (body (buffer-get-body in-buf))
         ) ;
-    (chat-persist-extract-title-from-tree body)
+    (string-replace (texmacs->verbatim body) "\n" " ")
   ) ;let*
-) ;tm-define
-
-;; chat-persist-extract-title-from-tree
-;; 从文档树 body 中提取纯文本标题（拼接所有原子文本）。
-
-(tm-define (chat-persist-extract-title-from-tree body)
-  (chat-persist-extract-title-loop body 0 "")
-) ;tm-define
-
-;; 内部递归：遍历 DOCUMENT 子节点，拼接所有原子文本。
-
-(tm-define (chat-persist-extract-title-loop body idx result)
-  (if (or (not (tree-children body)) (>= idx (length (tree-children body))))
-    result
-    (let ((child (tree-ref body idx)))
-      (if (tree-atomic? child)
-        (chat-persist-extract-title-loop body
-          (+ idx 1)
-          (string-append result (tree->string child))
-        ) ;chat-persist-extract-title-loop
-        (chat-persist-extract-title-loop body (+ idx 1) result)
-      ) ;if
-    ) ;let
-  ) ;if
 ) ;tm-define
 
 ;;; ---------- 加载状态 ----------
@@ -165,7 +142,14 @@
                       (display sid)
                       (newline)
                       ;; 只传元数据给 C++，不加载 buffer 内容
-                      (qt-chat-tab-restore-session sid title model archived-str created-at expand-count thinking)
+                      (qt-chat-tab-restore-session sid
+                        title
+                        model
+                        archived-str
+                        created-at
+                        expand-count
+                        thinking
+                      ) ;qt-chat-tab-restore-session
                       ;; 恢复 Scheme 侧 session state（包含 thinking）
                       (chat-persist-register-session sid model thinking)
                     ) ;let*
@@ -214,8 +198,11 @@
           (with-buffer msg-buf
             (session-unfold-last-n n)
             (chat-tab-add-default-style-packages!)
-            (go-end))
-          (buffer-pretend-saved msg-buf)))
+            (go-end)
+          ) ;with-buffer
+          (buffer-pretend-saved msg-buf)
+        ) ;when
+      ) ;let*
     ) ;when
   ) ;let
 ) ;tm-define
@@ -264,7 +251,8 @@
 (tm-define (chat-persist-update-manifest session-id title model archived created-at . opts)
   (let* ((thinking (if (and (pair? opts) (car opts)) (car opts) "disabled"))
          (manifest-path (chat-persist-manifest-path))
-         (entry (chat-persist-make-entry session-id title model archived created-at thinking))
+         (entry (chat-persist-make-entry session-id title model archived created-at thinking)
+         ) ;entry
         ) ;
     (chat-persist-ensure-dir! (chat-persist-base-dir))
     (if (not (file-exists? manifest-path))
@@ -309,7 +297,7 @@
       ) ;let*
     ) ;if
     (njson-free entry)
-  ) ;let
+  ) ;let*
 ) ;tm-define
 
 ;; chat-persist-save-one
@@ -318,7 +306,13 @@
 (tm-define (chat-persist-save-one session-id title model archived created-at . opts)
   (let ((thinking (if (and (pair? opts) (car opts)) (car opts) "disabled")))
     (chat-persist-export-buffer session-id)
-    (chat-persist-update-manifest session-id title model archived created-at thinking)
+    (chat-persist-update-manifest session-id
+      title
+      model
+      archived
+      created-at
+      thinking
+    ) ;chat-persist-update-manifest
   ) ;let
 ) ;tm-define
 
@@ -416,7 +410,8 @@
 
 (tm-define (chat-persist-register-session session-id model . opts)
   (let ((thinking (if (and (pair? opts) (car opts)) (car opts) "disabled"))
-        (st (chat-tab-get-state session-id)))
+        (st (chat-tab-get-state session-id))
+       ) ;
     (when (not st)
       (chat-tab-set-state! session-id (chat-tab-state model thinking))
     ) ;when
