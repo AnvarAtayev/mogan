@@ -127,11 +127,13 @@ protected:
   /// 欢迎模式下按容器高度比例调整顶部偏移
   void resizeEvent (QResizeEvent* event) override;
 
+public:
+  /// 在当前事件处理完成后更新输入区高度，避免读取到旧排版结果
+  void schedule_input_height_adjust ();
+
 private:
   /// 构建面板 UI 布局
   void setup_ui ();
-  /// 在当前事件处理完成后更新输入区高度，避免读取到旧排版结果
-  void schedule_input_height_adjust ();
   /// 根据内容动态调整输入区高度
   void adjust_input_height ();
 

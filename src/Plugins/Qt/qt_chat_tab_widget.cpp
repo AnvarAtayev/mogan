@@ -260,7 +260,6 @@ ChatConversationPanel::setup_ui () {
       inputQTMWidget_= editor;
     }
   }
-
   QHBoxLayout* btnLayout= new QHBoxLayout ();
   btnLayout->addStretch ();
 
@@ -537,6 +536,7 @@ ChatConversationPanel::eventFilter (QObject* watched, QEvent* event) {
   }
   if (event->type () == QEvent::FocusIn || event->type () == QEvent::FocusOut) {
     if (watched->property ("chat_panel").value<void*> () == this) {
+      if (event->type () == QEvent::FocusIn) schedule_input_height_adjust ();
       QWidget* frame=
           inputEditorWidget_ ? inputEditorWidget_->parentWidget () : nullptr;
       if (frame) {
@@ -565,9 +565,10 @@ ChatConversationPanel::adjust_input_height () {
   QWidget* frame= inputEditorWidget_->parentWidget ();
   if (!frame) return;
 
-  int lineH      = DpiUtils::scaled (kInputLineHeight);
-  int docLines   = count_input_lines (readInputMessage ());
-  int visualLines= count_visual_input_lines (inputQTMWidget_, lineH);
+  tree body       = readInputMessage ();
+  int  lineH      = DpiUtils::scaled (kInputLineHeight);
+  int  docLines   = count_input_lines (body);
+  int  visualLines= count_visual_input_lines (inputQTMWidget_, lineH);
 
 #ifdef LIII_DEBUG
   cout << "adjust_input_height: docLines= " << docLines
