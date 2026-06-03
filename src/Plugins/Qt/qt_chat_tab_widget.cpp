@@ -99,7 +99,7 @@ constexpr int kInputLineHeight       = 22;
 constexpr int kInputDefaultLines     = 3;
 constexpr int kInputMaxLines         = 10;
 constexpr int kContentMarginY        = 24;
-constexpr int kContentSpacing        = 16;
+constexpr int kContentSpacing        = 8;
 constexpr int kWelcomeTopOffsetY     = 240;
 constexpr int kConversationTopOffsetY= 8;
 constexpr int kInputFrameRadius      = 8;
@@ -138,15 +138,16 @@ void
 ChatConversationPanel::setup_ui () {
   QVBoxLayout* contentLayout= new QVBoxLayout (this);
   contentLayout->setContentsMargins (0, DpiUtils::scaled (kContentMarginY), 0,
-                                     DpiUtils::scaled (kContentMarginY));
+                                     DpiUtils::scaled (kContentSpacing));
   contentLayout->setSpacing (DpiUtils::scaled (kContentSpacing));
   topSpacer_= new QSpacerItem (0, 0, QSizePolicy::Minimum, QSizePolicy::Fixed);
   contentLayout->addSpacerItem (topSpacer_);
 
-  QWidget*     topPanel = new QWidget (this);
+  QWidget* topPanel= new QWidget (this);
+  topPanel->setObjectName ("chat-tab-top-panel");
   QVBoxLayout* topLayout= new QVBoxLayout (topPanel);
   topLayout->setContentsMargins (0, 0, 0, 0);
-  topLayout->setSpacing (DpiUtils::scaled (kContentSpacing));
+  topLayout->setSpacing (0);
 
   // Welcome title
   welcomeTitle_= new QLabel (qt_translate ("Welcome to Liii STEM!"), topPanel);
@@ -161,6 +162,7 @@ ChatConversationPanel::setup_ui () {
   sessionTitle_->setAlignment (Qt::AlignCenter);
   DpiUtils::applyScaledFont (sessionTitle_, kSessionTitleFontPx);
   topLayout->addWidget (sessionTitle_, 0, Qt::AlignHCenter);
+  topLayout->addSpacing (DpiUtils::scaled (kContentSpacing));
 
   // Message area
   qreal chatZoom = DpiUtils::scaled (100) / 100.0;
@@ -205,6 +207,7 @@ ChatConversationPanel::setup_ui () {
 
   // Input area
   QWidget* inputArea= new QWidget (topPanel);
+  inputArea->setObjectName ("chat-tab-input-area-wrap");
   inputArea->setSizePolicy (QSizePolicy::Expanding, QSizePolicy::Preferred);
   QVBoxLayout* inputAreaLayout= new QVBoxLayout (inputArea);
   inputAreaLayout->setContentsMargins (0, 0, 0, 0);
