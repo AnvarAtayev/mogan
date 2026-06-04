@@ -28,9 +28,43 @@
 
   <use-package|session>
 
-  <assign|llm-prompt-color|<value|generic-prompt-color>>
+  <assign|session|<\macro|language|session|body>
+    <\with|prog-language|<arg|language>|prog-session|<arg|session>>
+      <render-session|<arg|body>>
 
-  <assign|llm-input-color|<value|generic-input-color>>
+      \;
+    </with>
+  </macro>>
+
+  \;
+
+  <assign|llm-input-bg-color|<macro|<if|<equal|<value|color>|white>|#9ba8c2|#f0f4ff>>>
+
+  <assign|llm-prompt-color|#4d6cff>
+
+  <assign|llm-input-color|<macro|<if|<equal|<value|color>|white>|#242938|dark blue>>>
+
+  <\active*>
+    <\src-comment>
+      Input field with background color
+    </src-comment>
+  </active*>
+
+  <macro|indent-both|<\macro|left-indentation|right-indentation|body>
+    <with|par-left|<plus|<value|par-left>|<arg|left-indentation>>|par-right|<plus|<value|par-right>|<arg|right-indentation>>|<arg|body>>
+  </macro>>
+
+  <assign|llm-input|<\macro|prompt|body>
+    <\indent-both|0.1par|0.1par>
+      <\with|ornament-shape|classic|ornament-color|<llm-input-bg-color>|ornament-border|0ln|ornament-vpadding|0.3fn>
+        <\ornament>
+          <tabular|<tformat|<twith|table-width|1par>|<cwith|1|1|2|2|cell-hpart|1>|<cwith|1|1|1|1|cell-lsep|0fn>|<cwith|1|1|1|1|cell-rsep|0fn>|<cwith|1|1|2|2|cell-lsep|0fn>|<cwith|1|1|2|2|cell-rsep|0fn>|<cwith|1|1|2|2|cell-hyphen|t>|<twith|table-hyphen|y>|<table|<row|<cell|<id-function|<with|color|<value|llm-prompt-color>|<arg|prompt>>>>|<\cell>
+            <with|color|<llm-input-color>|math-display|true|<arg|body>>
+          </cell>>>>>
+        </ornament>
+      </with>
+    </indent-both>
+  </macro>>
 
   <\active*>
     <\src-comment>
@@ -39,11 +73,13 @@
   </active*>
 
   <assign|llm-output|<\macro|body>
-    <\with|info-flag|none|font-family|CMU>
-      <\generic-output>
-        <text|<arg|body>>
-      </generic-output>
-    </with>
+    <\indent-both|0.1par|0.1par>
+      <\with|info-flag|none|font-family|CMU>
+        <\generic-output>
+          <text|<arg|body>>
+        </generic-output>
+      </with>
+    </indent-both>
   </macro>>
 
   <assign|llm-errput|<\macro|body>
@@ -56,7 +92,7 @@
 
   <assign|llm-thinking-dots|<macro|<anim-repeat|<anim-compose|<anim-constant||0.35sec>|<anim-constant|.|0.35sec>|<anim-constant|..|0.35sec>|<anim-constant|...|0.35sec>>>>>
 
-  <assign|script-busy|<macro|msg|<script-status|<if|<equal|<arg|msg>|<uninit>>|<concat|<localize|Thinking>|<llm-thinking-dots>>|<arg|msg>>>>>}
+  <assign|script-busy|<macro|msg|<script-status|<if|<equal|<arg|msg>|<uninit>>|<concat|<localize|Thinking>|<llm-thinking-dots>>|<arg|msg>>>>>
 </body>
 
 <\initial>
