@@ -18,6 +18,7 @@
     (dynamic session-edit)
     (kernel texmacs tm-plugins)
     (texmacs texmacs tm-files)
+    (data latex)
   ) ;:use
 ) ;texmacs-module
 
@@ -169,7 +170,7 @@
 ) ;define
 
 ;; chat-tab-tree->plain-text
-;; 将 TeXmacs 树转为纯文本，直接提取字符串（不经过 LaTeX 管线，保留中文等 Unicode）。
+;; 将 TeXmacs 树转为 LaTeX 代码片段。
 ;;
 ;; 语法
 ;; ----
@@ -183,32 +184,10 @@
 ;; 返回值
 ;; ----
 ;; string
-;; 纯文本表示。
+;; LaTeX 代码片段。
 
 (define (chat-tab-tree->plain-text t)
-  (let ((s (if (tree? t) (tree->stree t) t)))
-    (cond ((string? s) (cork->utf8 s))
-          ((null? s) "")
-          ((number? s) (number->string s))
-          ((symbol? s) "")
-          ((not (pair? s)) "")
-          ((eq? (car s) 'document)
-           (chat-tab-join-nonempty (map chat-tab-tree->plain-text (cdr s)) "\n")
-          ) ;
-          ((eq? (car s) 'concat)
-           (apply string-append (map chat-tab-tree->plain-text (cdr s)))
-          ) ;
-          ((eq? (car s) 'new-line) "\n")
-          ((eq? (car s) 'folded-explain) "")
-          ((eq? (car s) 'unfolded-explain) "")
-          ((eq? (car s) 'image) "filtered image")
-          ((eq? (car s) 'with)
-           ;; (with var1 val1 ... body) → 只取 body
-           (if (null? (cdr s)) "" (chat-tab-tree->plain-text (car (reverse s))))
-          ) ;
-          (else (apply string-append (map chat-tab-tree->plain-text (cdr s))))
-    ) ;cond
-  ) ;let
+  (serialize-latex (texmacs->latex (tm->stree t) '()))
 ) ;define
 
 ;; chat-tab-tree-has-image?
@@ -1218,32 +1197,17 @@
              (plugin-ses (chat-tab-state->plugin-session-id st session-id))
             ) ;
         (if (chat-tab-tree-has-image? input)
-          ;; 包含图片等非文本内容：过滤图片，输出提示，不发给插件
-          (begin
-            (chat-tab-clear-input! in-buf)
-            (let* ((plain (chat-tab-tree->plain-text input))
-                   (filtered (stree->tree `(document ,plain)))
-                   (out (chat-tab-append-round! msg-buf filtered session-id))
-                  ) ;
-              (if (not out)
-                #f
-                (begin
-                  (with-buffer msg-buf
-                    (chat-tab-output out
-                      (stree->tree `(document (with ,"color"
-                                                ,"dark grey"
-                                                ,"font-shape"
-                                                ,"italic"
-                                                ,(utf8->cork "AI 聊天暂不支持图片等非文本内容，相关内容已过滤。")))
-                      ) ;stree->tree
-                    ) ;chat-tab-output
-                    (buffer-pretend-saved msg-buf)
-                  ) ;with-buffer
-                  #t
-                ) ;begin
-              ) ;if
-            ) ;let*
-          ) ;begin
+          ;; 包含图片：替换为不支持图片的问答，直接设置输出
+          (let* ((qa-input (stree->tree
+                      `(document ,(translate "Does the current AI chat support images?"))))
+                 (out (chat-tab-append-round! msg-buf qa-input session-id)))
+            (if (not out)
+              #f
+              (begin
+                (with-buffer msg-buf
+                  (chat-tab-output out (stree->tree `(document ,(translate "No, it does not."))))
+                  (buffer-pretend-saved msg-buf))
+                #t)))
           ;; 纯文本内容：正常发送流程
           (let* ((out (chat-tab-append-round! msg-buf input session-id)))
             (if (not out)
