@@ -178,7 +178,7 @@
   ) ;cond
 ) ;define
 
-(define (tmhtml-css-header)
+(tm-define (tmhtml-css-header)
   ;; TODO: return only used CSS properties
   (let ((html (string-append "body { text-align: justify } "
                 "h5 { display: inline; padding-right: 1em } "
@@ -217,13 +217,27 @@
                 ".strike-through { text-decoration: line-through; } "
                 "del { text-decoration: line-through wavy red; } "
                 ".fill-out { text-decoration: underline dotted; } "
+                "ol.enumerate-numeric { list-style-type: decimal; } "
+                "ol.enumerate-roman { list-style-type: lower-roman; } "
+                "ol.enumerate-Roman { list-style-type: upper-roman; } "
+                "ol.enumerate-alpha { list-style-type: lower-alpha; } "
+                "ol.enumerate-Alpha { list-style-type: upper-alpha; } "
+                "ol.enumerate-hanzi { list-style-type: simp-chinese-informal; } "
+                "ol.enumerate-circle { list-style-type: decimal; } "
+                "ol.enumerate-numeric-bracket > li::marker { content: counter(list-item) \") \"; } "
+                "ol.enumerate-numeric-paren > li::marker { content: \"(\" counter(list-item) \") \"; } "
+                "ol.enumerate-roman-bracket > li::marker { content: counter(list-item, lower-roman) \") \"; } "
+                "ol.enumerate-roman-paren > li::marker { content: \"(\" counter(list-item, lower-roman) \") \"; } "
+                "ol.enumerate-alpha-bracket > li::marker { content: counter(list-item, lower-alpha) \") \"; } "
+                "ol.enumerate-alpha-full-paren > li::marker { content: \"(\" counter(list-item, lower-alpha) \") \"; } "
               ) ;string-append
         ) ;html
-        (mathml "math { font-family: \"Latin Modern Math\", \"Cambria Math\", \"STIX Two Math\", \"Noto Sans Math\", \"STIXGeneral\", cmr, times, verdana, serif } ")
+        (mathml "math { font-family: \"Latin Modern Math\", \"Cambria Math\", \"STIX Two Math\", \"Noto Sans Math\", \"STIXGeneral\", cmr, times, verdana, serif } "
+        ) ;mathml
        ) ;
     (if tmhtml-mathml? (string-append html mathml) html)
   ) ;let
-) ;define
+) ;tm-define
 
 (define (with-extract-sub w var post)
   (cond ((and (pair? w)
@@ -2170,15 +2184,36 @@
 ) ;define
 
 (define (tmhtml-itemize args)
-  `((h:ul ,@(tmhtml (transform-items (car args)))))
+  (let ((style (if (string? tmhtml-current-tag)
+                 tmhtml-current-tag
+                 (symbol->string tmhtml-current-tag)
+               ) ;if
+        ) ;style
+       ) ;
+    `((h:ul (@ (class ,style)) ,@(tmhtml (transform-items (car args)))))
+  ) ;let
 ) ;define
 
 (define (tmhtml-enumerate args)
-  `((h:ol ,@(tmhtml (transform-items (car args)))))
+  (let ((style (if (string? tmhtml-current-tag)
+                 tmhtml-current-tag
+                 (symbol->string tmhtml-current-tag)
+               ) ;if
+        ) ;style
+       ) ;
+    `((h:ol (@ (class ,style)) ,@(tmhtml (transform-items (car args)))))
+  ) ;let
 ) ;define
 
 (define (tmhtml-description args)
-  `((h:dl ,@(tmhtml (transform-items (car args)))))
+  (let ((style (if (string? tmhtml-current-tag)
+                 tmhtml-current-tag
+                 (symbol->string tmhtml-current-tag)
+               ) ;if
+        ) ;style
+       ) ;
+    `((h:dl (@ (class ,style)) ,@(tmhtml (transform-items (car args)))))
+  ) ;let
 ) ;define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2611,10 +2646,20 @@
   (append-map tmhtml l)
 ) ;define
 
+(define tmhtml-current-tag #f)
+
 (define (tmhtml-dispatch htable l)
   (let ((x (logic-ref ,htable (car l))))
     (cond ((not x) #f)
-          ((procedure? x) (x (cdr l)))
+          ((procedure? x)
+           (let* ((old tmhtml-current-tag)
+                  (dummy (set! tmhtml-current-tag (car l)))
+                  (res (x (cdr l)))
+                 ) ;
+             (set! tmhtml-current-tag old)
+             res
+           ) ;let*
+          ) ;
           (else (tmhtml-post-simplify-element (append x (tmhtml-list (cdr l)))))
     ) ;cond
   ) ;let
@@ -2651,7 +2696,7 @@
   ) ;ahash-with
 ) ;tm-define
 
-(define (tmhtml x)
+(tm-define (tmhtml x)
   ;; Main conversion function.
   ;; Takes a TeXmacs tree in Scheme notation and produce a SXML node-set.
   ;; All handler functions have a similar prototype.
@@ -2669,7 +2714,7 @@
         ((string? x) (if (string-null? x) '() (tmhtml-text x)))
         (else (or (tmhtml-dispatch 'tmhtml-primitives% x) (tmhtml-implicit-compound x)))
   ) ;cond
-) ;define
+) ;tm-define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Dispatching
@@ -2867,6 +2912,7 @@
   ((:or enumerate
      enumerate-numeric
      enumerate-numeric-bracket
+     enumerate-numeric-paren
      enumerate-roman
      enumerate-roman-bracket
      enumerate-roman-paren
@@ -2875,6 +2921,8 @@
      enumerate-alpha-bracket
      enumerate-alpha-full-paren
      enumerate-Alpha
+     enumerate-circle
+     enumerate-hanzi
    ) ;:or
    ,tmhtml-enumerate
   ) ;
