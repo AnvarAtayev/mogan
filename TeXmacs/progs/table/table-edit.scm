@@ -161,7 +161,9 @@
   (table-remove-row downwards?)
 ) ;tm-define
 
-(tm-define (table-resize-notify t) (noop))
+(tm-define (table-resize-notify t)
+  (when (string-starts? (url->system (current-buffer-url)) "tmfs://chat-input-")
+    (qt-chat-notify-input-height)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Posititioning
