@@ -444,7 +444,6 @@ pretty-val : string
 ;; LaTeX ----------
 
 (define-preference-names "texmacs->latex:encoding"
-  ("ascii" "Ascii")
   ("cork"  "Cork with catcodes")
   ("utf-8" "Utf-8 with inputenc"))
 
@@ -506,7 +505,7 @@ pretty-val : string
   (aligned
     (item (text "Character encoding:")
       (enum (set-pretty-preference "texmacs->latex:encoding" answer)
-            '("Ascii" "Cork with catcodes" "Utf-8 with inputenc")
+            '("Utf-8 with inputenc" "Cork with catcodes")
             (get-pretty-preference "texmacs->latex:encoding")
             "15em")))
   ====== ======
