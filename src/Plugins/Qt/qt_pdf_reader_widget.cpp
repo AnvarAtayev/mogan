@@ -71,7 +71,9 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
       pageBaseWidthPts_ (0.0), overLink_ (false), zoomDebounceTimer_ (nullptr),
       resizeDebounceTimer_ (nullptr), gestureSafetyTimer_ (nullptr),
       inPinchGesture_ (false), blockRender_ (false), autoFitApplied_ (false),
-      pinchStartZoom_ (1.0), renderCallCount_ (0) {
+      pinchStartZoom_ (1.0), zoomAnchorContentY_ (0.0),
+      zoomAnchorViewportY_ (0.0), zoomAnchorOldZoom_ (1.0),
+      hasZoomAnchor_ (false), renderCallCount_ (0) {
 
   mainLayout_= new QVBoxLayout (this);
   mainLayout_->setContentsMargins (0, 0, 0, 0);
@@ -323,6 +325,16 @@ PDFReaderWidget::simulatePinchGesture (Qt::GestureState state,
 
 void
 PDFReaderWidget::setZoomFactor (double factor) {
+  if (pdfData_.isEmpty () || pageCount_ <= 0) {
+    zoomFactor_= qBound (MIN_ZOOM, factor, MAX_ZOOM);
+    updateZoomDisplay ();
+    return;
+  }
+  // Save anchor at viewport center before zoom
+  int    vpHeight= scrollArea_->viewport ()->height ();
+  QPoint vpCenter (scrollArea_->viewport ()->width () / 2, vpHeight / 2);
+  saveZoomAnchor (vpCenter);
+
   zoomFactor_= qBound (MIN_ZOOM, factor, MAX_ZOOM);
   updateZoomDisplay ();
   if (!pdfData_.isEmpty () && pageCount_ > 0) {
@@ -792,6 +804,12 @@ PDFReaderWidget::rebuildPages () {
     label->setFixedSize (width, height);
   }
 
+  // Force the layout to recalculate so that scroll bar ranges are correct
+  contentWidget_->adjustSize ();
+
+  // Restore scroll position anchored to the saved content point
+  restoreZoomAnchor ();
+
   // 计算当前视口范围（考虑预加载边距）
   int scrollY       = scrollArea_->verticalScrollBar ()->value ();
   int viewportHeight= scrollArea_->viewport ()->height ();
@@ -1140,6 +1158,77 @@ PDFReaderWidget::updateLinkCursor (const QPoint& contentPos) {
 }
 
 void
+PDFReaderWidget::saveZoomAnchor (const QPoint& viewportPos) {
+  // Only save on the first zoom event of a sequence (before any zoom change).
+  // Subsequent wheel events reuse the same anchor so that restoreZoomAnchor
+  // correctly computes the full zoom ratio from the original state.
+  if (hasZoomAnchor_) return;
+  QPoint contentPos=
+      contentWidget_->mapFrom (scrollArea_->viewport (), viewportPos);
+  zoomAnchorContentY_ = static_cast<double> (contentPos.y ());
+  zoomAnchorViewportY_= static_cast<double> (viewportPos.y ());
+  zoomAnchorOldZoom_  = zoomFactor_;
+  hasZoomAnchor_      = true;
+}
+
+void
+PDFReaderWidget::restoreZoomAnchor () {
+  if (!hasZoomAnchor_) return;
+  hasZoomAnchor_= false;
+
+  // Read the actual new page height from the label that was just resized in
+  // rebuildPages.  This avoids qRound mismatches between the saved anchor
+  // and the real layout geometry.
+  int pageIdx= 0;
+  {
+    double remaining= zoomAnchorContentY_ - PAGE_MARGIN;
+    for (int i= 0; i < pageCount_ && i < pageLayout_->count (); ++i) {
+      QLayoutItem* item= pageLayout_->itemAt (i);
+      if (!item) continue;
+      int h= item->widget ()->height ();
+      if (remaining >= 0) pageIdx= i;
+      remaining-= (h + PAGE_MARGIN);
+    }
+  }
+
+  // Compute old page top/height from the anchor content Y by finding which
+  // page the anchor falls on. We use the same formula rebuildPages uses.
+  QScreen* screen= this->screen ();
+  if (!screen) screen= QApplication::primaryScreen ();
+  qreal dpi     = screen ? screen->logicalDotsPerInch () : 96.0;
+  int   baseW   = (pageBaseWidthPts_ > 0)
+                      ? qRound (pageBaseWidthPts_ * dpi / 72.0)
+                      : scrollArea_->viewport ()->width () - PAGE_MARGIN * 2;
+  int   oldPageW= qMax (1, qRound (baseW * zoomAnchorOldZoom_));
+  int   oldPageH= 0;
+  {
+    double aspect= (pageIdx < pageAspectRatios_.size ())
+                       ? pageAspectRatios_[pageIdx]
+                       : pageAspectRatio_;
+    if (aspect <= 0.0) aspect= 1.414;
+    oldPageH= qMax (1, qRound (oldPageW * aspect));
+  }
+  double oldPageTop= PAGE_MARGIN + pageIdx * (oldPageH + PAGE_MARGIN);
+  double offset    = zoomAnchorContentY_ - oldPageTop;
+
+  // Read the actual new page height from the layout (just set by rebuildPages)
+  int newPageH= 1;
+  if (pageIdx < pageLayout_->count ()) {
+    QLayoutItem* item= pageLayout_->itemAt (pageIdx);
+    if (item && item->widget ()) newPageH= item->widget ()->height ();
+  }
+  int newPageTop= PAGE_MARGIN + pageIdx * (newPageH + PAGE_MARGIN);
+
+  double zoomRatio=
+      (oldPageH > 0) ? static_cast<double> (newPageH) / oldPageH : 1.0;
+  double      contentY     = newPageTop + offset * zoomRatio;
+  int         targetScrollY= qRound (contentY - zoomAnchorViewportY_);
+  QScrollBar* vbar         = scrollArea_->verticalScrollBar ();
+  targetScrollY            = qBound (0, targetScrollY, vbar->maximum ());
+  vbar->setValue (targetScrollY);
+}
+
+void
 PDFReaderWidget::setTestLinks (int page, const QVector<PdfLink>& links) {
   if (page < 0) return;
   if (page >= pageLinks_.size ()) pageLinks_.resize (page + 1);
@@ -1350,6 +1439,8 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
       if (isZoomModifier (wheelEvent->modifiers ())) {
         int delta= wheelEvent->angleDelta ().y ();
         if (delta != 0) {
+          // Save anchor at cursor position before zoom
+          saveZoomAnchor (wheelEvent->position ().toPoint ());
           double factor= 1.0 + static_cast<double> (delta) / 500.0;
           zoomFactor_  = qBound (MIN_ZOOM, zoomFactor_ * factor, MAX_ZOOM);
           updateZoomDisplay ();
