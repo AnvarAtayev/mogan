@@ -1292,10 +1292,9 @@
     (with-buffer floating-search-target (cancel-alt-selection "alternate"))
     (set-search-window-state #f #f)
     (let* ((msg-url (url->system floating-search-target))
-           (in-url (if (string-starts? msg-url "tmfs://chat-message-")
-                     (string-append "tmfs://chat-input-"
-                       (substring msg-url (string-length "tmfs://chat-message-"))
-                     ) ;string-append
+           (in-url (if (chat-message-buffer? floating-search-target)
+                     (url->system (chat-tab-session->input-buffer
+                       (chat-buffer-session-id floating-search-target)))
                      ""
                    ) ;if
            ) ;in-url
@@ -1827,25 +1826,8 @@
 
 (define-preferences ("toolbar search" "on" noop) ("toolbar replace" "on" noop))
 
-(define (chat-message-buffer? buf)
-  (string-starts? (url->system buf) "tmfs://chat-message-")
-) ;define
-
-(define (chat-input-buffer? buf)
-  (string-starts? (url->system buf) "tmfs://chat-input-")
-) ;define
-
-(define (chat-buffer-session-id buf)
-  (with s
-    (url->system buf)
-    (cond ((chat-message-buffer? buf)
-           (substring s (string-length "tmfs://chat-message-"))
-          ) ;
-          ((chat-input-buffer? buf) (substring s (string-length "tmfs://chat-input-")))
-          (else #f)
-    ) ;cond
-  ) ;with
-) ;define
+;; chat-message-buffer?, chat-input-buffer?, chat-buffer-session-id
+;; 已在 (llm chat-protocol) 中以 tm-define 导出
 
 (define (chat-message-buffer-has-content? msg-buf)
   (and (buffer-exists? msg-buf)
@@ -1863,10 +1845,10 @@
       (current-buffer)
       (with sid
         (chat-buffer-session-id buf)
-        (cond ((string-starts? (url->system buf) "tmfs://chat-")
+        (cond ((string-starts? (url->system buf) "tmfs://chat")
                ;; chat tab 任何缓冲区：通过 sid 或胶水函数找到消息缓冲区
                (let* ((msg-url (if sid
-                                 (string-append "tmfs://chat-message-" sid)
+                                 (url->system (chat-tab-session->message-buffer sid))
                                  (qt-chat-tab-active-message-buffer-url)
                                ) ;if
                       ) ;msg-url

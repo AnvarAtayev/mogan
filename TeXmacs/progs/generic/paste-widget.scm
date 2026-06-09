@@ -214,7 +214,7 @@
               ((== fm "internal") (paste-as-texmacs))
               (else (clipboard-paste-import fm "primary"))
         ) ;cond
-        (when (string-starts? (url->system (current-buffer-url)) "tmfs://chat-input-")
+        (when (chat-input-buffer? (current-buffer-url))
           (qt-chat-notify-input-height)
         ) ;when
       ) ;when

@@ -197,14 +197,14 @@ public:
   /**
    * @brief 获取会话消息缓冲区的 tmfs URL。
    * @param sessionId 会话 ID
-   * @return 格式为 "tmfs://chat-message-{sessionId}" 的 URL
+   * @return 格式为 "tmfs://chat/{sessionId}/message" 的 URL
    */
   static url messageBufferUrl (const string& sessionId);
 
   /**
    * @brief 获取会话输入缓冲区的 tmfs URL。
    * @param sessionId 会话 ID
-   * @return 格式为 "tmfs://chat-input-{sessionId}" 的 URL
+   * @return 格式为 "tmfs://chat/{sessionId}/input" 的 URL
    */
   static url inputBufferUrl (const string& sessionId);
 

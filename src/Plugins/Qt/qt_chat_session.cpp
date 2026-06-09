@@ -11,6 +11,8 @@
 
 #include "qt_chat_session.hpp"
 
+#include <analyze.hpp>
+
 #include <cstdio>
 #include <ctime>
 #include <lolly/hash/uuid.hpp>
@@ -182,12 +184,12 @@ ChatSessionManager::setPanel (const string&          sessionId,
 
 url
 ChatSessionManager::messageBufferUrl (const string& sessionId) {
-  return url ("tmfs://chat-message-" * sessionId);
+  return url ("tmfs://chat/" * sessionId * "/message");
 }
 
 url
 ChatSessionManager::inputBufferUrl (const string& sessionId) {
-  return url ("tmfs://chat-input-" * sessionId);
+  return url ("tmfs://chat/" * sessionId * "/input");
 }
 
 void
