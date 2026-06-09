@@ -13,7 +13,6 @@
 #define QT_CHAT_CONTROLLER_HPP
 
 #include "qt_chat_tab_widget.hpp"
-#include <QMap>
 #include <QObject>
 
 /**
@@ -203,6 +202,14 @@ private:
    * @return 显示标题，无标题时返回 "新会话"
    */
   string getSessionDisplayTitle (const string& sessionId);
+
+  /**
+   * @brief 注册未注册的 session 到持久化层并加入 sidebar。
+   *
+   * 首次发送消息时调用，完成延迟注册。
+   * @param sessionId 目标会话 ID
+   */
+  void registerSession (const string& sessionId);
 
   friend void qt_chat_tab_set_state (string sessionId, string stateStr);
   friend void qt_chat_tab_restore_session (string sessionId, string title,
