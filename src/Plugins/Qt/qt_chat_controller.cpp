@@ -12,6 +12,7 @@
 #include "qt_chat_controller.hpp"
 #include "qt_chat_tab_widget.hpp"
 #include "qt_floating_search_bar.hpp"
+#include "qt_utilities.hpp"
 
 #include "new_buffer.hpp"
 #include "s7_tm.hpp"
@@ -26,8 +27,8 @@
 #include <QStyle>
 #include <QTimer>
 #include <QToolButton>
-
-#include "qt_utilities.hpp"
+#include <cinttypes>
+#include <cstdio>
 
 using namespace moebius;
 
@@ -54,8 +55,7 @@ ChatController::createView (QWidget* parent, qt_tm_widget_rep* tm) {
   // 1. 先加载元数据到 sessionManager_（不需要 View）
   call ("chat-persist-load-all");
   cout << "[chat-persist] ChatController: restored "
-       << sessionManager_.getAllSessionIds ().size () << " session metadatas"
-       << LF;
+       << sessionManager_.sessionCount () << " session metadatas" << LF;
 
   // 2. 构建显示数据 + 确定初始激活会话
   QList<SessionDisplayInfo> infos= buildDisplayInfos ();
@@ -66,7 +66,7 @@ ChatController::createView (QWidget* parent, qt_tm_widget_rep* tm) {
     firstOpen_= false;
   }
   else {
-    initialId= determineInitialActiveSession ();
+    initialId= sessionManager_.firstActiveSessionId ();
   }
 
   // 3. 创建 View，Sidebar 构造时就有数据
@@ -131,11 +131,9 @@ ChatController::createView (QWidget* parent, qt_tm_widget_rep* tm) {
     ensureNewConversation ();
   }
 
-  // 5. 恢复 Scheme 层的全局当前模型（使用最新的会话）
-  auto allIds= sessionManager_.getAllSessionIds ();
-  if (!allIds.empty ()) {
-    string       lastSid= allIds.front ();
-    ChatSession* s      = sessionManager_.getSession (lastSid);
+  // 5. 恢复 Scheme 层的全局当前模型（使用激活的会话）
+  if (!is_empty (initialId)) {
+    ChatSession* s= sessionManager_.getSession (initialId);
     if (s && !is_empty (s->model)) {
       call ("chat-tab-session-select-model", s->model);
     }
@@ -224,11 +222,13 @@ ChatController::onSendRequested (const string& sessionId) {
   if (!as_bool (call ("chat-tab-send", sessionId))) return;
 
   sessionManager_.setState (sessionId, ChatState::Generating);
+  sessionManager_.touchSession (sessionId);
   panel->enterConversationMode ();
 
   panel->focusInput ();
   exportBuffer (sessionId);
   updateManifest (sessionId);
+  view_->sidebar ()->reorderItem (sessionId);
 }
 
 void
@@ -270,15 +270,7 @@ ChatController::onDeleteRequested (const QList<string>& sessionIds) {
   }
 
   // 查找第一个非归档会话作为下一个激活项
-  auto   allIds= sessionManager_.getAllSessionIds ();
-  string nextSid;
-  for (const string& sid : allIds) {
-    ChatSession* s= sessionManager_.getSession (sid);
-    if (s && !s->archived) {
-      nextSid= sid;
-      break;
-    }
-  }
+  string nextSid= sessionManager_.firstActiveSessionId ();
 
   if (!is_empty (nextSid)) {
     activateSession (nextSid);
@@ -287,7 +279,8 @@ ChatController::onDeleteRequested (const QList<string>& sessionIds) {
     ensureNewConversation ();
   }
 
-  // 将被删除的 buffer 标记为已保存，避免关闭时弹窗
+  // 确保所有剩余 buffer 标记为已保存，避免关闭时弹窗
+  auto allIds= sessionManager_.getAllSessionIds ();
   for (const string& sid : allIds) {
     call ("buffer-pretend-saved", ChatSessionManager::messageBufferUrl (sid));
     call ("buffer-pretend-saved", ChatSessionManager::inputBufferUrl (sid));
@@ -315,14 +308,7 @@ ChatController::onArchiveRequested (const QList<string>& sessionIds) {
   string nextSid;
 
   if (archivedActive) {
-    auto allIds= sessionManager_.getAllSessionIds ();
-    for (const string& sid : allIds) {
-      ChatSession* s= sessionManager_.getSession (sid);
-      if (s && !s->archived) {
-        nextSid= sid;
-        break;
-      }
-    }
+    nextSid= sessionManager_.firstActiveSessionId ();
   }
 
   if (!is_empty (nextSid)) {
@@ -450,30 +436,17 @@ ChatController::notifyStateChanged (const string& sessionId,
         connect (btn, &QToolButton::clicked, this,
                  [this, sessionId] () { onSendRequested (sessionId); });
     exportBuffer (sessionId);
+    updateManifest (sessionId);
     panel->focusInput ();
   }
 }
 
 void
-ChatController::restoreSessionMeta (const string& sessionId,
-                                    const string& title, const string& model,
-                                    bool archived, const string& createdAt,
-                                    int defaultExpandCount, bool thinking) {
+ChatController::restoreSessionMeta (const ChatSession& session) {
   // 注册 Scheme 侧会话状态
-  call ("chat-persist-register-session", sessionId, model,
-        thinking ? string ("enabled") : string ("disabled"));
+  call ("chat-persist-register-session", session.sessionId, session.model,
+        session.thinking ? string ("enabled") : string ("disabled"));
 
-  // 插入元数据，不创建面板
-  ChatSession session;
-  session.sessionId         = sessionId;
-  session.title             = title;
-  session.model             = model;
-  session.state             = ChatState::Idle;
-  session.archived          = archived;
-  session.createdAt         = createdAt;
-  session.defaultExpandCount= defaultExpandCount;
-  session.thinking          = thinking;
-  session.panel             = nullptr;
   sessionManager_.insertSession (session);
 }
 
@@ -553,11 +526,18 @@ void
 ChatController::updateManifest (const string& sessionId) {
   ChatSession* s= sessionManager_.getSession (sessionId);
   if (!s) return;
+  char createdAtBuf[32];
+  std::snprintf (createdAtBuf, sizeof (createdAtBuf), "%" PRId64,
+                 (int64_t) s->createdAt);
+  char updateAtBuf[32];
+  std::snprintf (updateAtBuf, sizeof (updateAtBuf), "%" PRId64,
+                 (int64_t) s->updateAt);
   array<object> args;
   args << object (sessionId) << object (s->title) << object (s->model)
        << object (s->archived ? string ("true") : string ("false"))
-       << object (s->createdAt)
-       << object (s->thinking ? string ("enabled") : string ("disabled"));
+       << object (string (createdAtBuf))
+       << object (s->thinking ? string ("enabled") : string ("disabled"))
+       << object (string (updateAtBuf));
   call ("chat-persist-update-manifest", args);
 }
 
@@ -567,30 +547,18 @@ ChatController::ensureNewConversation () {
   string currentModel=
       as_string (call ("chat-tab-session-select-model", string ("")));
 
-  // 尝试复用已有的空白会话（无标题、未发送过的）
-  auto allIds= sessionManager_.getAllSessionIds ();
-  for (const string& sid : allIds) {
-    ChatSession* s= sessionManager_.getSession (sid);
-    if (!s || s->archived) continue;
-    // 空白 session 无面板：复用并更新模型
-    if (!s->panel && is_empty (s->title)) {
-      sessionManager_.setModel (sid, currentModel);
-      activateSession (sid);
-      return;
-    }
-    // 有面板但未进入会话模式：复用并更新模型
-    if (s->panel) {
+  // 复用无标题的空白会话（无论是否有面板）
+  string reusable= sessionManager_.findReusableSession ();
+  if (!is_empty (reusable)) {
+    sessionManager_.setModel (reusable, currentModel);
+    ChatSession* s= sessionManager_.getSession (reusable);
+    if (s && s->panel) {
+      // 有面板时隐藏标题标签，确保视觉状态干净
       ChatConversationPanel* p= static_cast<ChatConversationPanel*> (s->panel);
-      if (p && !p->conversationMode ()) {
-        sessionManager_.setModel (sid, currentModel);
-        if (p->sessionTitle ()) {
-          p->sessionTitle ()->hide ();
-        }
-        view_->sidebar ()->setActiveItem (sid);
-        view_->activatePanel (p);
-        return;
-      }
+      if (p->sessionTitle ()) p->sessionTitle ()->hide ();
     }
+    activateSession (reusable);
+    return;
   }
 
   // 无可复用会话，创建新会话
@@ -666,24 +634,9 @@ ChatController::getOrCreatePanel (const string& sessionId) {
  * ChatController 辅助方法
  ******************************************************************************/
 
-QMap<string, string>
-ChatController::getDisplayTitles () {
-  QMap<string, string> result;
-
-  auto allIds= sessionManager_.getAllSessionIds ();
-  for (const string& sid : allIds) {
-    ChatSession* s= sessionManager_.getSession (sid);
-    if (!s) continue;
-    result[sid]= is_empty (s->title) ? string ("新会话") : s->title;
-  }
-
-  return result;
-}
-
 QList<SessionDisplayInfo>
 ChatController::buildDisplayInfos () {
   QList<SessionDisplayInfo> infos;
-  QMap<string, string>      titles= getDisplayTitles ();
   auto                      allIds= sessionManager_.getAllSessionIds ();
 
   for (const string& sid : allIds) {
@@ -694,7 +647,7 @@ ChatController::buildDisplayInfos () {
     info.sessionId   = s->sessionId;
     info.model       = s->model;
     info.archived    = s->archived;
-    info.displayTitle= titles.value (sid, "新会话");
+    info.displayTitle= is_empty (s->title) ? string ("新会话") : s->title;
 
     infos.append (info);
   }
@@ -703,19 +656,10 @@ ChatController::buildDisplayInfos () {
 }
 
 string
-ChatController::determineInitialActiveSession () {
-  auto allIds= sessionManager_.getAllSessionIds ();
-  for (const string& sid : allIds) {
-    ChatSession* s= sessionManager_.getSession (sid);
-    if (s && !s->archived) return sid;
-  }
-  return "";
-}
-
-string
 ChatController::getSessionDisplayTitle (const string& sessionId) {
-  QMap<string, string> titles= getDisplayTitles ();
-  return titles.value (sessionId, "新会话");
+  ChatSession* s= sessionManager_.getSession (sessionId);
+  if (s && !is_empty (s->title)) return s->title;
+  return "新会话";
 }
 
 /******************************************************************************
@@ -737,13 +681,25 @@ qt_chat_tab_set_state (string sessionId, string stateStr) {
 
 void
 qt_chat_tab_restore_session (string sessionId, string title, string model,
-                             string archived, string createdAt,
-                             int defaultExpandCount, string thinking) {
-  bool isArchived = (archived == "true");
-  int  expandCount= (defaultExpandCount > 0) ? defaultExpandCount : 5;
-  bool isThinking = (thinking == "enabled");
-  get_chat_controller ()->restoreSessionMeta (
-      sessionId, title, model, isArchived, createdAt, expandCount, isThinking);
+                             string archived, string createdAtStr,
+                             string updatedAtStr, int defaultExpandCount,
+                             string thinking) {
+  time_t      createdAt= (time_t) std::atol (c_string (createdAtStr));
+  time_t      updateAt = is_empty (updatedAtStr)
+                             ? createdAt
+                             : (time_t) std::atol (c_string (updatedAtStr));
+  ChatSession session;
+  session.sessionId         = sessionId;
+  session.title             = title;
+  session.model             = model;
+  session.state             = ChatState::Idle;
+  session.archived          = (archived == "true");
+  session.createdAt         = createdAt;
+  session.updateAt          = updateAt;
+  session.defaultExpandCount= (defaultExpandCount > 0) ? defaultExpandCount : 5;
+  session.thinking          = (thinking == "enabled");
+  session.panel             = nullptr;
+  get_chat_controller ()->restoreSessionMeta (session);
 }
 
 string
