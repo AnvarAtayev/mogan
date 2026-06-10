@@ -528,8 +528,13 @@ ChatController::registerSession (const string& sessionId) {
         ChatSessionManager::messageBufferUrl (sessionId));
   call ("buffer-pretend-saved", ChatSessionManager::inputBufferUrl (sessionId));
 
-  string displayTitle= getSessionDisplayTitle (sessionId);
-  view_->sidebar ()->addItem (sessionId, displayTitle);
+  string             displayTitle= getSessionDisplayTitle (sessionId);
+  SessionDisplayInfo info;
+  info.sessionId   = sessionId;
+  info.displayTitle= displayTitle;
+  info.model       = s->model;
+  info.archived    = false;
+  view_->sidebar ()->addItem (info);
 
   s->registered= true;
 }
