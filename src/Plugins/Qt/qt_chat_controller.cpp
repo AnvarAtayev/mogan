@@ -20,6 +20,7 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileDialog>
 #include <QLabel>
 #include <QPushButton>
@@ -540,6 +541,21 @@ ChatController::registerSession (const string& sessionId) {
 }
 
 void
+ChatController::connectPanelSignals (ChatConversationPanel* panel) {
+  connect (panel, &ChatConversationPanel::sendRequested, this,
+           &ChatController::onSendRequested);
+  connect (panel, &ChatConversationPanel::thinkingToggled, this,
+           &ChatController::onThinkingToggled);
+  connect (panel, &ChatConversationPanel::closeSidebarInDockModeRequested, this,
+           [this] () {
+             if (!view_) return;
+             QWidget* gp= view_->parentWidget ();
+             if (gp && qobject_cast<QDockWidget*> (gp))
+               emit view_->closeSidebarRequested ();
+           });
+}
+
+void
 ChatController::ensureNewConversation () {
   if (!view_) return;
 
@@ -571,10 +587,7 @@ ChatController::ensureNewConversation () {
   if (panel->sessionTitle ()) panel->sessionTitle ()->hide ();
 
   // 连接 Panel 的信号
-  connect (panel, &ChatConversationPanel::sendRequested, this,
-           &ChatController::onSendRequested);
-  connect (panel, &ChatConversationPanel::thinkingToggled, this,
-           &ChatController::onThinkingToggled);
+  connectPanelSignals (panel);
 
   view_->activatePanel (panel);
   view_->sidebar ()->setActiveItem ("");
@@ -604,10 +617,7 @@ ChatController::getOrCreatePanel (const string& sessionId) {
   call ("chat-tab-init-session!", sessionId, s->model);
 
   // 连接 Panel 的信号
-  connect (panel, &ChatConversationPanel::sendRequested, this,
-           &ChatController::onSendRequested);
-  connect (panel, &ChatConversationPanel::thinkingToggled, this,
-           &ChatController::onThinkingToggled);
+  connectPanelSignals (panel);
 
   // 恢复推理模式按钮状态
   if (panel->thinkingButton () && s->thinking) {
