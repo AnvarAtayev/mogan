@@ -86,11 +86,27 @@ finalize_returns (tree t) {
   else return u;
 }
 
+static string
+column_format_to_string (tree t) {
+  if (is_atomic (t)) return t->label;
+  else if (is_concat (t)) {
+    string r;
+    int    i, n= N (t);
+    for (i= 0; i < n; i++)
+      r << column_format_to_string (t[i]);
+    return r;
+  }
+  else if (is_apply (t, "begingroup")) return "{";
+  else if (is_apply (t, "endgroup")) return "}";
+  else if (is_func (t, APPLY, 1) && t[0] == "nbsp") return " ";
+  else return "";
+}
+
 static tree
 parse_matrix_params (tree t, string tr, string br, string hoff) {
   // cout << "parse_matrix_params: " << hoff << LF;
   tree   tformat (TFORMAT);
-  string s       = string_arg (t);
+  string s       = column_format_to_string (t);
   bool   col_flag= true;
   int    i, n= N (s), col= as_int (hoff);
   for (i= 0; i < n; i++) {
@@ -119,12 +135,29 @@ parse_matrix_params (tree t, string tr, string br, string hoff) {
       tformat << tree (CWITH, tr, br, col_s, col_s, halign, how);
       if (how_c != 'X') {
         int start= ++i;
-        while (i < n && (s[i] != ' ') && (s[i] != '|') && (s[i] != '<') &&
-               (s[i] != '*'))
-          i++;
-        string width= s (start, i);
-        tformat << tree (CWITH, tr, br, col_s, col_s, CELL_HMODE, "exact");
-        tformat << tree (CWITH, tr, br, col_s, col_s, CELL_WIDTH, width);
+        if (i < n && s[start] == '{') {
+          start++;
+          int braces= 1;
+          while (i < n && braces > 0) {
+            i++;
+            if (i < n) {
+              if (s[i] == '{') braces++;
+              else if (s[i] == '}') braces--;
+            }
+          }
+          string width= s (start, i);
+          tformat << tree (CWITH, tr, br, col_s, col_s, CELL_HMODE, "exact");
+          tformat << tree (CWITH, tr, br, col_s, col_s, CELL_WIDTH, width);
+        }
+        else {
+          while (i < n && (s[i] != ' ') && (s[i] != '|') && (s[i] != '<') &&
+                 (s[i] != '*'))
+            i++;
+          string width= s (start, i);
+          tformat << tree (CWITH, tr, br, col_s, col_s, CELL_HMODE, "exact");
+          tformat << tree (CWITH, tr, br, col_s, col_s, CELL_WIDTH, width);
+          i--;
+        }
       }
       else {
         tformat << tree (CWITH, tr, br, col_s, col_s, CELL_HALIGN, "l");
@@ -249,6 +282,7 @@ parse_pmatrix (tree& r, tree t, int& i, string lb, string rb, string fm) {
   if (lb != "") r << tree (LEFT, lb);
 
   int  rows= 0, cols= 0;
+  bool is_three_line_table= false;
   tree V (CONCAT);
   tree L (CONCAT);
   tree E (CONCAT);
@@ -337,27 +371,47 @@ parse_pmatrix (tree& r, tree t, int& i, string lb, string rb, string fm) {
     else if (v == tree (END, "vmatrix")) break;
     else if (v == tree (END, "smallmatrix")) break;
     else if (v == tree (END, "aligned")) break;
-    else if (v == tree (APPLY, "hline")) {
-      int howmany= 1;
+    else if (v == tree (APPLY, "hline") || is_apply (v, "toprule", 0) ||
+             is_apply (v, "midrule", 0) || is_apply (v, "bottomrule", 0)) {
+      bool is_booktabs= is_apply (v, "toprule", 0) ||
+                        is_apply (v, "midrule", 0) ||
+                        is_apply (v, "bottomrule", 0);
+      if (is_booktabs) {
+        is_three_line_table= true;
+      }
+      int    howmany  = 1;
+      string line_type= is_apply (v, "midrule", 0) ? "0.5ln" : "1ln";
       while (i + 1 < N (t) &&
-             (t[i + 1] == tree (APPLY, "hline") || t[i + 1] == " ")) {
-        if (t[i + 1] == tree (APPLY, "hline")) howmany++;
+             (t[i + 1] == tree (APPLY, "hline") ||
+              is_apply (t[i + 1], "toprule", 0) ||
+              is_apply (t[i + 1], "midrule", 0) ||
+              is_apply (t[i + 1], "bottomrule", 0) || t[i + 1] == " ")) {
+        if (t[i + 1] == tree (APPLY, "hline") ||
+            is_apply (t[i + 1], "toprule", 0) ||
+            is_apply (t[i + 1], "midrule", 0) ||
+            is_apply (t[i + 1], "bottomrule", 0)) {
+          howmany++;
+        }
         i++;
       }
       while (i + 1 < N (t) && t[i + 1] == " ")
         i++;
-      string how  = as_string (howmany) * "ln";
+      string how  = (howmany > 1) ? as_string (howmany) * "ln" : line_type;
       int    row  = N (V) + (N (L) == 0 ? 0 : 1);
       string row_s= row == 0 ? as_string (row + 1) : as_string (row);
       string vbor = row == 0 ? copy (CELL_TBORDER) : copy (CELL_BBORDER);
       tformat << tree (CWITH, row_s, row_s, "1", "-1", vbor, how);
     }
-    else if (is_apply (v, "cline", 1)) {
+    else if (is_apply (v, "cline", 1) || is_apply (v, "cmidrule")) {
+      bool is_cmid= is_apply (v, "cmidrule");
+      if (is_cmid) {
+        is_three_line_table= true;
+      }
       int    row  = N (V) + (N (L) == 0 ? 0 : 1);
-      tree   arg  = parse_cline (v[1]);
+      tree   arg  = parse_cline (v[N (v) - 1]);
       string row_s= row == 0 ? as_string (row + 1) : as_string (row);
       string vbor = row == 0 ? copy (CELL_TBORDER) : copy (CELL_BBORDER);
-      string how  = "1ln";
+      string how  = is_cmid ? "0.5ln" : "1ln";
       tformat << tree (CWITH, row_s, row_s, arg[0], arg[1], vbor, how);
       while (i + 1 < N (t) && t[i + 1] == " ")
         i++;
@@ -386,7 +440,16 @@ parse_pmatrix (tree& r, tree t, int& i, string lb, string rb, string fm) {
       tree tmp= parse_matrix_params (v[2], row_s, row_s, col_s);
       for (int j= 0; j < N (tmp); j++)
         tformat << tmp[j];
-      E << v[3];
+      if (is_apply (v[3], "multirow", 3)) {
+        string height= as_string (v[3][1]);
+        tformat << tree (CWITH, row_s, row_s, col_s, col_s, CELL_ROW_SPAN,
+                         height);
+        tformat << tree (CWITH, row_s, row_s, col_s, col_s, CELL_VALIGN, "c");
+        E << v[3][3];
+      }
+      else {
+        E << v[3];
+      }
       for (int j= 1; j < as_int (width); j++)
         F << concat ();
     }
@@ -424,7 +487,12 @@ parse_pmatrix (tree& r, tree t, int& i, string lb, string rb, string fm) {
     M << R;
   }
   tformat << trim_cell_spaces (M);
-  r << compound (fm, tformat);
+  if (is_three_line_table) {
+    r << compound ("three-line-table", tformat);
+  }
+  else {
+    r << compound (fm, tformat);
+  }
   if (rb != "") r << tree (RIGHT, rb);
 }
 

@@ -1265,8 +1265,6 @@
        load-menu
        save-menu
        close-menu
-       cite-texmacs-menu
-       cite-texmacs-related-menu
        color-menu
        document-encryption-menu
        document-columns-menu)
@@ -1720,7 +1718,10 @@
 ) ;tm-define
 
 (tm-widget ((message-widget msg) done)
-  (padded (centered (text msg)) === (centered (explicit-buttons ("Ok" (done)))))
+  (padded (centered (vlist (for (x (string-decompose msg "\n")) (text x))))
+    ===
+    (centered (explicit-buttons ("Ok" (done))))
+  ) ;padded
 ) ;tm-widget
 
 (tm-define (show-message msg title)

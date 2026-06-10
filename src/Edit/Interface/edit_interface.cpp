@@ -16,6 +16,7 @@
 #include "file.hpp"
 #include "gui.hpp" // for gui_interrupted
 #include "message.hpp"
+#include "new_view.hpp"
 #include "observers.hpp"
 #include "preferences.hpp"
 #include "server.hpp"
@@ -651,16 +652,16 @@ edit_interface_rep::compute_env_rects (path p, rectangles& rs, bool recurse) {
       if (is_func (st[i], ROW)) {
         for (int j= 0; j < N (st[i]); j++) {
           selection sel= cell_cache[i][j];
-          if (!sel->valid) continue;
+          if (!sel->valid || is_nil (sel->rs) || N (sel->rs) == 0) continue;
           rectangles rsel= copy (thicken (sel->rs, 0, 2 * pixel));
 
           if (i > 0 && j < row_sizes[i - 1] && N (cell_cache[i - 1]) > j) {
             selection bis= cell_cache[i - 1][j];
-            if (!bis->valid) {
+            if (!bis->valid || is_nil (bis->rs) || N (bis->rs) == 0) {
               bis= find_adjacent_selection (cell_cache, i, j, sel->rs->item->x1,
                                             sel->rs->item->x2, false);
             }
-            if (bis->valid) {
+            if (bis->valid && !is_nil (bis->rs) && N (bis->rs) > 0) {
               // Skip if cells are on different pages. Use un-thickened rects
               // because thickening could mask the page gap.
               if (!(bis->rs->item->y1 > sel->rs->item->y2)) {
@@ -673,11 +674,11 @@ edit_interface_rep::compute_env_rects (path p, rectangles& rs, bool recurse) {
           if (i + 1 < table_rows && j < row_sizes[i + 1] &&
               N (cell_cache[i + 1]) > j) {
             selection bis= cell_cache[i + 1][j];
-            if (!bis->valid) {
+            if (!bis->valid || is_nil (bis->rs) || N (bis->rs) == 0) {
               bis= find_adjacent_selection (cell_cache, i, j, sel->rs->item->x1,
                                             sel->rs->item->x2, true);
             }
-            if (bis->valid) {
+            if (bis->valid && !is_nil (bis->rs) && N (bis->rs) > 0) {
               if (!(sel->rs->item->y1 > bis->rs->item->y2)) {
                 rectangles rbis= copy (thicken (bis->rs, 0, 2 * pixel));
                 correct_adjacent (rsel, rbis);
@@ -687,7 +688,7 @@ edit_interface_rep::compute_env_rects (path p, rectangles& rs, bool recurse) {
 
           if (j > 0) {
             selection bis= cell_cache[i][j - 1];
-            if (bis->valid) {
+            if (bis->valid && !is_nil (bis->rs) && N (bis->rs) > 0) {
               rectangles rbis= copy (thicken (bis->rs, 0, 2 * pixel));
               correct_adjacent_horizontal (rbis, rsel);
             }
@@ -695,7 +696,7 @@ edit_interface_rep::compute_env_rects (path p, rectangles& rs, bool recurse) {
 
           if (j + 1 < N (cell_cache[i])) {
             selection bis= cell_cache[i][j + 1];
-            if (bis->valid) {
+            if (bis->valid && !is_nil (bis->rs) && N (bis->rs) > 0) {
               rectangles rbis= copy (thicken (bis->rs, 0, 2 * pixel));
               correct_adjacent_horizontal (rsel, rbis);
             }
@@ -812,14 +813,33 @@ edit_interface_rep::change_time () {
 
 void
 edit_interface_rep::update_menus () {
+  bool is_startup= is_startup_tab_buffer (buf->buf->name);
+  bool is_chat   = is_chat_tab_buffer (buf->buf->name);
   bench_start ("update_menus");
-  SERVER (menu_main ("(horizontal (link texmacs-menu))"));
-  SERVER (menu_icons (0, "(horizontal (link texmacs-main-icons))"));
-  SERVER (menu_icons (1, "(horizontal (link texmacs-mode-icons))"));
-  SERVER (menu_icons (2, "(horizontal (link texmacs-focus-icons))"));
-  SERVER (menu_icons (3, "(horizontal (link texmacs-extra-icons))"));
+
+  if (get_server ()->in_full_screen_mode ()) {
+    bench_end ("update_menus");
+    return;
+  }
+
+  if (!is_startup && !is_chat)
+    SERVER (menu_main ("(horizontal (link texmacs-menu))"));
+  if (!is_startup && !is_chat)
+    SERVER (menu_icons (0, "(horizontal (link texmacs-main-icons))"));
+  if (!is_startup)
+    SERVER (menu_icons (1, "(horizontal (link texmacs-mode-icons))"));
+  if (!is_startup && !is_chat)
+    SERVER (menu_icons (2, "(horizontal (link texmacs-focus-icons))"));
+  if (!is_startup && !is_chat)
+    SERVER (menu_icons (3, "(horizontal (link texmacs-extra-icons))"));
   SERVER (menu_icons (4, "(horizontal (link texmacs-tab-pages))"));
-  SERVER (notification_bar ("(horizontal (link texmacs-notification-bar))"));
+  if (!is_startup && !is_chat)
+    SERVER (notification_bar ("(horizontal (link texmacs-notification-bar))"));
+  if (is_startup || is_chat) {
+    last_update= last_change;
+    bench_end ("update_menus");
+    return;
+  }
   array<url> a= buffer_to_windows (buf->buf->name);
   if (N (a) > 0) {
     string win = "(string->url \"" * as_string (a[0]) * "\")";
@@ -1270,6 +1290,9 @@ void
 edit_interface_rep::full_screen_mode (bool flag) {
   full_screen= flag;
   send_invalidate_all (this);
+  if (!flag) {
+    notify_change (THE_MENUS);
+  }
 }
 
 void

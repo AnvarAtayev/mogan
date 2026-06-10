@@ -11,21 +11,18 @@
 #include <QClipboard>
 #include <QDebug>
 #include <QDesktopServices>
-#include <QElapsedTimer>
+#include <QDockWidget>
 #include <QFile>
 #include <QFrame>
 #include <QGestureEvent>
-#include <QHBoxLayout>
 #include <QKeyEvent>
-#include <QLineEdit>
-#include <QMenu>
+#include <QMainWindow>
 #include <QMouseEvent>
 #include <QPinchGesture>
+#include <QPushButton>
 #include <QResizeEvent>
 #include <QScreen>
 #include <QScrollBar>
-#include <QSizePolicy>
-#include <QToolButton>
 #include <QUrl>
 #include <QWheelEvent>
 
@@ -34,6 +31,7 @@
 #endif
 
 #include "MuPDF/mupdf_renderer.hpp"
+#include "qt_chat_tab_widget.hpp"
 #include "qt_dpi_utils.hpp"
 #include "qt_utilities.hpp"
 #include "scheme.hpp"
@@ -65,19 +63,17 @@ isZoomModifier (Qt::KeyboardModifiers modifiers) {
 
 PDFReaderWidget::PDFReaderWidget (QWidget* parent)
     : QWidget (parent), scrollArea_ (nullptr), contentWidget_ (nullptr),
-      pageLayout_ (nullptr), mainLayout_ (nullptr), toolBar_ (nullptr),
-      zoomCombo_ (nullptr), zoomDropBtn_ (nullptr), prevPageBtn_ (nullptr),
-      pageEdit_ (nullptr), pageTotalLabel_ (nullptr), nextPageBtn_ (nullptr),
-      zoomInBtn_ (nullptr), rectSelectBtn_ (nullptr), zoomMenu_ (nullptr),
-      rubberBand_ (nullptr), rectSelectMode_ (false),
-      rectSelectDragging_ (false), hintLabel_ (nullptr),
-      browseDragging_ (false), browseDragActive_ (false), scroller_ (nullptr),
-      pageCount_ (0), hasError_ (false), targetDpi_ (DEFAULT_DPI),
-      zoomFactor_ (1.0), pageAspectRatio_ (0.0), pageBaseWidthPts_ (0.0),
-      overLink_ (false), zoomDebounceTimer_ (nullptr),
+      pageLayout_ (nullptr), mainLayout_ (nullptr), rubberBand_ (nullptr),
+      rectSelectMode_ (false), rectSelectDragging_ (false),
+      hintLabel_ (nullptr), browseDragging_ (false), browseDragActive_ (false),
+      scroller_ (nullptr), pageCount_ (0), hasError_ (false),
+      targetDpi_ (DEFAULT_DPI), zoomFactor_ (1.0), pageAspectRatio_ (0.0),
+      pageBaseWidthPts_ (0.0), overLink_ (false), zoomDebounceTimer_ (nullptr),
       resizeDebounceTimer_ (nullptr), gestureSafetyTimer_ (nullptr),
-      inPinchGesture_ (false), blockRender_ (false), pinchStartZoom_ (1.0),
-      renderCallCount_ (0) {
+      inPinchGesture_ (false), blockRender_ (false), autoFitApplied_ (false),
+      pinchStartZoom_ (1.0), zoomAnchorContentY_ (0.0),
+      zoomAnchorViewportY_ (0.0), zoomAnchorOldZoom_ (1.0),
+      hasZoomAnchor_ (false), renderCallCount_ (0) {
 
   mainLayout_= new QVBoxLayout (this);
   mainLayout_->setContentsMargins (0, 0, 0, 0);
@@ -150,8 +146,6 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
 
   mainLayout_->addWidget (scrollArea_);
 
-  setupToolBar ();
-
   connect (scrollArea_->verticalScrollBar (), &QScrollBar::valueChanged, this,
            &PDFReaderWidget::updatePageNavigation);
   connect (scrollArea_->verticalScrollBar (), &QScrollBar::valueChanged, this,
@@ -169,7 +163,7 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
   resizeDebounceTimer_->setSingleShot (true);
   resizeDebounceTimer_->setInterval (RESIZE_DEBOUNCE_MS);
   connect (resizeDebounceTimer_, &QTimer::timeout, this,
-           &PDFReaderWidget::rebuildPages);
+           &PDFReaderWidget::onResizeDebounced);
 
   gestureSafetyTimer_= new QTimer (this);
   gestureSafetyTimer_->setSingleShot (true);
@@ -181,169 +175,74 @@ PDFReaderWidget::PDFReaderWidget (QWidget* parent)
 PDFReaderWidget::~PDFReaderWidget () {}
 
 void
-PDFReaderWidget::setupToolBar () {
-  toolBar_= new QWidget (this);
-  toolBar_->setObjectName ("pdf-reader-tool-bar");
-  QHBoxLayout* toolBarLayout= new QHBoxLayout (toolBar_);
-  toolBarLayout->setContentsMargins (4, 2, 4, 2);
-  toolBarLayout->setSpacing (4);
-
-  // 比例显示框（纯 QLineEdit，和页码框保持完全一致）
-  zoomCombo_= new QLineEdit (toolBar_);
-  zoomCombo_->setObjectName ("pdf-zoom-edit");
-  zoomCombo_->setFixedWidth (DpiUtils::scaled (80));
-  zoomCombo_->setFixedHeight (DpiUtils::scaled (26));
-  zoomCombo_->setFrame (false);
-  zoomCombo_->setStyleSheet (
-      "QLineEdit { padding: 0px; margin: 0px; border: 0.5px solid #CCC; }");
-  zoomCombo_->setAlignment (Qt::AlignCenter);
-  zoomCombo_->setReadOnly (true);
-
-  // 下拉按钮（触发比例选择菜单）
-  zoomDropBtn_= new QToolButton (toolBar_);
-  zoomDropBtn_->setObjectName ("pdf-zoom-drop-btn");
-  zoomDropBtn_->setAutoRaise (true);
-  zoomDropBtn_->setFixedSize (DpiUtils::scaled (24), DpiUtils::scaled (26));
-  zoomDropBtn_->setArrowType (Qt::DownArrow);
-  zoomDropBtn_->setToolTip (qt_translate ("Zoom"));
-
-  zoomMenu_= new QMenu (zoomDropBtn_);
-  zoomMenu_->addAction ("Fit Width");
-  zoomMenu_->addAction ("Fit Height");
-  zoomMenu_->addAction ("25%");
-  zoomMenu_->addAction ("33%");
-  zoomMenu_->addAction ("50%");
-  zoomMenu_->addAction ("75%");
-  zoomMenu_->addAction ("100%");
-  zoomMenu_->addAction ("125%");
-  zoomMenu_->addAction ("150%");
-  zoomMenu_->addAction ("200%");
-  zoomMenu_->addAction ("300%");
-  zoomMenu_->addAction ("400%");
-  zoomMenu_->addAction ("600%");
-  zoomMenu_->addAction ("800%");
-  connect (zoomMenu_, &QMenu::triggered, this,
-           [=] (QAction* action) { onZoomChanged (action->text ()); });
-  connect (zoomDropBtn_, &QToolButton::clicked, this, [=] () {
-    zoomMenu_->popup (
-        zoomDropBtn_->mapToGlobal (QPoint (0, zoomDropBtn_->height ())));
-  });
-
-  QFont comboFont= zoomCombo_->font ();
-  comboFont.setPixelSize (DpiUtils::scaled (14));
-  zoomCombo_->setFont (comboFont);
-
-  zoomOutBtn_= new QToolButton (toolBar_);
-  zoomOutBtn_->setObjectName ("pdf-zoom-out-btn");
-  zoomOutBtn_->setAutoRaise (true);
-  zoomOutBtn_->setFixedSize (DpiUtils::scaled (32), DpiUtils::scaled (32));
-  zoomOutBtn_->setIconSize (
-      QSize (DpiUtils::scaled (16), DpiUtils::scaled (16)));
-  zoomOutBtn_->setToolTip (qt_translate ("Zoom Out"));
-  connect (zoomOutBtn_, &QToolButton::clicked, this, &PDFReaderWidget::zoomOut);
-
-  zoomInBtn_= new QToolButton (toolBar_);
-  zoomInBtn_->setObjectName ("pdf-zoom-in-btn");
-  zoomInBtn_->setAutoRaise (true);
-  zoomInBtn_->setFixedSize (DpiUtils::scaled (32), DpiUtils::scaled (32));
-  zoomInBtn_->setIconSize (
-      QSize (DpiUtils::scaled (16), DpiUtils::scaled (16)));
-  zoomInBtn_->setToolTip (qt_translate ("Zoom In"));
-  connect (zoomInBtn_, &QToolButton::clicked, this, &PDFReaderWidget::zoomIn);
-
-  prevPageBtn_= new QToolButton (toolBar_);
-  prevPageBtn_->setObjectName ("pdf-prev-btn");
-  prevPageBtn_->setAutoRaise (true);
-  prevPageBtn_->setFixedSize (DpiUtils::scaled (32), DpiUtils::scaled (32));
-  prevPageBtn_->setIconSize (
-      QSize (DpiUtils::scaled (16), DpiUtils::scaled (16)));
-  prevPageBtn_->setToolTip (qt_translate ("Previous Page"));
-  connect (prevPageBtn_, &QToolButton::clicked, this,
-           &PDFReaderWidget::onPrevPage);
-
-  pageEdit_= new QLineEdit (toolBar_);
-  pageEdit_->setObjectName ("pdf-page-edit");
-  pageEdit_->setFixedWidth (DpiUtils::scaled (50));
-  pageEdit_->setFixedHeight (DpiUtils::scaled (26));
-  pageEdit_->setFrame (false);
-  pageEdit_->setStyleSheet (
-      "QLineEdit { padding: 0px; margin: 0px; border: 0.5px solid #CCC; }");
-  pageEdit_->setAlignment (Qt::AlignCenter);
-  pageEdit_->setFont (comboFont);
-  connect (pageEdit_, &QLineEdit::editingFinished, this,
-           &PDFReaderWidget::onPageEditingFinished);
-
-  pageTotalLabel_= new QLabel ("/ 0", toolBar_);
-  pageTotalLabel_->setFixedWidth (DpiUtils::scaled (45));
-  pageTotalLabel_->setFixedHeight (DpiUtils::scaled (26));
-  pageTotalLabel_->setStyleSheet (
-      "QLabel { padding: 0px; margin: 0px; border: none; }");
-  pageTotalLabel_->setAlignment (Qt::AlignCenter);
-
-  nextPageBtn_= new QToolButton (toolBar_);
-  nextPageBtn_->setObjectName ("pdf-next-btn");
-  nextPageBtn_->setAutoRaise (true);
-  nextPageBtn_->setFixedSize (DpiUtils::scaled (32), DpiUtils::scaled (32));
-  nextPageBtn_->setIconSize (
-      QSize (DpiUtils::scaled (16), DpiUtils::scaled (16)));
-  nextPageBtn_->setToolTip (qt_translate ("Next Page"));
-  connect (nextPageBtn_, &QToolButton::clicked, this,
-           &PDFReaderWidget::onNextPage);
-
-  QWidget*     navWidget= new QWidget (toolBar_);
-  QHBoxLayout* navLayout= new QHBoxLayout (navWidget);
-  navLayout->setContentsMargins (0, 0, 0, 0);
-  navLayout->setSpacing (0);
-  navLayout->addWidget (zoomOutBtn_);
-  navLayout->addWidget (prevPageBtn_);
-  navLayout->addWidget (pageEdit_);
-  navLayout->addWidget (pageTotalLabel_);
-  navLayout->addWidget (nextPageBtn_);
-  navLayout->addWidget (zoomInBtn_);
-
-  QWidget*     leftWidget= new QWidget (toolBar_);
-  QHBoxLayout* leftLayout= new QHBoxLayout (leftWidget);
-  leftLayout->setContentsMargins (0, 0, 0, 0);
-  leftLayout->setSpacing (0);
-  leftLayout->addWidget (zoomCombo_, 0, Qt::AlignVCenter);
-  leftLayout->addWidget (zoomDropBtn_, 0, Qt::AlignVCenter);
-  leftLayout->addStretch ();
-  leftWidget->setSizePolicy (QSizePolicy::Expanding, QSizePolicy::Preferred);
-
-  rectSelectBtn_= new QToolButton (toolBar_);
-  rectSelectBtn_->setObjectName ("pdf-screenshot-btn");
-  rectSelectBtn_->setAutoRaise (true);
-  rectSelectBtn_->setFixedSize (DpiUtils::scaled (32), DpiUtils::scaled (32));
-  rectSelectBtn_->setIconSize (
-      QSize (DpiUtils::scaled (16), DpiUtils::scaled (16)));
-  rectSelectBtn_->setCheckable (true);
-  connect (rectSelectBtn_, &QToolButton::toggled, this,
-           &PDFReaderWidget::onRectSelectToggled);
-
-  QWidget*     rightWidget= new QWidget (toolBar_);
-  QHBoxLayout* rightLayout= new QHBoxLayout (rightWidget);
-  rightLayout->setContentsMargins (0, 0, 0, 0);
-  rightLayout->addWidget (rectSelectBtn_);
-  rightLayout->addStretch ();
-  rightWidget->setSizePolicy (QSizePolicy::Expanding, QSizePolicy::Preferred);
-
-  toolBarLayout->addWidget (leftWidget, 1);
-  toolBarLayout->addWidget (navWidget, 0);
-  toolBarLayout->addWidget (rightWidget, 1);
-
-  mainLayout_->insertWidget (0, toolBar_);
+PDFReaderWidget::updateZoomDisplay () {
+  int     percent= qRound (zoomFactor_ * 100);
+  QString text   = QString::number (percent) + "%";
+  Q_EMIT zoomChanged (text);
 }
 
 void
-PDFReaderWidget::updateZoomDisplay () {
-  if (!zoomCombo_) return;
+PDFReaderWidget::onResizeDebounced () {
+  // 当窗口离开半屏贴靠状态时，重置自动适配标志，
+  // 以便下次贴靠到左/右半屏时仍能触发 Fit Width
+  if (autoFitApplied_) {
+    QScreen* screen= this->screen ();
+    if (!screen) screen= QApplication::primaryScreen ();
+    if (screen) {
+      QRect screenGeo= screen->availableGeometry ();
+      int   screenW  = screenGeo.width ();
+      QRect winGeo   = window ()->frameGeometry ();
+      int   halfWidth= screenW / 2;
+      int   tolerance= qMax (20, screenW / 20);
+      if (qAbs (winGeo.width () - halfWidth) > tolerance) {
+        autoFitApplied_= false;
+      }
+    }
+  }
 
-  int     percent= qRound (zoomFactor_ * 100);
-  QString text   = QString::number (percent) + "%";
+  if (!maybeAutoFitWidth ()) {
+    rebuildPages ();
+  }
+}
 
-  bool blocked= zoomCombo_->blockSignals (true);
-  zoomCombo_->setText (text);
-  zoomCombo_->blockSignals (blocked);
+bool
+PDFReaderWidget::maybeAutoFitWidth () {
+  if (autoFitApplied_) return false;
+  if (pdfData_.isEmpty () || pageCount_ <= 0) return false;
+  if (pageBaseWidthPts_ <= 0) return false;
+  if (isMaximized () || isFullScreen ()) return false;
+
+  QScreen* screen= this->screen ();
+  if (!screen) screen= QApplication::primaryScreen ();
+  if (!screen) return false;
+
+  QRect screenGeo= screen->availableGeometry ();
+  int   screenW  = screenGeo.width ();
+  int   screenH  = screenGeo.height ();
+  QRect winGeo   = window ()->frameGeometry ();
+
+  // 判断是否贴靠到左半屏或右半屏：
+  // 1. 宽度约等于屏幕宽度的一半
+  // 2. 高度约等于屏幕可用高度
+  // 3. 窗口左边缘贴近屏幕左边缘（左半屏）或
+  //    窗口右边缘贴近屏幕右边缘（右半屏）
+  int halfWidth      = screenW / 2;
+  int widthTolerance = qMax (20, screenW / 20);
+  int heightTolerance= qMax (40, screenH / 20);
+
+  if (qAbs (winGeo.width () - halfWidth) > widthTolerance) return false;
+  if (qAbs (winGeo.height () - screenH) > heightTolerance) return false;
+
+  bool snappedLeft = qAbs (winGeo.x () - screenGeo.x ()) <= 10;
+  bool snappedRight= qAbs ((winGeo.x () + winGeo.width ()) -
+                           (screenGeo.x () + screenGeo.width ())) <= 10;
+
+  if (snappedLeft || snappedRight) {
+    fitWidth ();
+    autoFitApplied_= true;
+    return true;
+  }
+  return false;
 }
 
 void
@@ -421,28 +320,21 @@ PDFReaderWidget::simulatePinchGesture (Qt::GestureState state,
     finishPinchGesture ();
   }
   int percent= qRound (zoomFactor_ * 100);
-  zoomCombo_->setText (QString::number (percent) + "%");
-}
-
-void
-PDFReaderWidget::onZoomChanged (QString text) {
-  if (text == "Fit Width") {
-    fitWidth ();
-  }
-  else if (text == "Fit Height") {
-    fitHeight ();
-  }
-  else {
-    QString numStr= text;
-    numStr.chop (1);
-    bool   ok;
-    double percent= numStr.toDouble (&ok);
-    if (ok) setZoomFactor (percent / 100.0);
-  }
+  Q_EMIT zoomChanged (QString::number (percent) + "%");
 }
 
 void
 PDFReaderWidget::setZoomFactor (double factor) {
+  if (pdfData_.isEmpty () || pageCount_ <= 0) {
+    zoomFactor_= qBound (MIN_ZOOM, factor, MAX_ZOOM);
+    updateZoomDisplay ();
+    return;
+  }
+  // Save anchor at viewport center before zoom
+  int    vpHeight= scrollArea_->viewport ()->height ();
+  QPoint vpCenter (scrollArea_->viewport ()->width () / 2, vpHeight / 2);
+  saveZoomAnchor (vpCenter);
+
   zoomFactor_= qBound (MIN_ZOOM, factor, MAX_ZOOM);
   updateZoomDisplay ();
   if (!pdfData_.isEmpty () && pageCount_ > 0) {
@@ -537,14 +429,8 @@ PDFReaderWidget::goToPage (int page) {
 
 void
 PDFReaderWidget::updatePageNavigation () {
-  if (!pageEdit_ || !pageTotalLabel_ || !prevPageBtn_ || !nextPageBtn_) return;
-
   int current= currentPage ();
-  pageEdit_->setText (QString::number (current));
-  pageTotalLabel_->setText (QString ("/ %1").arg (pageCount_));
-
-  prevPageBtn_->setEnabled (current > 1);
-  nextPageBtn_->setEnabled (current < pageCount_);
+  Q_EMIT pageChanged (current, pageCount_);
 }
 
 void
@@ -565,7 +451,7 @@ PDFReaderWidget::isRectSelectMode () const {
 }
 
 void
-PDFReaderWidget::onRectSelectToggled (bool checked) {
+PDFReaderWidget::setRectSelectMode (bool checked) {
   rectSelectMode_= checked;
   if (scrollArea_ && scrollArea_->viewport ()) {
     QWidget* vp= scrollArea_->viewport ();
@@ -601,6 +487,8 @@ PDFReaderWidget::onRectSelectToggled (bool checked) {
   else if (hintLabel_) {
     hintLabel_->hide ();
   }
+
+  Q_EMIT rectSelectModeChanged (checked);
 }
 
 void
@@ -678,13 +566,6 @@ PDFReaderWidget::extractSelectionPixmap (QLabel*      label,
   QPixmap copied= pm.copy (srcX, srcY, srcW, srcH);
   copied.setDevicePixelRatio (1.0);
   return copied;
-}
-
-void
-PDFReaderWidget::onPageEditingFinished () {
-  bool ok;
-  int  page= pageEdit_->text ().toInt (&ok);
-  if (ok) goToPage (page);
 }
 
 bool
@@ -923,6 +804,12 @@ PDFReaderWidget::rebuildPages () {
     label->setFixedSize (width, height);
   }
 
+  // Force the layout to recalculate so that scroll bar ranges are correct
+  contentWidget_->adjustSize ();
+
+  // Restore scroll position anchored to the saved content point
+  restoreZoomAnchor ();
+
   // 计算当前视口范围（考虑预加载边距）
   int scrollY       = scrollArea_->verticalScrollBar ()->value ();
   int viewportHeight= scrollArea_->viewport ()->height ();
@@ -976,6 +863,7 @@ PDFReaderWidget::rebuildPages () {
 bool
 PDFReaderWidget::loadFromFile (const QString& filePath, int dpi) {
   clear ();
+  autoFitApplied_= false;
 
   targetDpi_= dpi;
   hasError_ = false;
@@ -1089,6 +977,7 @@ PDFReaderWidget::loadFromFile (const QString& filePath, int dpi) {
   }
 
   pageLayout_->addStretch (1);
+  maybeAutoFitWidth ();
   rebuildPages ();
   contentWidget_->adjustSize ();
   updateZoomDisplay ();
@@ -1105,6 +994,7 @@ PDFReaderWidget::clear () {
   pageAspectRatio_ = 0.0;
   pageBaseWidthPts_= 0.0;
   pageAspectRatios_.clear ();
+  autoFitApplied_= false;
   clearPageLinks ();
   pageCache_.clear ();
 
@@ -1268,6 +1158,77 @@ PDFReaderWidget::updateLinkCursor (const QPoint& contentPos) {
 }
 
 void
+PDFReaderWidget::saveZoomAnchor (const QPoint& viewportPos) {
+  // Only save on the first zoom event of a sequence (before any zoom change).
+  // Subsequent wheel events reuse the same anchor so that restoreZoomAnchor
+  // correctly computes the full zoom ratio from the original state.
+  if (hasZoomAnchor_) return;
+  QPoint contentPos=
+      contentWidget_->mapFrom (scrollArea_->viewport (), viewportPos);
+  zoomAnchorContentY_ = static_cast<double> (contentPos.y ());
+  zoomAnchorViewportY_= static_cast<double> (viewportPos.y ());
+  zoomAnchorOldZoom_  = zoomFactor_;
+  hasZoomAnchor_      = true;
+}
+
+void
+PDFReaderWidget::restoreZoomAnchor () {
+  if (!hasZoomAnchor_) return;
+  hasZoomAnchor_= false;
+
+  // Read the actual new page height from the label that was just resized in
+  // rebuildPages.  This avoids qRound mismatches between the saved anchor
+  // and the real layout geometry.
+  int pageIdx= 0;
+  {
+    double remaining= zoomAnchorContentY_ - PAGE_MARGIN;
+    for (int i= 0; i < pageCount_ && i < pageLayout_->count (); ++i) {
+      QLayoutItem* item= pageLayout_->itemAt (i);
+      if (!item) continue;
+      int h= item->widget ()->height ();
+      if (remaining >= 0) pageIdx= i;
+      remaining-= (h + PAGE_MARGIN);
+    }
+  }
+
+  // Compute old page top/height from the anchor content Y by finding which
+  // page the anchor falls on. We use the same formula rebuildPages uses.
+  QScreen* screen= this->screen ();
+  if (!screen) screen= QApplication::primaryScreen ();
+  qreal dpi     = screen ? screen->logicalDotsPerInch () : 96.0;
+  int   baseW   = (pageBaseWidthPts_ > 0)
+                      ? qRound (pageBaseWidthPts_ * dpi / 72.0)
+                      : scrollArea_->viewport ()->width () - PAGE_MARGIN * 2;
+  int   oldPageW= qMax (1, qRound (baseW * zoomAnchorOldZoom_));
+  int   oldPageH= 0;
+  {
+    double aspect= (pageIdx < pageAspectRatios_.size ())
+                       ? pageAspectRatios_[pageIdx]
+                       : pageAspectRatio_;
+    if (aspect <= 0.0) aspect= 1.414;
+    oldPageH= qMax (1, qRound (oldPageW * aspect));
+  }
+  double oldPageTop= PAGE_MARGIN + pageIdx * (oldPageH + PAGE_MARGIN);
+  double offset    = zoomAnchorContentY_ - oldPageTop;
+
+  // Read the actual new page height from the layout (just set by rebuildPages)
+  int newPageH= 1;
+  if (pageIdx < pageLayout_->count ()) {
+    QLayoutItem* item= pageLayout_->itemAt (pageIdx);
+    if (item && item->widget ()) newPageH= item->widget ()->height ();
+  }
+  int newPageTop= PAGE_MARGIN + pageIdx * (newPageH + PAGE_MARGIN);
+
+  double zoomRatio=
+      (oldPageH > 0) ? static_cast<double> (newPageH) / oldPageH : 1.0;
+  double      contentY     = newPageTop + offset * zoomRatio;
+  int         targetScrollY= qRound (contentY - zoomAnchorViewportY_);
+  QScrollBar* vbar         = scrollArea_->verticalScrollBar ();
+  targetScrollY            = qBound (0, targetScrollY, vbar->maximum ());
+  vbar->setValue (targetScrollY);
+}
+
+void
 PDFReaderWidget::setTestLinks (int page, const QVector<PdfLink>& links) {
   if (page < 0) return;
   if (page >= pageLinks_.size ()) pageLinks_.resize (page + 1);
@@ -1299,10 +1260,33 @@ PDFReaderWidget::keyPressEvent (QKeyEvent* event) {
       return;
     }
     if (rectSelectMode_) {
-      rectSelectBtn_->setChecked (false);
+      setRectSelectMode (false);
       event->accept ();
       return;
     }
+  }
+
+  // Ctrl/Cmd+J：切换 AI 聊天侧边栏
+  if (event->key () == Qt::Key_J &&
+      (event->modifiers () & (Qt::ControlModifier | Qt::MetaModifier))) {
+    QMainWindow* mw= qobject_cast<QMainWindow*> (window ());
+    if (mw) {
+      QDockWidget* dock= mw->findChild<QDockWidget*> ("chatSideDock");
+      if (dock) {
+        if (dock->isVisible ()) {
+          QTChatTabWidget* chatWidget=
+              qobject_cast<QTChatTabWidget*> (dock->widget ());
+          if (chatWidget) emit chatWidget->closeSidebarRequested ();
+        }
+        else {
+          QPushButton* toggleBtn=
+              mw->findChild<QPushButton*> ("chat-tab-collapse-btn");
+          if (toggleBtn) toggleBtn->click ();
+        }
+      }
+    }
+    event->accept ();
+    return;
   }
 
   if (event->key () == Qt::Key_J || event->key () == Qt::Key_K) {
@@ -1339,10 +1323,25 @@ PDFReaderWidget::keyPressEvent (QKeyEvent* event) {
 #else
   bool closeModifier= event->modifiers () & Qt::ControlModifier;
 #endif
+  if (closeModifier && event->key () == Qt::Key_T) {
+    eval ("(new-document)");
+    event->accept ();
+    return;
+  }
   if (closeModifier && event->key () == Qt::Key_W) {
     eval ("(safely-kill-tabpage)");
     event->accept ();
     return;
+  }
+
+  if (closeModifier) {
+    int key= event->key ();
+    if (key >= Qt::Key_1 && key <= Qt::Key_9) {
+      int index= key - Qt::Key_1;
+      eval ("(switch-to-view-index " * as_string (index) * ")");
+      event->accept ();
+      return;
+    }
   }
 
   QWidget::keyPressEvent (event);
@@ -1440,6 +1439,8 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
       if (isZoomModifier (wheelEvent->modifiers ())) {
         int delta= wheelEvent->angleDelta ().y ();
         if (delta != 0) {
+          // Save anchor at cursor position before zoom
+          saveZoomAnchor (wheelEvent->position ().toPoint ());
           double factor= 1.0 + static_cast<double> (delta) / 500.0;
           zoomFactor_  = qBound (MIN_ZOOM, zoomFactor_ * factor, MAX_ZOOM);
           updateZoomDisplay ();
@@ -1476,7 +1477,7 @@ PDFReaderWidget::eventFilter (QObject* watched, QEvent* event) {
           return true;
         }
         if (rectSelectMode_) {
-          rectSelectBtn_->setChecked (false);
+          setRectSelectMode (false);
           return true;
         }
       }

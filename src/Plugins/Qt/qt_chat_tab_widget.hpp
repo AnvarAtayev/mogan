@@ -32,6 +32,8 @@ class QTimer;
 class QToolButton;
 class QVBoxLayout;
 class QEvent;
+class QTMWidget;
+class QTMStateToolButton;
 class qt_tm_widget_rep;
 
 /**
@@ -76,7 +78,7 @@ public:
    */
   tree readInputMessage () const;
 
-  QPushButton*  sendButton () const { return sendButton_; }
+  QToolButton*  sendButton () const { return sendButton_; }
   QToolButton*  thinkingButton () const { return thinkingButton_; }
   QLabel*       sessionTitle () const { return sessionTitle_; }
   const string& sessionId () const { return sessionId_; }
@@ -96,6 +98,24 @@ public:
    */
   static int count_input_lines (tree body);
 
+  /**
+   * @brief 判断只读控件是否应拦截该事件。
+   * @param watched 事件目标对象（需带有 chat_message_readonly 属性）
+   * @param event   待判断的事件
+   * @return 应拦截返回 true，放行返回 false
+   */
+  static bool should_block_readonly_event (QObject* watched, QEvent* event);
+
+  /**
+   * @brief 判断输入区当前按键是否应触发发送。
+   * @param key 按键值
+   * @param mods 修饰键状态
+   * @param hasActiveCompletionPopup 是否存在待确认的补全/Tab cycle 弹窗
+   * @return 应触发发送时返回 true
+   */
+  static bool should_send_on_keypress (int key, Qt::KeyboardModifiers mods,
+                                       bool hasActiveCompletionPopup);
+
 signals:
   void sendRequested (const string& sessionId);
   void thinkingToggled (const string& sessionId, bool enabled);
@@ -104,6 +124,12 @@ signals:
 protected:
   /// 事件过滤器：拦截 Enter 键触发发送
   bool eventFilter (QObject* watched, QEvent* event) override;
+  /// 欢迎模式下按容器高度比例调整顶部偏移
+  void resizeEvent (QResizeEvent* event) override;
+
+public:
+  /// 在当前事件处理完成后更新输入区高度，避免读取到旧排版结果
+  void schedule_input_height_adjust ();
 
 private:
   /// 构建面板 UI 布局
@@ -111,19 +137,20 @@ private:
   /// 根据内容动态调整输入区高度
   void adjust_input_height ();
 
-  string       sessionId_;                  ///< 所属会话 ID
-  bool         conversationMode_ = false;   ///< 是否已进入对话模式
-  QLabel*      welcomeTitle_     = nullptr; ///< 欢迎页标题
-  QLabel*      sessionTitle_     = nullptr; ///< 会话标题标签
-  QWidget*     messageFrame_     = nullptr; ///< 消息区域容器
-  QWidget*     inputEditorWidget_= nullptr; ///< 输入编辑器容器
-  QWidget*     inputQTMWidget_   = nullptr; ///< 输入区 QTMWidget
-  QPushButton* sendButton_       = nullptr; ///< 发送/停止按钮
-  QToolButton* thinkingButton_   = nullptr; ///< 推理模式开关
-  QSpacerItem* topSpacer_        = nullptr; ///< 欢迎页顶部弹性空间
-  widget       messageWidget_;              ///< 消息区 TeXmacs widget
-  widget       inputWidget;                 ///< 输入区 TeXmacs widget
-  int          fixedFrameExtra_= 0;         ///< 输入框额外高度（边框等）
+  string       sessionId_;                         ///< 所属会话 ID
+  bool         conversationMode_ = false;          ///< 是否已进入对话模式
+  QLabel*      welcomeTitle_     = nullptr;        ///< 欢迎页标题
+  QLabel*      sessionTitle_     = nullptr;        ///< 会话标题标签
+  QWidget*     messageFrame_     = nullptr;        ///< 消息区域容器
+  QWidget*     inputEditorWidget_= nullptr;        ///< 输入编辑器容器
+  QTMWidget*   inputQTMWidget_   = nullptr;        ///< 输入区 QTMWidget
+  QToolButton* sendButton_       = nullptr;        ///< 发送/停止按钮
+  QToolButton* thinkingButton_   = nullptr;        ///< 推理模式开关
+  QSpacerItem* topSpacer_        = nullptr;        ///< 欢迎页顶部弹性空间
+  widget       messageWidget_;                     ///< 消息区 TeXmacs widget
+  widget       inputWidget;                        ///< 输入区 TeXmacs widget
+  int          fixedFrameExtra_           = 0;     ///< 输入框额外高度（边框等）
+  bool         inputHeightAdjustScheduled_= false; ///< 是否已有待执行的高度更新
 };
 
 /**
@@ -160,10 +187,9 @@ public:
 
   /**
    * @brief 添加新的侧边栏项。
-   * @param sessionId   会话 ID
-   * @param displayTitle 显示标题
+   * @param info 会话显示数据
    */
-  void addItem (const string& sessionId, const string& displayTitle);
+  void addItem (const SessionDisplayInfo& info);
 
   /**
    * @brief 更新指定会话的显示标题。
@@ -202,6 +228,12 @@ public:
   void beginEditTitle (const string& sessionId);
 
   // ---- 其他公共方法 ----
+
+  /**
+   * @brief 将指定会话项移到活跃列表顶部。
+   * @param sessionId 目标会话 ID
+   */
+  void reorderItem (const string& sessionId);
 
   /**
    * @brief 移除指定的侧边栏项。
@@ -257,8 +289,7 @@ private:
   QLineEdit*   searchEdit_            = nullptr; ///< 搜索框
   bool         multiSelectMode_       = false;   ///< 是否处于多选模式
   bool         archiveSelectMode_     = false;   ///< 是否在归档区多选
-  QList<SessionDisplayInfo> sessionCache_;       ///< 会话显示数据缓存
-  string                    activeSessionId_;    ///< 当前激活的会话 ID
+  string       activeSessionId_;                 ///< 当前激活的会话 ID
 
   SidebarItem createItem (const string& sessionId); ///< 创建单个侧边栏项 widget
   void destroyItem (const string& sessionId);       ///< 销毁单个侧边栏项 widget
@@ -322,14 +353,42 @@ public:
   ChatSidebar* sidebar () const { return sidebar_; }
   QPushButton* newChatButton () const { return newChatButton_; }
   QPushButton* floatingNewChatButton () const { return floatingNewChatBtn_; }
+  QPushButton* closeSidebarButton () const { return closeSidebarBtn_; }
   QList<ChatConversationPanel*>& conversations () { return conversations_; }
   ChatConversationPanel*         activeConversation () const {
     return activeConversation_;
   }
+  void setSidebarCollapsed (bool collapsed);
+  bool isSidebarCollapsed () const { return sidebarCollapsed_; }
+
+  /**
+   * @brief 获取全局记忆的侧边栏折叠状态。
+   */
+  static bool globalSidebarCollapsed ();
+  /**
+   * @brief 设置全局记忆的侧边栏折叠状态。
+   */
+  static void setGlobalSidebarCollapsed (bool collapsed);
+  bool        isSidebarWidgetVisible () const {
+    return sidebarWidget_ != nullptr && sidebarWidget_->isVisible ();
+  }
+  bool isFloatingContainerVisible () const {
+    return floatingBtnContainer_ != nullptr &&
+           floatingBtnContainer_->isVisible ();
+  }
+  /**
+   * @brief 直接设置内部侧边栏显隐（dock 模式使用，不触发浮动按钮）。
+   */
+  void setSidebarVisible (bool visible);
+  void setCloseSidebarButtonVisible (bool visible);
+
+  // ---- 供外部组件访问 ----
+  QWidget* contentWidget () const { return contentWidget_; }
 
 signals:
   void cancelRequested (const string& sessionId);
   void newChatRequested ();
+  void closeSidebarRequested ();
 
 protected:
   /// 键盘事件处理（Ctrl+N 新建会话等）
@@ -357,6 +416,8 @@ private:
   QPushButton*    floatingNewChatBtn_  = nullptr; ///< 浮动新建按钮
   QWidget*        floatingBtnContainer_= nullptr; ///< 浮动按钮容器
   QPushButton*    newChatButton_       = nullptr; ///< 侧边栏新建按钮
+  QPushButton*    newChatSidebarBtn_   = nullptr; ///< 新建按钮（dock 模式）
+  QPushButton*    closeSidebarBtn_     = nullptr; ///< 对话区域关闭侧边栏按钮
   QWidget*        sidebarNormalContent_= nullptr; ///< 侧边栏常规内容区
   QStackedWidget* conversationStack_   = nullptr; ///< 会话面板堆栈
 
@@ -365,6 +426,8 @@ private:
   bool                   sidebarCollapsed_    = false;   ///< 侧边栏是否折叠
   int                    sidebarExpandedWidth_= 0;       ///< 侧边栏展开时宽度
   qt_tm_widget_rep*      parentTmWidget_= nullptr; ///< 关联的 TeXmacs widget
+
+  static bool globalSidebarCollapsed_; ///< 全局记忆的侧边栏折叠状态
 };
 
 #endif // QT_CHAT_TAB_WIDGET_HPP

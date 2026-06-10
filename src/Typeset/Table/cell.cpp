@@ -19,7 +19,8 @@ using namespace moebius;
  * Cells
  ******************************************************************************/
 
-cell_rep::cell_rep (edit_env env2) : var (""), env (env2), border_flags (0) {}
+cell_rep::cell_rep (edit_env env2)
+    : var (""), env (env2), border_flags (0), bcolor_precedence (-1) {}
 
 void
 cell_rep::typeset (tree fm, tree t, path iq) {
@@ -186,6 +187,11 @@ cell_rep::format_cell (tree fm) {
     if (bg == "foreground") bg= env->get_string (COLOR);
   }
   else bg= "";
+  if (var->contains (CELL_BORDER_COLOR)) {
+    bcolor= env->exec (var[CELL_BORDER_COLOR]);
+    if (bcolor == "foreground") bcolor= env->get_string (COLOR);
+  }
+  else bcolor= "";
   if (var->contains (CELL_WIDTH)) {
     width= env->as_length (env->exec (var[CELL_WIDTH]));
     if (var->contains (CELL_HMODE))
@@ -467,13 +473,16 @@ cell_rep::finish () {
     b= T->b;
   }
 
+  brush fg= env->pen->get_brush ();
+  if (bcolor != "") fg= brush (bcolor, env->alpha);
+
   if (!is_nil (T)) {
     b= cell_box (ip, b, xoff, yoff, 0, 0, x2 - x1, y2 - y1, 0, 0, 0, 0, 0, 0,
-                 env->pen->get_brush (), brush (bg, env->alpha));
+                 fg, brush (bg, env->alpha));
   }
   else {
     b= cell_box (ip, b, xoff, yoff, 0, 0, x2 - x1, y2 - y1, lborder, rborder,
-                 bborder, tborder, dborder, aborder, env->pen->get_brush (),
+                 bborder, tborder, dborder, aborder, fg,
                  brush (bg, env->alpha));
   }
 }

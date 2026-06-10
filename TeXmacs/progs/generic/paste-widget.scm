@@ -214,6 +214,9 @@
               ((== fm "internal") (paste-as-texmacs))
               (else (clipboard-paste-import fm "primary"))
         ) ;cond
+        (when (chat-input-buffer? (current-buffer-url))
+          (qt-chat-notify-input-height)
+        ) ;when
       ) ;when
     ) ;lambda
   ) ;define
