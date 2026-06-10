@@ -1371,7 +1371,7 @@ qt_tm_widget_rep::update_visibility () {
   bool old_pdfToolBarVisibility= pdfToolBar->isVisible ();
 
   bool new_mainVisibility      = visibility[1] && visibility[0];
-  bool new_menuVisibility      = visibility[0];
+  bool new_menuVisibility      = visibility[0] && !use_native_menubar;
   bool new_modeVisibility      = visibility[2] && visibility[0];
   bool new_focusVisibility     = visibility[3] && visibility[0];
   bool new_userVisibility      = visibility[4] && visibility[0];
