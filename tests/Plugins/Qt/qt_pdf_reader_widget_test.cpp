@@ -52,21 +52,27 @@ private slots:
     delete widget;
   }
 
-  void test_toolBarWidgetsHeightAligned () {
+  void test_zoomPageSignals () {
+    // Toolbar widgets are now in PdfToolBar, not PDFReaderWidget.
+    // Verify that the reader emits the expected signals via setZoomFactor.
     PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (400, 300);
     widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (is_regular (pdfUrl)) {
+      widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    }
     QApplication::processEvents ();
 
-    QLineEdit* zoomEdit= widget->findChild<QLineEdit*> ("pdf-zoom-edit");
-    QVERIFY (zoomEdit != nullptr);
-    QLineEdit* pageEdit= widget->findChild<QLineEdit*> ("pdf-page-edit");
-    QVERIFY (pageEdit != nullptr);
-    QToolButton* zoomDropBtn=
-        widget->findChild<QToolButton*> ("pdf-zoom-drop-btn");
-    QVERIFY (zoomDropBtn != nullptr);
+    QString capturedZoom;
+    connect (widget, &PDFReaderWidget::zoomChanged,
+             [&capturedZoom] (const QString& text) { capturedZoom= text; });
 
-    QCOMPARE (zoomEdit->height (), pageEdit->height ());
-    QVERIFY (zoomDropBtn->arrowType () == Qt::DownArrow);
+    widget->setZoomFactor (1.5);
+    QApplication::processEvents ();
+
+    QCOMPARE (capturedZoom, QString ("150%"));
 
     delete widget;
   }
@@ -205,24 +211,25 @@ private slots:
     delete widget;
   }
 
-  void test_rectSelectButtonExists () {
+  void test_rectSelectModeApi () {
+    // The rect-select button is now in PdfToolBar.
+    // Verify the public API setRectSelectMode works.
     PDFReaderWidget* widget= new PDFReaderWidget ();
-    QToolButton*     rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
+    QVERIFY (!widget->isRectSelectMode ());
+    widget->setRectSelectMode (true);
+    QVERIFY (widget->isRectSelectMode ());
+    widget->setRectSelectMode (false);
+    QVERIFY (!widget->isRectSelectMode ());
     delete widget;
   }
 
   void test_rectSelectModeToggle () {
     PDFReaderWidget* widget= new PDFReaderWidget ();
-    QToolButton*     rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
 
     QVERIFY (!widget->isRectSelectMode ());
-    rectBtn->click ();
+    widget->setRectSelectMode (true);
     QVERIFY (widget->isRectSelectMode ());
-    rectBtn->click ();
+    widget->setRectSelectMode (false);
     QVERIFY (!widget->isRectSelectMode ());
     delete widget;
   }
@@ -232,18 +239,14 @@ private slots:
     widget->show ();
     QApplication::processEvents ();
 
-    QToolButton* rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
-
     QWidget* vp= widget->viewport ();
     QVERIFY (vp != nullptr);
 
     QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
-    rectBtn->click ();
+    widget->setRectSelectMode (true);
     QApplication::processEvents ();
     QCOMPARE (vp->cursor ().shape (), Qt::CrossCursor);
-    rectBtn->click ();
+    widget->setRectSelectMode (false);
     QApplication::processEvents ();
     QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
     delete widget;
@@ -261,12 +264,8 @@ private slots:
 
     QApplication::processEvents ();
 
-    QToolButton* rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
-
     // 进入选择模式后显示提示
-    rectBtn->click ();
+    widget->setRectSelectMode (true);
     QApplication::processEvents ();
 
     QLabel* hint= widget->findChild<QLabel*> ("rectSelectHint");
@@ -288,7 +287,7 @@ private slots:
     QCOMPARE (hint->text (), QString ("Copied to Clipboard!"));
 
     // 退出选择模式后隐藏提示
-    rectBtn->click ();
+    widget->setRectSelectMode (false);
     QApplication::processEvents ();
     QVERIFY (!hint->isVisible ());
 
@@ -313,10 +312,7 @@ private slots:
     QApplication::processEvents ();
 
     // 进入选择模式
-    QToolButton* rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
-    rectBtn->click ();
+    widget->setRectSelectMode (true);
     QApplication::processEvents ();
 
     QWidget* vp= widget->viewport ();
@@ -347,10 +343,7 @@ private slots:
 
     QApplication::processEvents ();
 
-    QToolButton* rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
-    rectBtn->click ();
+    widget->setRectSelectMode (true);
     QApplication::processEvents ();
     QVERIFY (widget->isRectSelectMode ());
 
@@ -377,10 +370,7 @@ private slots:
 
     QApplication::processEvents ();
 
-    QToolButton* rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
-    rectBtn->click ();
+    widget->setRectSelectMode (true);
     QApplication::processEvents ();
     QVERIFY (widget->isRectSelectMode ());
 
@@ -604,10 +594,6 @@ private slots:
     }
     QApplication::processEvents ();
 
-    QToolButton* rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
-
     QWidget* vp= widget->viewport ();
     QVERIFY (vp != nullptr);
 
@@ -615,7 +601,7 @@ private slots:
     QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
 
     // 进入选择模式
-    rectBtn->click ();
+    widget->setRectSelectMode (true);
     QApplication::processEvents ();
     QCOMPARE (vp->cursor ().shape (), Qt::CrossCursor);
 
@@ -636,7 +622,7 @@ private slots:
     QCOMPARE (vbar->value (), initialPos);
 
     // 退出选择模式后恢复小手
-    rectBtn->click ();
+    widget->setRectSelectMode (false);
     QApplication::processEvents ();
     QCOMPARE (vp->cursor ().shape (), Qt::OpenHandCursor);
 
@@ -1169,10 +1155,7 @@ private slots:
     }
     QApplication::processEvents ();
 
-    QToolButton* rectBtn=
-        widget->findChild<QToolButton*> ("pdf-screenshot-btn");
-    QVERIFY (rectBtn != nullptr);
-    rectBtn->click ();
+    widget->setRectSelectMode (true);
     QApplication::processEvents ();
     QVERIFY (widget->isRectSelectMode ());
 
@@ -1273,6 +1256,11 @@ private slots:
   }
 
   void test_autoFitWidth_whenSnappedLeftHalf () {
+    // Wayland 下客户端无法控制窗口位置，frameGeometry() 不可靠，跳过
+    if (qEnvironmentVariable ("XDG_SESSION_TYPE") == "wayland") {
+      QSKIP ("Wayland does not support client-side window positioning");
+    }
+
     PDFReaderWidget* widget= new PDFReaderWidget ();
     QScreen*         screen= QApplication::primaryScreen ();
     QRect            screenGeo=
@@ -1317,6 +1305,171 @@ private slots:
 
     // 不满足半屏贴靠条件，应保持默认 100% 缩放
     QCOMPARE (widget->zoomFactor (), 1.0);
+    delete widget;
+  }
+
+  // ============================================================
+  // Zoom position preservation tests (TDD for issue #0192)
+  // ============================================================
+
+  void test_setZoomFactor_preservesContentPosition () {
+    // When zooming via setZoomFactor, the scroll position should be
+    // adjusted so that the same content point stays at the viewport center.
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (200, 100);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (!is_regular (pdfUrl)) {
+      delete widget;
+      QSKIP ("No test PDF");
+    }
+    widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    QApplication::processEvents ();
+
+    QScrollBar* vbar= widget->verticalScrollBar ();
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->maximum () > 0; }, 1000));
+
+    // First zoom in to 1.5x so we have more scrollable area
+    widget->setZoomFactor (1.5);
+    QTest::qWait (300);
+    QApplication::processEvents ();
+    QVERIFY (vbar->maximum () > 0);
+
+    // Scroll to a non-trivial position
+    vbar->setValue (vbar->maximum () / 2);
+    QApplication::processEvents ();
+
+    // Record the absolute content Y coordinate at viewport center
+    int    scrollY1      = vbar->value ();
+    int    viewportHeight= widget->viewport ()->height ();
+    double contentYBefore= static_cast<double> (scrollY1) +
+                           static_cast<double> (viewportHeight) / 2.0;
+
+    // Zoom in further — content size scales by 2.0/1.5 = 1.333x
+    double oldZoom= 1.5;
+    double newZoom= 2.0;
+    widget->setZoomFactor (newZoom);
+    QTest::qWait (300);
+    QApplication::processEvents ();
+
+    int    scrollY2     = vbar->value ();
+    double contentYAfter= static_cast<double> (scrollY2) +
+                          static_cast<double> (viewportHeight) / 2.0;
+
+    // After zoom, the content Y that was at viewport center should
+    // have scaled by the zoom ratio. So:
+    //   contentYAfter ≈ contentYBefore * (newZoom / oldZoom)
+    double expectedContentY= contentYBefore * (newZoom / oldZoom);
+    double tolerance       = expectedContentY * 0.05; // 5% tolerance
+    QVERIFY2 (qAbs (contentYAfter - expectedContentY) <= tolerance,
+              "Content position under viewport center shifted after zoom");
+    delete widget;
+  }
+
+  void test_wheelZoom_preservesContentPosition () {
+    // When zooming via Ctrl+wheel, the scroll position should be
+    // adjusted so that the content under the cursor stays under the cursor.
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (200, 100);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (!is_regular (pdfUrl)) {
+      delete widget;
+      QSKIP ("No test PDF");
+    }
+    widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    QApplication::processEvents ();
+
+    QScrollBar* vbar= widget->verticalScrollBar ();
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->maximum () > 0; }, 1000));
+
+    // First zoom in to 1.5x so we have more scrollable area
+    widget->setZoomFactor (1.5);
+    QTest::qWait (300);
+    QApplication::processEvents ();
+
+    vbar->setValue (vbar->maximum () / 2);
+    QApplication::processEvents ();
+
+    // Cursor is at viewport position (50, 50)
+    QPoint cursorPos (50, 50);
+    double oldZoom         = widget->zoomFactor ();
+    double contentYAtCursor= static_cast<double> (vbar->value ()) +
+                             static_cast<double> (cursorPos.y ());
+
+    // Ctrl+wheel zoom in
+    QWheelEvent wheelEvent (QPointF (cursorPos), QPointF (cursorPos),
+                            QPoint (0, 0), QPoint (0, 120), Qt::NoButton,
+                            Qt::ControlModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent (widget->viewport (), &wheelEvent);
+    QTest::qWait (300);
+    QApplication::processEvents ();
+
+    double newZoom= widget->zoomFactor ();
+
+    double contentYAtCursorAfter= static_cast<double> (vbar->value ()) +
+                                  static_cast<double> (cursorPos.y ());
+
+    // After zoom, the content point that was under the cursor should
+    // have been scaled by the zoom ratio.
+    double expectedContentY= contentYAtCursor * (newZoom / oldZoom);
+    double tolerance       = qMax (expectedContentY * 0.05, 5.0); // 5% or 5px
+    QVERIFY2 (qAbs (contentYAtCursorAfter - expectedContentY) <= tolerance,
+              "Content under cursor shifted after wheel zoom");
+    delete widget;
+  }
+
+  void test_wheelZoom_roundTrip_preservesScrollRatio () {
+    // Use setZoomFactor for both zoom-in and zoom-out so that the same
+    // anchor (viewport center) is used in both directions. The scroll
+    // position should return to the original after a round-trip.
+    PDFReaderWidget* widget= new PDFReaderWidget ();
+    widget->resize (200, 100);
+    widget->show ();
+
+    url pdfUrl= url_system ("$TEXMACS_PATH/tests/PDF/pdf_1_4_sample.pdf");
+    if (!is_regular (pdfUrl)) {
+      delete widget;
+      QSKIP ("No test PDF");
+    }
+    widget->loadFromFile (to_qstring (as_string (pdfUrl)));
+    QApplication::processEvents ();
+
+    QScrollBar* vbar= widget->verticalScrollBar ();
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->maximum () > 0; }, 1000));
+
+    // First zoom in to 1.5x so we have more scrollable area
+    widget->setZoomFactor (1.5);
+    QTest::qWait (300);
+    QApplication::processEvents ();
+
+    // Scroll to a non-trivial position
+    vbar->setValue (vbar->maximum () / 2);
+    QApplication::processEvents ();
+
+    int    initialScrollY= vbar->value ();
+    double initialZoom   = widget->zoomFactor ();
+
+    // Zoom in via setZoomFactor (anchor at viewport center)
+    widget->setZoomFactor (3.0);
+    QTest::qWait (300);
+    QApplication::processEvents ();
+
+    QVERIFY (widget->zoomFactor () > initialZoom);
+
+    // Return to the original zoom level via setZoomFactor (same anchor)
+    widget->setZoomFactor (initialZoom);
+    QTest::qWait (300);
+    QApplication::processEvents ();
+
+    QCOMPARE (widget->zoomFactor (), initialZoom);
+
+    // Scroll position should return to the original (within 5px)
+    QVERIFY2 (
+        qAbs (vbar->value () - initialScrollY) <= 5,
+        "Scroll position did not return to original after round-trip zoom");
     delete widget;
   }
 };

@@ -67,6 +67,8 @@
 
 (define tmtex-image-total 0)
 
+(define tmtex-progress? #f)
+
 (define (tmtex-count-images t)
   (cond ((null? t) 0)
         ((npair? t) 0)
@@ -103,7 +105,7 @@
 
 (define (tmtex-image-increment)
   (set! tmtex-image-progress (+ tmtex-image-progress 1))
-  (when (and (qt-gui?) (> tmtex-image-total 0))
+  (when (and tmtex-progress? (> tmtex-image-total 0))
     (latex-progress-update tmtex-image-progress)
   ) ;when
 ) ;define
@@ -209,6 +211,7 @@
 
 (define (tmtex-initialize opts)
   (set! tmtex-image-progress 0)
+  (set! tmtex-progress? #f)
   (set! tmtex-ref-cnt 1)
   (set! tmtex-env (make-ahash-table))
   (set! tmtex-macros (make-ahash-table))
@@ -248,21 +251,14 @@
     (set! tmtex-mathjax? #t)
   ) ;when
   (with charset
-    (assoc-ref opts "texmacs->latex:encoding")
+    (or (assoc-ref opts "texmacs->latex:encoding") "utf-8")
     (if tmtex-cjk-document? (set! charset "utf-8"))
-    (cond ((== charset "utf-8")
+    (cond ((== (locase-all charset) "utf-8")
            (set! tmtex-use-catcodes? #f)
-           (set! tmtex-use-ascii? #f)
            (set! tmtex-use-unicode? #t)
           ) ;
           ((== charset "cork")
            (set! tmtex-use-catcodes? #t)
-           (set! tmtex-use-ascii? #f)
-           (set! tmtex-use-unicode? #f)
-          ) ;
-          ((== charset "ascii")
-           (set! tmtex-use-catcodes? #f)
-           (set! tmtex-use-ascii? #t)
            (set! tmtex-use-unicode? #f)
           ) ;
     ) ;cond
@@ -749,7 +745,7 @@
             ((== c #\x1E) (tmtex-text-sub "ffi" l))
             ((== c #\x1F) (tmtex-text-sub "ffl" l))
             ((== c #\|) (tmtex-text-sub '(textbar) l))
-            (else (append (if (or tmtex-use-unicode? tmtex-use-ascii?)
+            (else (append (if tmtex-use-unicode?
                             (string->list (string-convert (char->string c) "Cork" "UTF-8"))
                             (list c)
                           ) ;if
@@ -793,7 +789,7 @@
              (tmtex-math-operator l)
             ) ;
             (else (with c
-                    (if (or tmtex-use-unicode? tmtex-use-ascii?)
+                    (if tmtex-use-unicode?
                       (string->list (string-convert (char->string c) "Cork" "UTF-8"))
                       (list c)
                     ) ;if
@@ -874,7 +870,7 @@
     (set! s (texmacs->verbatim (tm->tree s)))
   ) ;when
   (let* ((l (string->list s)) (t (tmtex-verb-list l)) (r (tmtex-string-produce t)))
-    (if (or tmtex-use-unicode? tmtex-use-ascii?)
+    (if tmtex-use-unicode?
       (set! r (map (lambda (x) (string-convert* x "Cork" "UTF-8")) r))
       (set! r (map unescape-angles r))
     ) ;if
@@ -3198,10 +3194,12 @@
   (set! l (escape-backslashes l))
   (set! l (escape-braces l))
   (set! s (car (string-decompose s "-")))
-  (with lang
-    (if (or (== s "verbatim") (== s "code")) '() `((!option ,s)))
-    `((!begin* ,"tmcode" ,@lang) ,(tmtex-verbatim* "" l))
-  ) ;with
+  (if (or (== s "verbatim") (== s "code"))
+    `((!begin* ,"alltt") ,(tmtex-verbatim* "" l))
+    (with lang `((!option ,s))
+      `((!begin* ,"tmcode" ,@lang) ,(tmtex-verbatim* "" l))
+    ) ;with
+  ) ;if
 ) ;define
 
 (define (tmtex-add-preview-packages x)
@@ -3856,10 +3854,6 @@
 
 (define (tmtex-nocite s l)
   (tex-apply 'nocite (tmtex-cite-list l))
-) ;define
-
-(define (tmtex-cite-TeXmacs s l)
-  (tex-apply 'citetexmacs (tmtex-cite-list l))
 ) ;define
 
 (tm-define (tmtex-cite-detail s l)
@@ -4585,7 +4579,6 @@
  (tm-made (,(tmtex-rename 'tmmade) 0))
  (cite (,tmtex-cite -1))
  (nocite (,tmtex-nocite -1))
- (cite-TeXmacs (,tmtex-cite-TeXmacs -1))
  (cite-detail (,tmtex-cite-detail-hook 2))
  (cite-raw (,tmtex-cite-raw -1))
  (cite-raw* (,tmtex-cite-raw* -1))
@@ -5044,7 +5037,13 @@
           ) ;
       (tmtex-initialize opts)
       (set! tmtex-image-total (tmtex-count-images x3))
-      (when (and (qt-gui?) (> tmtex-image-total 0))
+      (set! tmtex-progress?
+        (and (qt-gui?)
+          (== (assoc-ref opts "texmacs->latex:progress") "on")
+          (> tmtex-image-total 0)
+        ) ;and
+      ) ;set!
+      (when tmtex-progress?
         (latex-progress-start tmtex-image-total)
       ) ;when
       (with r
@@ -5052,8 +5051,9 @@
         (if tmtex-mathjax? (set! r (latex-mathjax-pre r)))
         (if (not tmtex-use-macros?) (set! r (latex-expand-macros r)))
         (if tmtex-mathjax? (set! r (latex-mathjax r)))
-        (when (and (qt-gui?) (> tmtex-image-total 0))
+        (when tmtex-progress?
           (latex-progress-end)
+          (set! tmtex-progress? #f)
         ) ;when
         r
       ) ;with

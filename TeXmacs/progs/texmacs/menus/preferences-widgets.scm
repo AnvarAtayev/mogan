@@ -231,7 +231,13 @@ pretty-val : string
       (enum (set-pretty-preference "cyrillic input method" answer)
             '("None" "Translit" "Jcuken" "Yawerty")
             (get-pretty-preference "cyrillic input method")
-            "15em")))
+            "15em"))
+    (assuming (os-macos?)
+      (item (text "Keyboard shortcut style:")
+        (enum (set-pretty-preference* "keyboard shortcut style" answer)
+              '("Text" "Symbol")
+              (get-pretty-preference "keyboard shortcut style")
+              "15em"))))
   ====== ======
   (bold (text "Remote controllers with keyboard simulation"))
   ======
@@ -438,7 +444,6 @@ pretty-val : string
 ;; LaTeX ----------
 
 (define-preference-names "texmacs->latex:encoding"
-  ("ascii" "Ascii")
   ("cork"  "Cork with catcodes")
   ("utf-8" "Utf-8 with inputenc"))
 
@@ -500,7 +505,7 @@ pretty-val : string
   (aligned
     (item (text "Character encoding:")
       (enum (set-pretty-preference "texmacs->latex:encoding" answer)
-            '("Ascii" "Cork with catcodes" "Utf-8 with inputenc")
+            '("Utf-8 with inputenc" "Cork with catcodes")
             (get-pretty-preference "texmacs->latex:encoding")
             "15em")))
   ====== ======

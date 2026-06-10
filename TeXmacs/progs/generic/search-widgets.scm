@@ -111,6 +111,20 @@
     (when isreplace?
       (set! isreplace? #f)
     ) ;when
+    ;; 更新浮动搜索栏的匹配计数
+    (when floating-search-target
+      (if (== index-str "")
+        (qt-floating-search-set-match-info 0 0)
+        (let* ((parts (string-split index-str #\/))
+               (cur (string->number (car parts)))
+               (tot (string->number (cadr parts)))
+              ) ;
+          (when (and cur tot)
+            (qt-floating-search-set-match-info cur tot)
+          ) ;when
+        ) ;let*
+      ) ;if
+    ) ;when
     (if (== index-str "")
       (set-auxiliary-widget-title (translate search-replace-text))
       (set-auxiliary-widget-title (string-append (translate search-replace-text) " (" index-str ")")
@@ -158,20 +172,30 @@
 ;; ----
 ;; 此函数用于管理搜索辅助缓冲区的生命周期，确保每个主文档视图有唯一的搜索缓冲区。
 (tm-define (search-buffer)
-  (with u
-    (current-buffer)
-    (if (and (url-rooted-tmfs? u)
-          (== (url-head (url-head u)) (string->url "tmfs://aux/search"))
-        ) ;and
-      u
-      (string->url (string-append "tmfs://aux/search/"
-                     (md5 (url->string (current-view-url)))
-                     "/"
-                     (url->string (url-tail (current-window)))
-                   ) ;string-append
-      ) ;string->url
-    ) ;if
-  ) ;with
+  ;; 悬浮搜索激活时直接返回保存的 aux buffer
+  (if (and floating-search-active?
+        floating-search-aux
+        (buffer-exists? floating-search-aux)
+        (or (== (current-buffer) floating-search-aux)
+          (== (current-buffer) floating-search-target)
+        ) ;or
+      ) ;and
+    floating-search-aux
+    (with u
+      (current-buffer)
+      (if (and (url-rooted-tmfs? u)
+            (== (url-head (url-head u)) (string->url "tmfs://aux/search"))
+          ) ;and
+        u
+        (string->url (string-append "tmfs://aux/search/"
+                       (md5 (url->string (current-view-url)))
+                       "/"
+                       (url->string (url-tail (current-window)))
+                     ) ;string-append
+        ) ;string->url
+      ) ;if
+    ) ;with
+  ) ;if
 ) ;tm-define
 
 ;; replace-buffer
@@ -329,35 +353,73 @@
 ) ;tm-define
 
 (tm-define (master-buffer)
-  (and (buffer-exists? (search-buffer))
-    (with mas
-      (buffer-get-master (search-buffer))
-      (cond ((nnull? (buffer->windows mas)) mas)
-            ((in? search-window (window-list))
-             (buffer-set-master (search-buffer) (window->buffer search-window))
-             (with-buffer (buffer-get-master (search-buffer))
-               (set-search-reference (cursor-path))
-               (set-search-filter)
-             ) ;with-buffer
-             (master-buffer)
-            ) ;
-            ((nnull? (window-list))
-             (set! search-window (car (window-list)))
-             (master-buffer)
-            ) ;
-            (else #f)
-      ) ;cond
-    ) ;with
-  ) ;and
+  ;; 悬浮搜索激活时直接返回保存的 target buffer
+  (if (and floating-search-active?
+        floating-search-target
+        (buffer-exists? floating-search-target)
+        (or (== (current-buffer) floating-search-aux)
+          (== (current-buffer) floating-search-target)
+        ) ;or
+      ) ;and
+    floating-search-target
+    (and (buffer-exists? (search-buffer))
+      (with mas
+        (buffer-get-master (search-buffer))
+        (cond ((nnull? (buffer->windows mas)) mas)
+              ((in? search-window (window-list))
+               (buffer-set-master (search-buffer) (window->buffer search-window))
+               (with-buffer (buffer-get-master (search-buffer))
+                 (set-search-reference (cursor-path))
+                 (set-search-filter)
+               ) ;with-buffer
+               (master-buffer)
+              ) ;
+              ((nnull? (window-list))
+               (set! search-window (car (window-list)))
+               (master-buffer)
+              ) ;
+              (else #f)
+        ) ;cond
+      ) ;with
+    ) ;and
+  ) ;if
 ) ;tm-define
 
-(tm-define (inside-search-buffer?) (== (current-buffer) (search-buffer)))
+(tm-define (inside-search-buffer?)
+  (if (and floating-search-active?
+        (or (== (current-buffer) floating-search-aux)
+          (== (current-buffer) floating-search-target)
+        ) ;or
+      ) ;and
+    (== (current-buffer) floating-search-aux)
+    (== (current-buffer) (search-buffer))
+  ) ;if
+) ;tm-define
 
 (tm-define (inside-replace-buffer?) (== (current-buffer) (replace-buffer)))
 
 (tm-define (inside-search-or-replace-buffer?)
   (in? (current-buffer) (list (search-buffer) (replace-buffer)))
 ) ;tm-define
+
+(define (search-or-replace-aux-buffer? u)
+  (and (url-rooted-tmfs? u)
+    (with root
+      (url-head (url-head u))
+      (or (== root (string->url "tmfs://aux/search"))
+        (== root (string->url "tmfs://aux/replace"))
+      ) ;or
+    ) ;with
+  ) ;and
+) ;define
+
+(define (search-command-target-buffer u)
+  (with mas (buffer-get-master u) (search-command-target-buffer* u mas))
+) ;define
+
+(define (search-command-target-buffer* u mas)
+  (if (and (search-or-replace-aux-buffer? u) mas (buffer-exists? mas)) mas u)
+) ;define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Filtered searching
@@ -417,17 +479,38 @@
 ) ;define
 
 (define (accept-search-result? p)
-  (or (== (get-init "mode") "src")
+  (if (and floating-search-active? (== floating-search-mode "math"))
+    (search-path-inside-math? p)
+    (if floating-search-active?
+      #t
+      ;; text mode: tree-perform-search 中 access=0 已限制只搜文本节点，无需额外 filter
+      (or (== (get-init "mode") "src")
+        (let* ((buf (buffer-tree))
+               (rel (path-strip (cDr p) (tree->path buf)))
+               (initial (cons 'attr (get-main-attrs get-init)))
+               (old-env (get-search-filter))
+               (new-env (tree-descendant-env* buf rel initial))
+              ) ;
+          ;; (display* p " ~> " new-env "\n")
+          (check-same? (tm-children new-env) (tm-children old-env))
+        ) ;let*
+      ) ;or
+    ) ;if
+  ) ;if
+) ;define
+
+(define (search-path-inside-math? p)
+  (with-buffer (master-buffer)
     (let* ((buf (buffer-tree))
            (rel (path-strip (cDr p) (tree->path buf)))
            (initial (cons 'attr (get-main-attrs get-init)))
-           (old-env (get-search-filter))
-           (new-env (tree-descendant-env* buf rel initial))
+           (env (and rel (tree-descendant-env* buf rel initial)))
           ) ;
-      ;; (display* p " ~> " new-env "\n")
-      (check-same? (tm-children new-env) (tm-children old-env))
+      (and env
+        (with env-attrs (tm-children env) (check-same-sub? env-attrs "mode" "math"))
+      ) ;and
     ) ;let*
-  ) ;or
+  ) ;with-buffer
 ) ;define
 
 (define (filter-search-results sels)
@@ -450,8 +533,13 @@
 
 (define (tree-perform-search t what p limit)
   (let* ((source-mode 2)
+         (math-mode 1)
          (old-mode (get-access-mode))
-         (new-mode (if (== (get-init "mode") "src") source-mode old-mode))
+         (new-mode (cond ((== (get-init "mode") "src") source-mode)
+                         ((and floating-search-active? (== floating-search-mode "math")) math-mode)
+                         (else old-mode)
+                   ) ;cond
+         ) ;new-mode
         ) ;
     (set-access-mode new-mode)
     (let* ((cp (cDr (cursor-path)))
@@ -466,7 +554,10 @@
 
 (define (go-to* p)
   (go-to p)
-  (when (and (not (cursor-accessible?)) (not (in-source?)))
+  (when (and (not (cursor-accessible?))
+          (not (in-source?))
+          (not floating-search-active?)
+        ) ;and
     (cursor-show-hidden)
     (delayed (:pause 50)
       (set! search-serial (+ search-serial 1))
@@ -637,7 +728,9 @@
   (set! search-serial (+ search-serial 1))
   (with-buffer (master-buffer) (cancel-alt-selection "alternate"))
   (set-search-window-state #f #f)
-  (buffer-focus u #t)
+  (when u
+    (buffer-focus u #t)
+  ) ;when
 ) ;tm-define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1113,6 +1206,110 @@
 ) ;tm-define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Chat tab search (floating search bar)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define floating-search-target #f)
+
+(define floating-search-aux #f)
+
+(define floating-search-active? #f)
+
+(define floating-search-mode "text")
+
+(define floating-search-last-content "")
+
+(tm-define (floating-search-toggle-mode)
+  (set! floating-search-mode (if (== floating-search-mode "text") "math" "text"))
+  ;; 更新 filter
+  (when floating-search-target
+    (with-buffer floating-search-target (set-search-filter))
+  ) ;when
+  ;; 重建 widget 以切换数学/文本输入环境，保留已输入文本
+  (when floating-search-aux
+    (let ((saved-body (buffer-get-body floating-search-aux)))
+      (qt-floating-search-init (url->string floating-search-aux) floating-search-mode)
+      (when (not (tree-empty? saved-body))
+        (buffer-set-body floating-search-aux saved-body)
+      ) ;when
+      ;; 重建 widget 后同步暗色样式
+      (sync-buffer-dark-style-with-gui-theme floating-search-aux)
+    ) ;let
+  ) ;when
+  ;; 在 floating-search-aux 上下文中搜索，确保 guards 通过
+  (when floating-search-aux
+    (with-buffer floating-search-aux (perform-search*))
+  ) ;when
+) ;tm-define
+
+(define (floating-search-init target-buf)
+  (set! floating-search-target target-buf)
+  (set! floating-search-last-content "")
+  (let ((aux (search-buffer)))
+    (set! floating-search-aux aux)
+    (set! floating-search-active? #t)
+    (buffer-set-master aux target-buf)
+    (set-search-window-state #t #t)
+    (with-buffer target-buf
+      (set-search-reference (cursor-path))
+      (set-search-filter)
+    ) ;with-buffer
+    (set! search-filter-out? #f)
+    ;; 设置搜索缓冲区的初始 init env（与侧边栏 texmacs-input 行为一致）
+    (with-buffer aux (init-env "mode" floating-search-mode))
+    (qt-floating-search-set-callbacks "(floating-search-next #t)"
+      "(floating-search-next #f)"
+      "(floating-search-close)"
+    ) ;qt-floating-search-set-callbacks
+    (qt-floating-search-init (url->string aux) floating-search-mode)
+    ;; 同步暗色样式到搜索缓冲区
+    (sync-buffer-dark-style-with-gui-theme aux)
+    (qt-floating-search "true")
+  ) ;let
+) ;define
+
+(tm-define (floating-search-next forward?)
+  (when (and floating-search-target floating-search-aux)
+    (with-buffer floating-search-target (search-rotate-match forward?))
+  ) ;when
+) ;tm-define
+
+(tm-define (floating-search-on-input)
+  (when (and floating-search-active? floating-search-aux)
+    (let ((current (tree->string (buffer-get-body floating-search-aux))))
+      (when (not (== current floating-search-last-content))
+        (set! floating-search-last-content current)
+        (with-buffer floating-search-aux (perform-search*))
+      ) ;when
+    ) ;let
+  ) ;when
+) ;tm-define
+
+(tm-define (floating-search-close)
+  (when floating-search-target
+    (search-show-all)
+    (set! search-serial (+ search-serial 1))
+    (with-buffer floating-search-target (cancel-alt-selection "alternate"))
+    (set-search-window-state #f #f)
+    (let* ((msg-url (url->system floating-search-target))
+           (in-url (if (chat-message-buffer? floating-search-target)
+                     (url->system (chat-tab-session->input-buffer
+                       (chat-buffer-session-id floating-search-target)))
+                     ""
+                   ) ;if
+           ) ;in-url
+          ) ;
+      (when (not (== in-url ""))
+        (buffer-focus (string->url in-url) #t)
+      ) ;when
+    ) ;let*
+    (set! floating-search-active? #f)
+    (set! floating-search-target #f)
+    (set! floating-search-aux #f)
+  ) ;when
+) ;tm-define
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Search and replace widget
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1393,6 +1590,9 @@
 ) ;tm-define
 
 (tm-define (toolbar-search-end)
+  (when floating-search-active?
+    (floating-search-close)
+  ) ;when
   (cancel-alt-selection "alternate")
   (search-show-all)
   (set! search-filter-out? #f)
@@ -1626,34 +1826,75 @@
 
 (define-preferences ("toolbar search" "on" noop) ("toolbar replace" "on" noop))
 
+;; chat-message-buffer?, chat-input-buffer?, chat-buffer-session-id
+;; 已在 (llm chat-protocol) 中以 tm-define 导出
+
+(define (chat-message-buffer-has-content? msg-buf)
+  (and (buffer-exists? msg-buf)
+    (with body
+      (buffer-get-body msg-buf)
+      (not (and (tm-func? body 'document 1) (tree-empty? (tm-ref body 0))))
+    ) ;with
+  ) ;and
+) ;define
+
 (tm-define (interactive-search)
   (:interactive #t)
-  (unless (string-starts? (url->system (current-buffer)) "tmfs:")
-    (set! search-replace-text
-      (cond ((in-math?) "Only search in math mode")
-            ((in-prog?) "Only search in Program mode")
-            ((in-graphics?) "Graphics mode cannot search")
-            (else "Only search in text mode")
-      ) ;cond
-    ) ;set!
-    (set-boolean-preference "search-and-replace" #f)
-    (open-search)
-  ) ;unless
+  (with-buffer (search-command-target-buffer (current-buffer))
+    (with buf
+      (current-buffer)
+      (with sid
+        (chat-buffer-session-id buf)
+        (cond ((string-starts? (url->system buf) "tmfs://chat")
+               ;; chat tab 任何缓冲区：通过 sid 或胶水函数找到消息缓冲区
+               (let* ((msg-url (if sid
+                                 (url->system (chat-tab-session->message-buffer sid))
+                                 (qt-chat-tab-active-message-buffer-url)
+                               ) ;if
+                      ) ;msg-url
+                      (msg-u (and msg-url (not (== msg-url "")) (string->url msg-url)))
+                     ) ;
+                 (if (and msg-u (chat-message-buffer-has-content? msg-u))
+                   (floating-search-init msg-u)
+                   (noop)
+                 ) ;if
+               ) ;let*
+              ) ;
+              ((string-starts? (url->system buf) "tmfs:")
+               ;; 其他 tmfs:// 缓冲区保持禁用搜索
+               (noop)
+              ) ;
+              (else (set! search-replace-text
+                      (cond ((in-math?) "Only search in math mode")
+                            ((in-prog?) "Only search in Program mode")
+                            ((in-graphics?) "Graphics mode cannot search")
+                            (else "Only search in text mode")
+                      ) ;cond
+                    ) ;set!
+                (set-boolean-preference "search-and-replace" #f)
+                (open-search)
+              ) ;else
+        ) ;cond
+      ) ;with
+    ) ;with
+  ) ;with-buffer
 ) ;tm-define
 
 (tm-define (interactive-replace)
   (:interactive #t)
-  (unless (string-starts? (url->system (current-buffer)) "tmfs:")
-    (set! search-replace-text
-      (cond ((in-math?) "Only search and replace in math mode")
-            ((in-prog?) "Only search and replace in Program mode")
-            ((in-graphics?) "Graphics mode cannot search and replace")
-            (else "Only search and replace in text mode")
-      ) ;cond
-    ) ;set!
-    (set-boolean-preference "search-and-replace" #t)
-    (open-replace)
-  ) ;unless
+  (with-buffer (search-command-target-buffer (current-buffer))
+    (unless (string-starts? (url->system (current-buffer)) "tmfs:")
+      (set! search-replace-text
+        (cond ((in-math?) "Only search and replace in math mode")
+              ((in-prog?) "Only search and replace in Program mode")
+              ((in-graphics?) "Graphics mode cannot search and replace")
+              (else "Only search and replace in text mode")
+        ) ;cond
+      ) ;set!
+      (set-boolean-preference "search-and-replace" #t)
+      (open-replace)
+    ) ;unless
+  ) ;with-buffer
 ) ;tm-define
 
 (define (close-search-widget)

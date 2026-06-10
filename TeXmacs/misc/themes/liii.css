@@ -1251,7 +1251,10 @@ QWidget#chat-tab-archive-list {
 
 /* 右侧内容区 */
 QWidget#chat-tab-content,
-QWidget#chat-tab-conversation-page {
+QWidget#chat-tab-conversation-stack,
+QWidget#chat-tab-conversation-page,
+QWidget#chat-tab-top-panel,
+QWidget#chat-tab-input-area-wrap {
   background-color: #ffffff;
 }
 
@@ -1343,6 +1346,11 @@ QAbstractScrollArea#chat-tab-input-area QScrollBar::handle:vertical:hover {
   background: #a0a0a0;
 }
 
+/* AI 免责提示 */
+QLabel#chat-tab-disclaimer {
+  color: rgba(0, 0, 0, 102);
+}
+
 /* 输入框框架 */
 QWidget#chat-tab-input-frame {
   background-color: #ffffff;
@@ -1362,26 +1370,25 @@ QToolButton#chat-tab-thinking-btn {
   background: transparent;
   qproperty-iconNormal: url(":/llm-chat/thinking.svg");
   qproperty-iconChecked: url(":/llm-chat/thinking-white.svg");
-  qproperty-iconHovered: url(":/llm-chat/thinking.svg");
 }
 QToolButton#chat-tab-thinking-btn:checked {
   background: #215a6a;
   color: #ffffff;
 }
-QToolButton#chat-tab-thinking-btn:hover {
-  background: rgba(33,90,106,0.15);
-  color: #215a6a;
-}
 
 /* 发送按钮 */
-QPushButton#chat-tab-send-btn {
+QToolButton#chat-tab-send-btn {
   background-color: transparent;
   border: 1px solid #215a6a;
+  qproperty-icon: url(":/llm-chat/send.svg");
 }
-QPushButton#chat-tab-send-btn:hover {
+QToolButton#chat-tab-send-btn[generating="true"] {
+  qproperty-icon: url(":/llm-chat/cancel.svg");
+}
+QToolButton#chat-tab-send-btn:hover {
   background-color: #dddddd;
 }
-QPushButton#chat-tab-send-btn:pressed {
+QToolButton#chat-tab-send-btn:pressed {
   background-color: #d3d3d3;
 }
 
@@ -1409,4 +1416,64 @@ QPushButton#chat-tab-conversation-btn:hover {
 QPushButton#chat-tab-conversation-btn:checked {
   font-weight: 600;
   background-color: #e8eefc;
+}
+
+/****************************************************************************
+* 悬浮搜索栏样式
+****************************************************************************/
+QWidget#floating_search_bar {
+  background: #f3f3f3;
+  border: none;
+}
+
+QWidget#floating_search_bar QToolButton {
+  border: none;
+  background: transparent;
+}
+
+QWidget#floating_search_bar QToolButton:hover {
+  background: rgba(0, 0, 0, 30);
+}
+
+QWidget#floating_search_bar QToolButton:pressed {
+  background: rgba(0, 0, 0, 50);
+}
+
+QWidget#floating_search_bar QToolButton#floating-search-prev {
+  qproperty-icon: url(":/floating-search/up.svg");
+}
+
+QWidget#floating_search_bar QToolButton#floating-search-next {
+  qproperty-icon: url(":/floating-search/down.svg");
+}
+
+QWidget#floating_search_bar QToolButton#floating-search-close {
+  qproperty-icon: url(":/tabpage/close.svg");
+}
+
+QWidget#floating_search_bar QToolButton#floating-search-mode-text {
+  qproperty-icon: url(":/floating-search/text-mode.svg");
+}
+
+QWidget#floating_search_bar QToolButton#floating-search-mode-math {
+  qproperty-icon: url(":/floating-search/math-mode.svg");
+}
+
+QWidget#floating_search_bar QWidget#floating-search-input {
+  border: 1px solid #d0d0d0;
+}
+
+QWidget#floating_search_bar QWidget#floating-search-input:focus {
+  border: 1px solid #215a6a;
+}
+
+QWidget#floating_search_bar QLabel#floating-search-info {
+  background: transparent;
+  color: #2c2c2c;
+}
+
+/* 数学补全弹窗容器 */
+QFrame#math_completion_container {
+  background: white;
+  border-color: black;
 }

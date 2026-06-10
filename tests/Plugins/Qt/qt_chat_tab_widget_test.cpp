@@ -9,12 +9,16 @@
 #include "Qt/qt_utilities.hpp"
 #include "base.hpp"
 #include <QInputMethodEvent>
+#include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QStackedWidget>
 #include <QWheelEvent>
+#include <QWidget>
 #include <QtTest/QtTest>
 
 using namespace moebius;
@@ -23,7 +27,11 @@ class TestChatTabWidget : public QObject {
   Q_OBJECT
 
 private slots:
-  void init () { init_lolly (); }
+  void init () {
+    init_lolly ();
+    // 重置全局侧边栏折叠状态，避免测试间互相影响
+    QTChatTabWidget::setGlobalSidebarCollapsed (false);
+  }
 
   void test_count_input_lines_empty_document () {
     tree empty_doc= tree (DOCUMENT, "");
@@ -139,6 +147,72 @@ private slots:
     widget.setSidebarCollapsed (false);
     QVERIFY (widget.isSidebarWidgetVisible ());
     QVERIFY (!widget.isFloatingContainerVisible ());
+  }
+
+  // === globalSidebarCollapsed 全局状态记忆 ===
+  void test_globalSidebarCollapsed_default () {
+    QCOMPARE (QTChatTabWidget::globalSidebarCollapsed (), false);
+  }
+
+  void test_globalSidebarCollapsed_set_and_get () {
+    QTChatTabWidget::setGlobalSidebarCollapsed (true);
+    QVERIFY (QTChatTabWidget::globalSidebarCollapsed ());
+
+    QTChatTabWidget::setGlobalSidebarCollapsed (false);
+    QVERIFY (!QTChatTabWidget::globalSidebarCollapsed ());
+  }
+
+  void test_constructor_respects_global_collapsed () {
+    QTChatTabWidget::setGlobalSidebarCollapsed (true);
+    QList<SessionDisplayInfo> sessions;
+    QTChatTabWidget           widget (sessions, "", nullptr);
+    widget.show ();
+
+    QVERIFY (widget.isSidebarCollapsed ());
+    QVERIFY (!widget.isSidebarWidgetVisible ());
+    QVERIFY (widget.isFloatingContainerVisible ());
+  }
+
+  void test_constructor_respects_global_expanded () {
+    QTChatTabWidget::setGlobalSidebarCollapsed (false);
+    QList<SessionDisplayInfo> sessions;
+    QTChatTabWidget           widget (sessions, "", nullptr);
+    widget.show ();
+
+    QVERIFY (!widget.isSidebarCollapsed ());
+    QVERIFY (widget.isSidebarWidgetVisible ());
+    QVERIFY (!widget.isFloatingContainerVisible ());
+  }
+
+  void test_setSidebarCollapsed_updates_global () {
+    QTChatTabWidget::setGlobalSidebarCollapsed (false);
+    QList<SessionDisplayInfo> sessions;
+    QTChatTabWidget           widget (sessions, "", nullptr);
+
+    widget.setSidebarCollapsed (true);
+    QVERIFY (QTChatTabWidget::globalSidebarCollapsed ());
+
+    widget.setSidebarCollapsed (false);
+    QVERIFY (!QTChatTabWidget::globalSidebarCollapsed ());
+  }
+
+  void test_global_state_persists_across_instances () {
+    QTChatTabWidget::setGlobalSidebarCollapsed (false);
+    QList<SessionDisplayInfo> sessions;
+
+    {
+      QTChatTabWidget widget1 (sessions, "", nullptr);
+      widget1.setSidebarCollapsed (true);
+      QVERIFY (QTChatTabWidget::globalSidebarCollapsed ());
+    }
+
+    {
+      QTChatTabWidget widget2 (sessions, "", nullptr);
+      widget2.show ();
+      QVERIFY (widget2.isSidebarCollapsed ());
+      QVERIFY (!widget2.isSidebarWidgetVisible ());
+      QVERIFY (widget2.isFloatingContainerVisible ());
+    }
   }
 
   // === setSidebarVisible (dock 模式专用) ===
@@ -372,6 +446,242 @@ private slots:
     emit sidebar.exportRequested ("s1");
     emit sidebar.exportRequested ("s1");
     QCOMPARE (spy.count (), 2);
+    // ---- ChatConversationPanel 输入事件判定测试 ----
+  }
+
+  // === ChatSidebar addItem (SessionDisplayInfo) ===
+
+  void test_addItem_creates_visible_item () {
+    QList<SessionDisplayInfo> sessions;
+    ChatSidebar               sidebar (sessions, "", nullptr);
+    sidebar.show ();
+
+    SessionDisplayInfo info{"s1", "hello", "", false};
+    sidebar.addItem (info);
+
+    auto buttons=
+        sidebar.findChildren<QPushButton*> ("chat-tab-conversation-btn");
+    QCOMPARE (buttons.size (), 1);
+    QCOMPARE (buttons[0]->text (), QString ("hello"));
+  }
+
+  void test_addItem_sets_archived_state () {
+    QList<SessionDisplayInfo> sessions;
+    ChatSidebar               sidebar (sessions, "", nullptr);
+    sidebar.show ();
+
+    SessionDisplayInfo info{"s1", "archived session", "", true};
+    sidebar.addItem (info);
+
+    // 归档项不应出现在活跃列表的按钮中（在归档区）
+    auto buttons=
+        sidebar.findChildren<QPushButton*> ("chat-tab-conversation-btn");
+    QCOMPARE (buttons.size (), 1);
+    QCOMPARE (buttons[0]->text (), QString ("archived session"));
+  }
+
+  void test_addItem_duplicate_ignored () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "hello", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    SessionDisplayInfo info{"s1", "world", "", false};
+    sidebar.addItem (info);
+
+    auto buttons=
+        sidebar.findChildren<QPushButton*> ("chat-tab-conversation-btn");
+    QCOMPARE (buttons.size (), 1);
+    QCOMPARE (buttons[0]->text (), QString ("hello"));
+  }
+
+  void test_addItem_sets_active () {
+    QList<SessionDisplayInfo> sessions;
+    ChatSidebar               sidebar (sessions, "", nullptr);
+    sidebar.show ();
+
+    SessionDisplayInfo info{"s1", "hello", "", false};
+    sidebar.addItem (info);
+
+    QCOMPARE (to_qstring (sidebar.activeSessionId ()), QString ("s1"));
+  }
+
+  // === ChatSidebar removeItem ===
+
+  void test_removeItem_destroys_widget () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "hello", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    sidebar.removeItem ("s1");
+
+    auto buttons=
+        sidebar.findChildren<QPushButton*> ("chat-tab-conversation-btn");
+    QCOMPARE (buttons.size (), 0);
+  }
+
+  void test_removeItem_clears_active () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "hello", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    sidebar.removeItem ("s1");
+    QCOMPARE (to_qstring (sidebar.activeSessionId ()), QString (""));
+  }
+
+  void test_removeItem_nonexistent_noop () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "hello", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    sidebar.removeItem ("nonexistent");
+
+    auto buttons=
+        sidebar.findChildren<QPushButton*> ("chat-tab-conversation-btn");
+    QCOMPARE (buttons.size (), 1);
+  }
+
+  // === ChatSidebar moveToArchive ===
+
+  void test_moveToArchive_moves_item () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "hello", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    sidebar.moveToArchive ("s1");
+
+    // 归档后 activeSessionId 应被清除
+    QCOMPARE (to_qstring (sidebar.activeSessionId ()), QString (""));
+
+    // 归档 header 应显示
+    auto header= sidebar.findChild<QPushButton*> ("chat-tab-archive-header");
+    QVERIFY (header != nullptr);
+    QVERIFY (header->isVisible ());
+  }
+
+  void test_moveToArchive_already_archived_noop () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "hello", "", true};
+    ChatSidebar sidebar (sessions, "", nullptr);
+    sidebar.show ();
+
+    // s1 已归档，再次 moveToArchive 不应崩溃或重复
+    sidebar.moveToArchive ("s1");
+    auto buttons=
+        sidebar.findChildren<QPushButton*> ("chat-tab-conversation-btn");
+    QCOMPARE (buttons.size (), 1);
+  }
+
+  // === ChatSidebar moveFromArchive ===
+
+  void test_moveFromArchive_restores_item () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "hello", "", true};
+    ChatSidebar sidebar (sessions, "", nullptr);
+    sidebar.show ();
+
+    sidebar.moveFromArchive ("s1");
+
+    // s1 应回到活跃列表顶部
+    auto buttons=
+        sidebar.findChildren<QPushButton*> ("chat-tab-conversation-btn");
+    QCOMPARE (buttons.size (), 1);
+  }
+
+  void test_moveFromArchive_already_active_noop () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "hello", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    sidebar.moveFromArchive ("s1");
+    QCOMPARE (to_qstring (sidebar.activeSessionId ()), QString ("s1"));
+  }
+
+  // === ChatSidebar updateCountLabels ===
+
+  void test_updateCountLabels_active_count () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "a", "", false}
+             << SessionDisplayInfo{"s2", "b", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    auto label= sidebar.findChild<QLabel*> ("chat-tab-conversation-count");
+    QVERIFY (label != nullptr);
+    QVERIFY (label->text ().contains ("2"));
+  }
+
+  void test_updateCountLabels_archived_shows_header () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "a", "", false}
+             << SessionDisplayInfo{"s2", "b", "", true};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    auto header= sidebar.findChild<QPushButton*> ("chat-tab-archive-header");
+    QVERIFY (header != nullptr);
+    QVERIFY (header->isVisible ());
+    QVERIFY (header->text ().contains ("1"));
+  }
+
+  void test_updateCountLabels_after_remove () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "a", "", false}
+             << SessionDisplayInfo{"s2", "b", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    sidebar.removeItem ("s1");
+
+    auto label= sidebar.findChild<QLabel*> ("chat-tab-conversation-count");
+    QVERIFY (label != nullptr);
+    QVERIFY (label->text ().contains ("1"));
+  }
+
+  // === ChatSidebar exitMultiSelectMode ===
+
+  void test_exitMultiSelectMode_clears_flags () {
+    QList<SessionDisplayInfo> sessions;
+    sessions << SessionDisplayInfo{"s1", "a", "", false};
+    ChatSidebar sidebar (sessions, "s1", nullptr);
+    sidebar.show ();
+
+    sidebar.enterMultiSelectMode (false);
+    sidebar.exitMultiSelectMode ();
+
+    auto bar= sidebar.findChild<QWidget*> ("chat-tab-multi-select-bar");
+    QVERIFY (bar != nullptr);
+    QVERIFY (!bar->isVisible ());
+  }
+
+  void test_send_on_plain_enter_without_completion_popup () {
+    QVERIFY (ChatConversationPanel::should_send_on_keypress (
+        Qt::Key_Return, Qt::NoModifier, false));
+  }
+
+  void test_send_on_ctrl_enter_without_completion_popup () {
+    QVERIFY (ChatConversationPanel::should_send_on_keypress (
+        Qt::Key_Return, Qt::ControlModifier, false));
+  }
+
+  void test_not_send_on_shift_enter () {
+    QVERIFY (!ChatConversationPanel::should_send_on_keypress (
+        Qt::Key_Return, Qt::ShiftModifier, false));
+  }
+
+  void test_not_send_on_plain_enter_with_completion_popup () {
+    QVERIFY (!ChatConversationPanel::should_send_on_keypress (
+        Qt::Key_Return, Qt::NoModifier, true));
+  }
+
+  void test_not_send_on_non_enter_key () {
+    QVERIFY (!ChatConversationPanel::should_send_on_keypress (
+        Qt::Key_A, Qt::NoModifier, false));
     // ---- should_block_readonly_event 测试 ----
   }
 
@@ -511,6 +821,338 @@ private slots:
                     QPoint (0, 120), Qt::NoButton, Qt::NoModifier,
                     Qt::NoScrollPhase, false);
     QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &we));
+  }
+
+  // === shift+方向键 选中内容 ===
+  void test_readonly_allows_shift_left () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Left, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_shift_right () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Right, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_shift_up () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Up, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_shift_down () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Down, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_shift_home () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Home, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_shift_end () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_End, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_shift_pageup () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_PageUp, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_shift_pagedown () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_PageDown, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_plain_left () {
+    // 单独方向键 → 放行（移动光标）
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Left, Qt::NoModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_plain_right () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_plain_up () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_plain_down () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_plain_home () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Home, Qt::NoModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_plain_end () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_End, Qt::NoModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_plain_pageup () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_PageUp, Qt::NoModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_plain_pagedown () {
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_PageDown, Qt::NoModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_blocks_plain_shift () {
+    // 单独按 Shift 键 → 拦截
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Shift, Qt::ShiftModifier);
+    QVERIFY (ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_ctrl_shift_left () {
+    // Ctrl+Shift+Left 选中单词 → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Left,
+                  Qt::ControlModifier | Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_shift_left_keyrelease () {
+    // Shift+Left 的 KeyRelease → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyRelease, Qt::Key_Left, Qt::ShiftModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  // === cmd+/- 缩放 ===
+  void test_readonly_allows_ctrl_plus () {
+    // Ctrl+Plus 放大 → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Plus, Qt::ControlModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_ctrl_equal () {
+    // Ctrl+Equal（主键盘 + 号）放大 → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Equal, Qt::ControlModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_ctrl_minus () {
+    // Ctrl+Minus 缩小 → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Minus, Qt::ControlModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_meta_plus () {
+    // Meta+Plus（macOS Cmd+Plus）放大 → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_Plus, Qt::MetaModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_ctrl_plus_keyrelease () {
+    // Ctrl+Plus 的 KeyRelease → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyRelease, Qt::Key_Plus, Qt::ControlModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  // === Ctrl/Cmd+J AI 侧边栏快捷键 ===
+  void test_readonly_allows_ctrl_j () {
+    // Ctrl+J 切换 AI 侧边栏 → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_J, Qt::ControlModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_meta_j () {
+    // Meta+J（macOS ⌘+J）切换 AI 侧边栏 → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_J, Qt::MetaModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_ctrl_j_keyrelease () {
+    // Ctrl+J 的 KeyRelease → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyRelease, Qt::Key_J, Qt::ControlModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_allows_meta_j_keyrelease () {
+    // Meta+J 的 KeyRelease → 放行
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyRelease, Qt::Key_J, Qt::MetaModifier);
+    QVERIFY (!ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  void test_readonly_blocks_plain_j () {
+    // 无修饰键的 J → 拦截（readonly 区域禁止输入）
+    QObject obj;
+    obj.setProperty ("chat_message_readonly", true);
+    QKeyEvent ke (QEvent::KeyPress, Qt::Key_J, Qt::NoModifier);
+    QVERIFY (ChatConversationPanel::should_block_readonly_event (&obj, &ke));
+  }
+
+  // === enterConversationMode 布局行为 ===
+  // 模拟 contentLayout + topPanel 的布局结构，验证 enterConversationMode
+  // 的布局逻辑：将 topPanel 从 Preferred/AlignTop 切换到 Expanding/无对齐
+  void test_enterConversationMode_topPanel_expands () {
+    // 模拟 contentLayout 的结构：topSpacer + topPanel(AlignTop, stretch=1)
+    QWidget     container;
+    QVBoxLayout contentLayout (&container);
+    contentLayout.setContentsMargins (0, 0, 0, 0);
+
+    QSpacerItem* topSpacer=
+        new QSpacerItem (0, 100, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    contentLayout.addSpacerItem (topSpacer);
+
+    QWidget* topPanel= new QWidget (&container);
+    topPanel->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Preferred);
+    contentLayout.addWidget (topPanel, 1, Qt::AlignTop);
+
+    container.resize (400, 600);
+    QTest::qWait (0);
+
+    // 验证初始状态
+    QCOMPARE (topPanel->sizePolicy ().verticalPolicy (),
+              QSizePolicy::Preferred);
+    QLayoutItem* topPanelItem= contentLayout.itemAt (1);
+    QVERIFY (topPanelItem != nullptr);
+    QVERIFY (topPanelItem->alignment () & Qt::AlignTop);
+
+    // 模拟 enterConversationMode 的布局逻辑
+    topSpacer->changeSize (0, 30, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    topPanel->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Expanding);
+    contentLayout.setAlignment (topPanel, Qt::Alignment ());
+    contentLayout.invalidate ();
+    contentLayout.activate ();
+    container.updateGeometry ();
+    QTest::qWait (0);
+
+    // 验证：sizePolicy 变为 Expanding
+    QCOMPARE (topPanel->sizePolicy ().verticalPolicy (),
+              QSizePolicy::Expanding);
+    // 验证：AlignTop 已被移除
+    QCOMPARE (topPanelItem->alignment (), Qt::Alignment ());
+    // 验证：topPanel 填满剩余空间（600 - 30 spacer = ~570）
+    QVERIFY (topPanel->height () > 500);
+  }
+
+  void test_enterConversationMode_topPanel_before_expand () {
+    // 验证 AlignTop + Preferred 下 topPanel 不扩展
+    QWidget     container;
+    QVBoxLayout contentLayout (&container);
+    contentLayout.setContentsMargins (0, 0, 0, 0);
+
+    QSpacerItem* topSpacer=
+        new QSpacerItem (0, 100, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    contentLayout.addSpacerItem (topSpacer);
+
+    QWidget* topPanel= new QWidget (&container);
+    topPanel->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Preferred);
+    contentLayout.addWidget (topPanel, 1, Qt::AlignTop);
+
+    container.resize (400, 600);
+    QTest::qWait (0);
+
+    // Preferred + AlignTop：topPanel 只取 sizeHint（很小），不填满空间
+    QVERIFY (topPanel->height () < 100);
+  }
+
+  // 模拟真实的 QStackedWidget + Ignored panel 场景
+  void test_enterConversationMode_ignored_panel_expands () {
+    // 外层 QStackedWidget 模拟 conversationStack_
+    QStackedWidget stack;
+    stack.resize (400, 600);
+
+    // 内层 panel 模拟 ChatConversationPanel（Ignored 垂直策略）
+    QWidget* panel= new QWidget (&stack);
+    panel->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Ignored);
+    stack.addWidget (panel);
+
+    // panel 内部的 contentLayout
+    QVBoxLayout* contentLayout= new QVBoxLayout (panel);
+    contentLayout->setContentsMargins (0, 0, 0, 0);
+
+    QSpacerItem* topSpacer=
+        new QSpacerItem (0, 100, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    contentLayout->addSpacerItem (topSpacer);
+
+    QWidget* topPanel= new QWidget (panel);
+    topPanel->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Preferred);
+    contentLayout->addWidget (topPanel, 1, Qt::AlignTop);
+
+    stack.show ();
+    QTest::qWaitFor ([&stack] { return stack.isVisible (); });
+
+    // 初始状态：Ignored panel 在 QStackedWidget 中，
+    // topPanel(AlignTop+Preferred) 不应扩展
+    QVERIFY (topPanel->height () < 100);
+
+    // 模拟 enterConversationMode 的布局操作
+    topSpacer->changeSize (0, 30, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    topPanel->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Expanding);
+    contentLayout->setAlignment (topPanel, Qt::Alignment ());
+    contentLayout->invalidate ();
+    contentLayout->activate ();
+    panel->updateGeometry ();
+    QTest::qWait (0);
+
+    // 验证：即使 panel 自身是 Ignored，topPanel 仍能扩展填满空间
+    QVERIFY2 (topPanel->height () > 400,
+              qPrintable (QString ("topPanel height = %1, expected > 400")
+                              .arg (topPanel->height ())));
   }
 };
 

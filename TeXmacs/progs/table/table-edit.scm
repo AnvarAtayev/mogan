@@ -161,7 +161,11 @@
   (table-remove-row downwards?)
 ) ;tm-define
 
-(tm-define (table-resize-notify t) (noop))
+(tm-define (table-resize-notify t)
+  (when (chat-input-buffer? (current-buffer-url))
+    (qt-chat-notify-input-height)
+  ) ;when
+) ;tm-define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Posititioning

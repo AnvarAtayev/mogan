@@ -1171,7 +1171,7 @@
 ) ;tm-define
 
 (tm-define (bib-cite-context? t)
-  (and (tree-in? t '(cite nocite cite-detail cite-TeXmacs)) (cursor-inside? t))
+  (and (tree-in? t '(cite nocite cite-detail)) (cursor-inside? t))
 ) ;tm-define
 
 (tm-define (kbd-variant t forwards?)
@@ -1215,6 +1215,9 @@
 (tm-define (kbd-cut) (clipboard-cut "primary"))
 (tm-define (kbd-paste)
   (clipboard-paste "primary")
+  (when (chat-input-buffer? (current-buffer-url))
+    (qt-chat-notify-input-height)
+  ) ;when
   (when (defined? 'tutorial-notify-action)
     (tutorial-notify-action "paste")
   ) ;when
@@ -1342,7 +1345,7 @@
 ) ;tm-define
 
 ;; kbd-magic-paste
-;; 智能粘贴。通过`Ctrl+Shift+v`或者`编辑->智能粘贴`触发，能够根据粘贴内容和当前模式，切换粘贴的方式。
+;; 魔法粘贴。通过`Ctrl+Shift+v`或者`编辑->魔法粘贴`触发，能够根据粘贴内容和当前模式，切换粘贴的方式。
 ;;
 ;; 语法
 ;; ----
@@ -1355,7 +1358,7 @@
 ;; 2. 数学模式：将剪贴板中的内容作为LaTeX格式粘贴
 ;; 3. 文本模式：将剪贴板中的内容作为纯文本粘贴
 ;;
-;; TODO: 在文本模式中，可以自动识别剪贴板中的内容，并智能粘贴。比如，内容格式经过识别，发现是LaTeX格式，
+;; TODO: 在文本模式中，可以自动识别剪贴板中的内容，并魔法粘贴。比如，内容格式经过识别，发现是LaTeX格式，
 ;; 那么应该粘贴为LaTeX格式
 (tm-define (kbd-magic-paste)
   (if (string-starts? (qt-clipboard-format) "image")
@@ -1378,6 +1381,9 @@
       ) ;cond
     ) ;with
   ) ;if
+  (when (chat-input-buffer? (current-buffer-url))
+    (qt-chat-notify-input-height)
+  ) ;when
   (when (defined? 'tutorial-notify-action)
     (tutorial-notify-action "ocr-paste")
   ) ;when
