@@ -1260,6 +1260,8 @@
 "eusb10.tfm" "$TEXMACS_PATH/fonts/tfm/ams/euler/eusb10.tfm"
 "NotoSerifCJK-Regular.ttc" "$TEXMACS_PATH/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"
 "NotoSerifCJK-Black.ttc" "$TEXMACS_PATH/fonts/opentype/noto/NotoSerifCJK-Black.ttc"
+"NotoSansSymbols-Regular.ttf" "$TEXMACS_PATH/fonts/truetype/NotoSansSymbols-Regular.ttf"
+"NotoSansSymbols2-Regular.ttf" "$TEXMACS_PATH/fonts/truetype/NotoSansSymbols2-Regular.ttf"
 "NotoSansCJK-Regular.ttc" "$TEXMACS_PATH/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 "NotoSansCJK-Bold.ttc" "$TEXMACS_PATH/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
 )
