@@ -22,6 +22,8 @@
   ) ;:use
 ) ;texmacs-module
 
+(import (liii http))
+
 (tm-define (generic-context? t) #t)
 ;; overridden in, e.g., graphics mode
 
@@ -1360,26 +1362,81 @@
 ;;
 ;; TODO: 在文本模式中，可以自动识别剪贴板中的内容，并魔法粘贴。比如，内容格式经过识别，发现是LaTeX格式，
 ;; 那么应该粘贴为LaTeX格式
+(tm-define (check-magic-paste)
+  (when (not (defined? 'account-load-token))
+    (use-modules (liii account)))
+  (let* ((token (account-load-token))
+         (base-url (current-stem-site))
+         (check-url (string-append base-url "/api/v1/oauth2/magicPaste/check"))
+         (headers (list (cons "Authorization" (string-append "Bearer " token))
+                        (cons "Content-Type" "application/json"))))
+    (if (string=? token "")
+      "not-logged-in"
+      (catch #t
+        (lambda ()
+          (let* ((r (http-post check-url '() "{}" headers))
+                 (status (r 'status-code)))
+            (cond ((= status 200) "allowed")
+                  ((= status 401) "not-logged-in")
+                  ((= status 403) "limit-exceeded")
+                  (else "allowed"))))
+        (lambda (key . args) "allowed")))))
+
+(tm-widget (magic-paste-login-widget cmd)
+  (padded
+    (text "Please log in to use Magic Paste")
+    ======
+    (centered (explicit-buttons ("Login" (cmd "ok"))))))
+
+(tm-widget (magic-paste-upgrade-widget cmd)
+  (padded
+    (text "Daily Magic Paste limit reached. Upgrade for unlimited access.")
+    ======
+    (centered (explicit-buttons ("Upgrade" (cmd "ok"))))))
+
+(define (show-magic-paste-login-dialog)
+  (dialogue-window magic-paste-login-widget
+    (lambda (answ) (when (== answ "ok") (login)))
+    "Magic Paste"))
+
+(define (show-magic-paste-upgrade-dialog)
+  (dialogue-window magic-paste-upgrade-widget
+    (lambda (answ) (when (== answ "ok") (open-pricing-url)))
+    "Magic Paste"))
+
+(tm-define (with-magic-paste-check cont)
+  (if (community-stem?) (cont)
+    (let ((result (check-magic-paste)))
+      (cond ((== result "allowed") (cont))
+            ((== result "not-logged-in")
+             (show-magic-paste-login-dialog))
+            ((== result "limit-exceeded")
+             (show-magic-paste-upgrade-dialog))))))
+
 (tm-define (kbd-magic-paste)
   (if (string-starts? (qt-clipboard-format) "image")
     (begin
       (ocr-paste)
       (track-event "OCR_RECOGNIZE" '(("mode" . "paste")))
     ) ;begin
-    (with mode
-      (get-env "mode")
-      (cond ((== mode "prog")
-             (clipboard-paste-import "code" "primary")
-             (track-event "MAGIC_PASTE" '(("mode" . "prog")))
-            ) ;
-            ((== mode "math")
-             (clipboard-paste-import "latex" "primary")
-             (track-event "MAGIC_PASTE" '(("mode" . "math")))
-            ) ;
-            (else (smart-format-paste) (track-event "MAGIC_PASTE" '(("mode"
-                                                                     . "text"))))
-      ) ;cond
-    ) ;with
+    (with-magic-paste-check
+      (lambda ()
+        (with mode
+          (get-env "mode")
+          (cond ((== mode "prog")
+                 (clipboard-paste-import "code" "primary")
+                 (track-event "MAGIC_PASTE" '(("mode" . "prog")))
+                ) ;
+                ((== mode "math")
+                 (clipboard-paste-import "latex" "primary")
+                 (track-event "MAGIC_PASTE" '(("mode" . "math")))
+                ) ;
+                (else (smart-format-paste) (track-event "MAGIC_PASTE" '(("mode"
+                                                                         . "text"))))
+          ) ;cond
+        ) ;with
+      ) ;lambda
+    ) ;with-magic-paste-check
   ) ;if
   (when (chat-input-buffer? (current-buffer-url))
     (qt-chat-notify-input-height)
