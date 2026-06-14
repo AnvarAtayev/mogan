@@ -12,6 +12,7 @@
 #include "qt_chat_controller.hpp"
 #include "qt_chat_tab_widget.hpp"
 #include "qt_floating_search_bar.hpp"
+#include "qt_floating_toast.hpp"
 #include "qt_utilities.hpp"
 
 #include "new_buffer.hpp"
@@ -20,6 +21,7 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileDialog>
 #include <QLabel>
 #include <QPushButton>
@@ -178,6 +180,14 @@ ChatController::onSendRequested (const string& sessionId) {
   tree inputBody= panel->readInputMessage ();
   if (ChatConversationPanel::is_empty_document_body (inputBody)) return;
 
+  // 包含图片时提示不支持，不发送
+  if (as_bool (call ("chat-tab-tree-has-image?", inputBody))) {
+    QtFloatingToast::showToast (
+        view_, qt_translate ("Images are not supported in AI chat"), 3000,
+        QtFloatingToast::Warning);
+    return;
+  }
+
   // 首次发送时注册 session 到持久化层 + 加入 sidebar
   registerSession (sessionId);
 
@@ -201,7 +211,8 @@ ChatController::onSendRequested (const string& sessionId) {
 
   if (!as_bool (
           call ("chat-tab-send", sessionId, session->model,
-                session->thinking ? string ("enabled") : string ("disabled"))))
+                session->thinking ? string ("enabled") : string ("disabled"),
+                session->search ? string ("enabled") : string ("disabled"))))
     return;
 
   sessionManager_.setState (sessionId, ChatState::Generating);
@@ -222,6 +233,12 @@ ChatController::onCancelRequested (const string& sessionId) {
 void
 ChatController::onThinkingToggled (const string& sessionId, bool enabled) {
   sessionManager_.setThinking (sessionId, enabled);
+  updateManifest (sessionId);
+}
+
+void
+ChatController::onSearchToggled (const string& sessionId, bool enabled) {
+  sessionManager_.setSearch (sessionId, enabled);
   updateManifest (sessionId);
 }
 
@@ -515,6 +532,7 @@ ChatController::updateManifest (const string& sessionId) {
        << object (s->archived ? string ("true") : string ("false"))
        << object (string (createdAtBuf))
        << object (s->thinking ? string ("enabled") : string ("disabled"))
+       << object (s->search ? string ("enabled") : string ("disabled"))
        << object (string (updateAtBuf));
   call ("chat-persist-update-manifest", args);
 }
@@ -537,6 +555,23 @@ ChatController::registerSession (const string& sessionId) {
   view_->sidebar ()->addItem (info);
 
   s->registered= true;
+}
+
+void
+ChatController::connectPanelSignals (ChatConversationPanel* panel) {
+  connect (panel, &ChatConversationPanel::sendRequested, this,
+           &ChatController::onSendRequested);
+  connect (panel, &ChatConversationPanel::thinkingToggled, this,
+           &ChatController::onThinkingToggled);
+  connect (panel, &ChatConversationPanel::searchToggled, this,
+           &ChatController::onSearchToggled);
+  connect (panel, &ChatConversationPanel::closeSidebarInDockModeRequested, this,
+           [this] () {
+             if (!view_) return;
+             QWidget* gp= view_->parentWidget ();
+             if (gp && qobject_cast<QDockWidget*> (gp))
+               emit view_->closeSidebarRequested ();
+           });
 }
 
 void
@@ -571,10 +606,7 @@ ChatController::ensureNewConversation () {
   if (panel->sessionTitle ()) panel->sessionTitle ()->hide ();
 
   // 连接 Panel 的信号
-  connect (panel, &ChatConversationPanel::sendRequested, this,
-           &ChatController::onSendRequested);
-  connect (panel, &ChatConversationPanel::thinkingToggled, this,
-           &ChatController::onThinkingToggled);
+  connectPanelSignals (panel);
 
   view_->activatePanel (panel);
   view_->sidebar ()->setActiveItem ("");
@@ -604,14 +636,16 @@ ChatController::getOrCreatePanel (const string& sessionId) {
   call ("chat-tab-init-session!", sessionId, s->model);
 
   // 连接 Panel 的信号
-  connect (panel, &ChatConversationPanel::sendRequested, this,
-           &ChatController::onSendRequested);
-  connect (panel, &ChatConversationPanel::thinkingToggled, this,
-           &ChatController::onThinkingToggled);
+  connectPanelSignals (panel);
 
   // 恢复推理模式按钮状态
   if (panel->thinkingButton () && s->thinking) {
     panel->thinkingButton ()->setChecked (true);
+  }
+
+  // 恢复网络搜索按钮状态
+  if (panel->searchButton () && s->search) {
+    panel->searchButton ()->setChecked (true);
   }
 
   return panel;
@@ -670,7 +704,7 @@ void
 qt_chat_tab_restore_session (string sessionId, string title, string model,
                              string archived, string createdAtStr,
                              string updatedAtStr, int defaultExpandCount,
-                             string thinking) {
+                             string thinking, string search) {
   time_t      createdAt= (time_t) std::atol (c_string (createdAtStr));
   time_t      updateAt = is_empty (updatedAtStr)
                              ? createdAt
@@ -685,6 +719,7 @@ qt_chat_tab_restore_session (string sessionId, string title, string model,
   session.updateAt          = updateAt;
   session.defaultExpandCount= (defaultExpandCount > 0) ? defaultExpandCount : 5;
   session.thinking          = (thinking == "enabled");
+  session.search            = (search == "enabled");
   session.panel             = nullptr;
   get_chat_controller ()->restoreSessionMeta (session);
 }

@@ -115,6 +115,13 @@ public:
   void onThinkingToggled (const string& sessionId, bool enabled);
 
   /**
+   * @brief 网络搜索开关切换时触发。
+   * @param sessionId 目标会话 ID
+   * @param enabled   是否启用网络搜索
+   */
+  void onSearchToggled (const string& sessionId, bool enabled);
+
+  /**
    * @brief Scheme→C++ 回调：通知状态变更。
    */
   void notifyStateChanged (const string& sessionId, const string& stateStr);
@@ -212,13 +219,19 @@ private:
    */
   void registerSession (const string& sessionId);
 
+  /**
+   * @brief 连接 Panel 的所有 signal 到 Controller。
+   * @param panel 目标面板
+   */
+  void connectPanelSignals (ChatConversationPanel* panel);
+
   friend void qt_chat_tab_set_state (string sessionId, string stateStr);
   friend void qt_chat_tab_restore_session (string sessionId, string title,
                                            string model, string archived,
                                            string createdAtStr,
                                            string updatedAtStr,
                                            int    defaultExpandCount,
-                                           string thinking);
+                                           string thinking, string search);
   friend void qt_chat_notify_input_height ();
 };
 
@@ -238,7 +251,7 @@ void qt_chat_tab_set_state (string sessionId, string stateStr);
 void qt_chat_tab_restore_session (string sessionId, string title, string model,
                                   string archived, string createdAtStr,
                                   string updatedAtStr, int defaultExpandCount,
-                                  string thinking);
+                                  string thinking, string search);
 
 string qt_chat_tab_active_message_buffer_url ();
 
