@@ -150,12 +150,6 @@
   ) ;user-simple-confirm
 ) ;define
 
-(define (auto-backup-after-pdf-export fname)
-  (when (and (== (url-suffix fname) "pdf") (url-exists? fname))
-    (auto-backup-buffer (current-buffer) "export-pdf")
-  ) ;when
-) ;define
-
 (tm-define (wrapped-print-to-file fname)
   (system-wait "Exporting, " (translate "please wait"))
   (let* ((cur (current-buffer))
@@ -177,8 +171,10 @@
     ) ;when
     (print-to-file fname)
     (switch-to-buffer cur)
-    (auto-backup-after-pdf-export fname)
     (buffer-close tmp-url)
+    (let ((export-kind (string-append (url-suffix fname) "_export")))
+      (save-buffer-save cur (list) export-kind)
+    ) ;let
   ) ;let*
   (system-wait "" "")
   (user-confirm-open-pdf fname)
@@ -211,8 +207,8 @@
       (notify-now "Fail to attach tm to pdf")
     ) ;unless
     (switch-to-buffer cur)
-    (auto-backup-after-pdf-export fname)
     (buffer-close tmp-url)
+    (save-buffer-save cur (list) "tm_pdf_export")
   ) ;let*
   (system-wait "" "")
   (user-confirm-open-pdf fname)
@@ -245,8 +241,8 @@
       (notify-now "Fail to attach tmu to pdf")
     ) ;unless
     (switch-to-buffer cur)
-    (auto-backup-after-pdf-export fname)
     (buffer-close tmp-url)
+    (save-buffer-save cur (list) "tmu_pdf_export")
   ) ;let*
   (system-wait "" "")
   (user-confirm-open-pdf fname)
@@ -328,6 +324,9 @@
 ) ;tm-define
 
 (tm-define (preview-buffer)
+  (let ((export-kind (string-append (if (supports-native-pdf?) "pdf" "ps") "_export")))
+    (save-buffer-save (current-buffer) (list) export-kind)
+  ) ;let
   (with-default-view (with file
                        (url-glue (url-temp) (if (supports-native-pdf?) ".pdf" ".ps"))
                        (print-to-file file)

@@ -366,7 +366,7 @@
 ;; doc id 只在用户明确保存时随文档持久化；打开已有文件时不会静默
 ;; 写回源文件。
 
-(define (save-buffer-save name opts . kind*)
+(tm-define (save-buffer-save name opts . kind*)
   ;; (display* "save-buffer-save " name "\n")
   (let ((kind (if (null? kind*) "save" (car kind*))))
     (with vname
@@ -384,13 +384,13 @@
           ;; Remember directory for file dialog
           (remember-file-dialog-directory name)
           (set-message `(concat ,"Saved " ,vname) "Save file")
-          (auto-backup-buffer name kind)
+          (auto-backup-trig name kind)
           (save-buffer-post name opts)
         ) ;begin
       ) ;if
     ) ;with
   ) ;let
-) ;define
+) ;tm-define
 
 (define (save-buffer-check-faithful name opts)
   ;; (display* "save-buffer-check-faithful " name "\n")
@@ -624,9 +624,9 @@
       (set-message `(concat ,"Could not save " ,vto) "Export file")
       (begin
         (set-message `(concat ,"Exported to " ,vto) "Export file")
-        (when (== fm "pdf")
-          (auto-backup-buffer name "export-pdf")
-        ) ;when
+        (let ((export-kind (string-append fm "_export")))
+          (save-buffer-save name opts export-kind)
+        ) ;let
       ) ;begin
     ) ;if
   ) ;with
@@ -1762,6 +1762,28 @@
   ) ;let
 ) ;tm-define
 
+;; auto-backup-trig
+;; 自动备份触发入口，当前仅用于调试输出触发参数。
+;;
+;; 语法
+;; ----
+;; (auto-backup-trig u kind)
+;;
+;; 参数
+;; ----
+;; u : url
+;; 需要备份的 buffer url。
+;;
+;; kind : string
+;; 备份类型，例如 "save"、"save-as"、"export-pdf"、"on-open"、"auto"、"manual-open"。
+;;
+;; 逻辑
+;; ----
+;; 仅打印触发参数，不执行实际备份逻辑；后续可在此扩展备份行为。
+(tm-define (auto-backup-trig u kind)
+  (display* "auto-backup-trig: u=" u ", kind=" kind "\n")
+) ;tm-define
+
 ;; auto-backup-opened-buffer!
 ;; 文件打开后的自动备份准备流程。
 ;;
@@ -1781,14 +1803,14 @@
 
 (define (auto-backup-opened-buffer! name)
   (auto-backup-ensure-buffer-doc-id! name)
-  (delayed (:pause 100) (auto-backup-buffer name "on-open"))
+  (delayed (:pause 100) (auto-backup-trig name "on-open"))
 ) ;define
 
 (tm-define (auto-backup-all)
   (let ((buffers (buffer-list)))
     (auto-backup-log (string-append "auto-scan buffers=" (number->string (length buffers)))
     ) ;auto-backup-log
-    (for-each (lambda (name) (auto-backup-buffer name "auto")) buffers)
+    (for-each (lambda (name) (auto-backup-trig name "auto")) buffers)
   ) ;let
 ) ;tm-define
 
@@ -1834,11 +1856,7 @@
 (tm-define (open-auto-backup-location)
   (let ((name (auto-backup-manual-target)))
     (when name
-      (let ((backup-result (auto-backup-buffer name "manual-open")))
-        (when (not (community-stem?))
-          (auto-backup-upload-buffer name backup-result)
-        ) ;when
-      ) ;let
+      (auto-backup-trig name "visit-cloud-backup")
     ) ;when
   ) ;let
   (if (community-stem?)
