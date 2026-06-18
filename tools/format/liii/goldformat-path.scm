@@ -37,6 +37,7 @@
         "TeXmacs/progs/kernel"
         "TeXmacs/progs/language"
         "TeXmacs/progs/link"
+        "TeXmacs/progs/lolly"
         "TeXmacs/progs/source"
         "TeXmacs/progs/texmacs/texmacs"
         "TeXmacs/progs/texmacs/menus"
