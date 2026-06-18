@@ -12,17 +12,60 @@
 
 (define-library (liii goldformat-path)
   (import (liii base) (liii path) (liii string))
-  (export cpp-roots scm-dirs collect-cpp-files collect-all-cpp-files)
+  (export cpp-roots
+    scm-dirs
+    collect-cpp-files
+    collect-all-cpp-files
+    collect-scm-files
+    collect-all-scm-files
+  ) ;export
   (begin
 
     (define cpp-roots '("tests" "src" "moebius" "3rdparty/lolly"))
 
     (define scm-dirs
       '("TeXmacs/plugins/gnuplot"
+        "TeXmacs/progs/client"
+        "TeXmacs/progs/convert"
+        "TeXmacs/progs/database"
+        "TeXmacs/progs/debug"
+        "TeXmacs/progs/doc"
+        "TeXmacs/progs/dynamic"
+        "TeXmacs/progs/education"
+        "TeXmacs/progs/fonts"
         "TeXmacs/progs/generic"
         "TeXmacs/progs/kernel"
+        "TeXmacs/progs/language"
+        "TeXmacs/progs/link"
+        "TeXmacs/progs/lolly"
+        "TeXmacs/progs/math"
+        "TeXmacs/progs/moebius"
+        "TeXmacs/progs/network"
+        "TeXmacs/progs/part"
+        "TeXmacs/progs/prog"
+        "TeXmacs/progs/server"
         "TeXmacs/progs/source"
+        "TeXmacs/progs/startup-tab"
+        "TeXmacs/progs/table"
+        "TeXmacs/progs/telemetry"
+        "TeXmacs/progs/texmacs/texmacs"
+        "TeXmacs/progs/texmacs/menus"
+        "TeXmacs/progs/texmacs/keyboard"
+        "TeXmacs/progs/text"
+        "TeXmacs/progs/text/cyrillic"
+        "TeXmacs/progs/text/vietnamese"
+        "TeXmacs/progs/utils/automate"
+        "TeXmacs/progs/utils/base"
+        "TeXmacs/progs/utils/cas"
+        "TeXmacs/progs/utils/edit"
+        "TeXmacs/progs/utils/handwriting"
+        "TeXmacs/progs/utils/library"
+        "TeXmacs/progs/utils/misc"
         "TeXmacs/progs/utils/plugins"
+        "TeXmacs/progs/utils/relate"
+        "TeXmacs/progs/utils/test"
+        "TeXmacs/progs/various"
+        "TeXmacs/progs/version"
         "TeXmacs/plugins/llm/progs")
     ) ;define
 
@@ -66,6 +109,51 @@
           (if (path-dir? (path (car roots)))
             (loop (cdr roots) (append acc (collect-cpp-files (car roots))))
             (loop (cdr roots) acc)
+          ) ;if
+        ) ;if
+      ) ;let
+    ) ;define
+
+    (define scm-exts '(".scm"))
+
+    (define (scm-file? name)
+      (let loop
+        ((exts scm-exts))
+        (if (null? exts) #f (if (string-ends? name (car exts)) #t (loop (cdr exts))))
+      ) ;let
+    ) ;define
+
+    (define (collect-scm-files dir-path)
+      (let ((entries (path-list-path (path dir-path))))
+        (let loop
+          ((i 0) (acc '()))
+          (if (>= i (vector-length entries))
+            acc
+            (let ((entry (vector-ref entries i)))
+              (cond ((path-file? entry)
+                     (let ((s (path->string entry)))
+                       (if (scm-file? s) (loop (+ i 1) (cons s acc)) (loop (+ i 1) acc))
+                     ) ;let
+                    ) ;
+                    ((path-dir? entry)
+                     (loop (+ i 1) (append (collect-scm-files (path->string entry)) acc))
+                    ) ;
+                    (else (loop (+ i 1) acc))
+              ) ;cond
+            ) ;let
+          ) ;if
+        ) ;let
+      ) ;let
+    ) ;define
+
+    (define (collect-all-scm-files)
+      (let loop
+        ((dirs scm-dirs) (acc '()))
+        (if (null? dirs)
+          acc
+          (if (path-dir? (path (car dirs)))
+            (loop (cdr dirs) (append acc (collect-scm-files (car dirs))))
+            (loop (cdr dirs) acc)
           ) ;if
         ) ;if
       ) ;let
