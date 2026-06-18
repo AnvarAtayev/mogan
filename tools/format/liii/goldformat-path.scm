@@ -31,6 +31,7 @@
         "TeXmacs/progs/debug"
         "TeXmacs/progs/doc"
         "TeXmacs/progs/dynamic"
+        "TeXmacs/progs/education"
         "TeXmacs/progs/generic"
         "TeXmacs/progs/kernel"
         "TeXmacs/progs/source"
