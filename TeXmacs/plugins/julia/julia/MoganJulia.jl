@@ -193,8 +193,22 @@ display(d::InlineDisplay, m::MIME"application/pdf", x) =
 display(d::InlineDisplay, m::MIME"text/html", x) = 
     tm_out("html:", limitstringmime(m, x))
 
-display(d::InlineDisplay, m::MIME"text/latex", x) = 
-    tm_out("latex:", limitstringmime(m, x))
+display(d::InlineDisplay, m::MIME"text/latex", x) = begin
+    s = strip(limitstringmime(m, x))
+    # 去除外层 $$, $, \[ \], or \( \) 修饰符直接解析
+    s = replace(s, r"^(\$\$?|\\\[|\\\()|(\$\$?|\\\]|\\\))$" => "")
+    s = strip(s)
+    # 去掉环境编号
+    s = replace(s, "begin{equation}" => "begin{equation*}")
+    s = replace(s, "end{equation}" => "end{equation*}")
+    s = replace(s, "begin{align}" => "begin{align*}")
+    s = replace(s, "end{align}" => "end{align*}")
+    if occursin(r"^\\begin", s)
+        tm_out("latex:", s)
+    else
+        tm_out("latex:", "\$\\rmfamily{" * s * "}\$")
+    end
+end
 
 display(d::InlineDisplay, m::MIME"text/markdown", x) = 
     display(d, MIME("text/html"), Markdown.html(x))
@@ -216,11 +230,45 @@ const tm_mimetypes = [
     MIME("application/pdf"),
     MIME("image/png"),
     MIME("image/jpg"),
+    MIME("text/latex"),
     MIME("text/html"), 
-    MIME("text/markdown"), 
-    MIME("text/latex")]
+    MIME("text/markdown")]
+
+is_symbolic_type(t::Type) = begin
+    t isa Union && return false
+    s = string(t)
+    (occursin("SymPy", s) || occursin("Symbolics", s) || occursin("SymbolicUtils", s) || s == "Num") && return true
+    try
+        m = parentmodule(t)
+        m_name = string(Symbol(m))
+        return occursin("SymPy", m_name) || occursin("Symbolics", m_name) || occursin("SymbolicUtils", m_name)
+    catch
+        return false
+    end
+end
+
+is_symbolic_object(x) = is_symbolic_type(typeof(x))
+is_symbolic_object(x::AbstractArray) = any(is_symbolic_object, x)
+is_symbolic_object(x::Tuple) = any(is_symbolic_object, x)
+is_symbolic_object(x::Set) = any(is_symbolic_object, x)
+is_symbolic_object(x::Dict) = any(is_symbolic_object, keys(x)) || any(is_symbolic_object, values(x))
 
 function display(d::InlineDisplay, x)
+    if is_symbolic_object(x)
+        if showable(MIME("text/latex"), x)
+            display(d, MIME("text/latex"), x)
+            return
+        elseif isdefined(Main, :Latexify)
+            try
+                lx = Main.Latexify.latexify(x)
+                display(d, MIME("text/latex"), lx)
+                return
+            catch
+                # If latexify fails, fall back to default behavior
+            end
+        end
+    end
+
     for m in tm_mimetypes
         if showable(m, x)
             display(d, m, x)
