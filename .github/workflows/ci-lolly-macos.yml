@@ -1,26 +1,28 @@
-name: CI for moebius on macOS
+name: CI for lolly on macOS
 
 on:
   push:
     branches: [ main ]
     paths:
-      - 'moebius/Data/**'
-      - 'moebius/Kernel/**'
-      - 'moebius/Scheme/**'
-      - 'moebius/moebius/**'
-      - 'moebius/tests/**'
-      - 'moebius/xmake.lua'
-      - '.github/workflows/ci-moebius-macos.yml'
+      - 'lolly/Data/**'
+      - 'lolly/Kernel/**'
+      - 'lolly/Plugins/**'
+      - 'lolly/System/**'
+      - 'lolly/lolly/**'
+      - 'lolly/tests/**'
+      - 'lolly/xmake.lua'
+      - '.github/workflows/ci-lolly-macos.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'moebius/Data/**'
-      - 'moebius/Kernel/**'
-      - 'moebius/Scheme/**'
-      - 'moebius/moebius/**'
-      - 'moebius/tests/**'
-      - 'moebius/xmake.lua'
-      - '.github/workflows/ci-moebius-macos.yml'
+      - 'lolly/Data/**'
+      - 'lolly/Kernel/**'
+      - 'lolly/Plugins/**'
+      - 'lolly/System/**'
+      - 'lolly/lolly/**'
+      - 'lolly/tests/**'
+      - 'lolly/xmake.lua'
+      - '.github/workflows/ci-lolly-macos.yml'
   workflow_dispatch:
 
 jobs:
@@ -48,16 +50,16 @@ jobs:
         with:
           path: |
             ${{ env.XMAKE_GLOBALDIR }}/.xmake/packages
-          key: xrepo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xmake/vars.lua', 'moebius/xmake.lua') }}
+          key: xrepo-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('xmake/vars.lua', 'lolly/xmake.lua') }}
       - name: cache xmake
         uses: actions/cache@v4
         with:
           path: |
             ${{ github.workspace }}/build/.build_cache
-          key: xmake-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xmake/vars.lua', 'moebius/xmake.lua') }}
+          key: xmake-build-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('xmake/vars.lua', 'lolly/xmake.lua') }}
       - name: config
-        run: xmake config --policies=build.ccache -m releasedbg --yes
+        run: xmake config --policies=build.ccache -m releasedbg --yes --enable_tests=true
       - name: build
-        run: xmake build --yes -vD libmoebius
+        run: xmake build --yes -vD liblolly
       - name: test
-        run: xmake test "moebius_tests/*"
+        run: xmake test "lolly_tests/*"

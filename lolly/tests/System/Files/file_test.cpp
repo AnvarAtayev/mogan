@@ -70,7 +70,8 @@ TEST_CASE ("is_of_type") {
   CHECK (!is_of_type (url_pwd (), "f"));
   CHECK (is_of_type (xmake_lua, "fr"));
 #if defined(OS_MINGW) || defined(OS_WIN)
-  CHECK (is_of_type (url_pwd () * url ("bin/format.bat"), "x"));
+  // url_pwd() 在 lolly 测试中指向 lolly/ 子目录，使用其下确实存在的可执行脚本。
+  CHECK (is_of_type (url_pwd () * url ("bin/test_only.bat"), "x"));
 #endif
 }
 
@@ -93,8 +94,23 @@ TEST_CASE ("mkdir/rmdir") {
   CHECK (!is_directory (test_mkdir));
 }
 
+// On macOS, /tmp is a symlink to /private/tmp. url_temp_dir() returns the
+// logical path (/tmp/...) while url_pwd() (which calls getcwd()) reports the
+// resolved physical path (/private/tmp/...). Normalize lolly_tmp through the
+// same mechanism so subsequent comparisons against url_pwd() are consistent.
+static url
+resolved_temp_dir () {
+  url old= url_pwd ();
+  url tmp= url_temp_dir ();
+  if (!is_directory (tmp)) return tmp;
+  chdir (tmp);
+  url resolved= url_pwd ();
+  chdir (old);
+  return resolved;
+}
+
 TEST_CASE ("chdir") {
-  url lolly_tmp= url_temp_dir ();
+  url lolly_tmp= resolved_temp_dir ();
   url old      = url_pwd ();
 
   SUBCASE ("tmp directory") {
