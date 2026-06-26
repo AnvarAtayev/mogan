@@ -1,4 +1,3 @@
-
 /******************************************************************************
  * MODULE     : cork_test.cpp
  * DESCRIPTION: tests for the Cork encoding
@@ -9,10 +8,8 @@
  * in the root directory or <http://www.gnu.org/licenses/gpl-3.0.html>.
  ******************************************************************************/
 
+#include "a_lolly_test.hpp"
 #include "cork.hpp"
-#include "modification.hpp"
-#include "moe_doctests.hpp"
-#include "tree.hpp"
 
 TEST_CASE ("tm_encode") {
   string_eq (tm_encode ("<>"), "<less><gtr>");
