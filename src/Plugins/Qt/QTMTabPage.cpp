@@ -17,7 +17,9 @@
 #include "tm_window.hpp"
 #include <QCursor>
 #include <QEvent>
+#include <QHash>
 #include <QIcon>
+#include <QList>
 #include <QSize>
 
 // Base tab widths
@@ -455,11 +457,106 @@ QTMTabPageContainer::~QTMTabPageContainer () { removeAllTabPages (); }
 
 void
 QTMTabPageContainer::replaceTabPages (QList<QAction*>* p_src) {
-  removeAllTabPages ();    // remove  old tabs
-  extractTabPages (p_src); // extract new tabs
+  // 增量 diff：按 view-url 复用已有 tab、摄取新增、移除多余，不全量重建。
+  if (!p_src) return;
+
+  // 现有 tab 按 url 索引，便于复用与移除判定。
+  QHash<QString, QTMTabPage*> existing;
+  for (QTMTabPage* tab : m_tabPageList)
+    existing.insert (to_qstring (as_string (tab->m_viewUrl)), tab);
+
+  QList<QTMTabPage*> next;
+  for (int i= 0; i < p_src->size (); ++i) {
+    QTMTabPageAction* carrier= qobject_cast<QTMTabPageAction*> ((*p_src)[i]);
+    ASSERT (carrier, "QTMTabPageAction expected")
+    QTMTabPage* srcTab= qobject_cast<QTMTabPage*> (carrier->m_widget);
+    if (!srcTab) {
+      delete carrier->m_widget;
+      continue;
+    }
+    QString key= to_qstring (as_string (srcTab->m_viewUrl));
+    auto    it = existing.find (key);
+    if (it != existing.end ()) {
+      // 复用：已有同 url 的 tab，同步标题即可（active 由 updateActiveTab
+      // 维护）。
+      QTMTabPage* tab= it.value ();
+      existing.erase (it);
+      tab->setText (srcTab->text ());
+      next.append (tab);
+      // srcTab 是本次 carrier 新建的 widget，未被接管。QTMTabPageAction 的
+      // dtor 不会删 m_widget（见 hpp 注释），此处须手动释放，否则每次重建都
+      // 把全套新 carrier widget 泄漏一遍。
+      delete srcTab;
+    }
+    else {
+      // 新增：从 carrier 摄取 srcTab，接管其所有权。
+      srcTab->setParent (this);
+      next.append (srcTab);
+#ifdef LIII_DEBUG
+      debug_added_count++;
+#endif
+    }
+    // carrier 由其父 widget（QTMTabPageBar）经 schedule_destruction 统一销毁，
+    // 这里不手动 delete。
+  }
+
+  // existing 中剩下的 url 不在新列表里 => 已被移除，deleteLater。
+  for (auto it= existing.begin (); it != existing.end (); ++it) {
+    it.value ()->setParent (nullptr);
+    it.value ()->deleteLater ();
+#ifdef LIII_DEBUG
+    debug_removed_count++;
+#endif
+  }
+
+  m_tabPageList= next;
+  // startup/chat 标签固定置顶。
+  int startupIndex= startup_tab_index (m_tabPageList);
+  if (startupIndex > 0) {
+    QTMTabPage* startupTab= m_tabPageList.takeAt (startupIndex);
+    m_tabPageList.prepend (startupTab);
+  }
+  int chatIndex= chat_tab_index (m_tabPageList);
+  if (chatIndex > 1) {
+    QTMTabPage* chatTab= m_tabPageList.takeAt (chatIndex);
+    m_tabPageList.insert (1, chatTab);
+  }
+  else if (chatIndex == 0 && m_tabPageList.size () > 1) {
+    QTMTabPage* chatTab= m_tabPageList.takeAt (chatIndex);
+    m_tabPageList.insert (1, chatTab);
+  }
 
   arrangeTabPages ();
+#ifdef LIII_DEBUG
+  cout << "[tabpage] rebuild tabs=" << m_tabPageList.size ()
+       << " added=" << debug_added_count << " removed=" << debug_removed_count
+       << LF;
+#endif
 }
+
+void
+QTMTabPageContainer::updateActiveTab (const url& currentView) {
+#ifdef LIII_DEBUG
+  debug_active_count++;
+  cout << "[tabpage] active #" << debug_active_count
+       << " added=" << debug_added_count << " removed=" << debug_removed_count
+       << LF;
+#endif
+  for (int i= 0; i < m_tabPageList.size (); ++i) {
+    QTMTabPage* tab= m_tabPageList[i];
+    tab->setChecked (as_string (tab->m_viewUrl) == as_string (currentView));
+  }
+}
+
+#ifdef LIII_DEBUG
+QTMTabPage*
+QTMTabPageContainer::debug_findTab (const url& viewUrl) const {
+  string key= as_string (viewUrl);
+  for (int i= 0; i < m_tabPageList.size (); ++i)
+    if (as_string (m_tabPageList[i]->m_viewUrl) == key) return m_tabPageList[i];
+  return nullptr;
+}
+#endif
 
 void
 QTMTabPageContainer::removeAllTabPages () {
@@ -469,46 +566,6 @@ QTMTabPageContainer::removeAllTabPages () {
     m_tabPageList[i]->deleteLater ();
   }
   m_tabPageList.clear ();
-}
-
-void
-QTMTabPageContainer::extractTabPages (QList<QAction*>* p_src) {
-  if (!p_src) return;
-  for (int i= 0; i < p_src->size (); ++i) {
-    // see the definition of QTMTabPageAction why we're using it
-    QTMTabPageAction* carrier= qobject_cast<QTMTabPageAction*> ((*p_src)[i]);
-    ASSERT (carrier, "QTMTabPageAction expected")
-
-    QTMTabPage* tab= qobject_cast<QTMTabPage*> (carrier->m_widget);
-    if (tab) {
-      tab->setParent (this);
-      m_tabPageList.append (tab);
-    }
-    else {
-      delete carrier->m_widget; // we don't use it so we should delete it
-    }
-
-    // We don't need to manually delete carrier, because it(p_src) is a QAction,
-    // which will be deleted by the parent widget (QTMTabPageBar) when it
-    // is destroyed (by shedule_destruction).
-  }
-
-  int startupIndex= startup_tab_index (m_tabPageList);
-  if (startupIndex > 0) {
-    QTMTabPage* startupTab= m_tabPageList.takeAt (startupIndex);
-    m_tabPageList.prepend (startupTab);
-  }
-
-  int chatIndex= chat_tab_index (m_tabPageList);
-  if (chatIndex > 1) {
-    QTMTabPage* chatTab= m_tabPageList.takeAt (chatIndex);
-    m_tabPageList.insert (1, chatTab);
-  }
-  else if (chatIndex == 0 && m_tabPageList.size () > 1) {
-    // Chat tab should be after startup tab, not before
-    QTMTabPage* chatTab= m_tabPageList.takeAt (chatIndex);
-    m_tabPageList.insert (1, chatTab);
-  }
 }
 
 void
