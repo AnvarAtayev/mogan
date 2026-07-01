@@ -265,8 +265,10 @@
 
 (menu-bind insert-session-menu
   (when (and (style-has? "std-dtd") (in-text?))
-    ("Scheme" (make-session "scheme" "default"))
-    ---
+    (assuming (with-developer-tool?)
+     ("Scheme" (make-session "scheme" "default"))
+     ---
+    ) ;assuming
     (link supported-sessions-menu)
     ---
     (assuming #f
