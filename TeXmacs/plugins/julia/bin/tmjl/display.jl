@@ -122,7 +122,53 @@ is_symbolic_object(x::Tuple) = any(is_symbolic_object, x)
 is_symbolic_object(x::Set) = any(is_symbolic_object, x)
 is_symbolic_object(x::Dict) = any(is_symbolic_object, keys(x)) || any(is_symbolic_object, values(x))
 
+is_plots_type(t::Type) = begin
+    t isa Union && return false
+    # Prefer a precise type check when Plots.jl is loaded in Main
+    if isdefined(Main, :Plots)
+        try
+            return t <: Main.Plots.Plot
+        catch
+        end
+    end
+    # Fallback: accept Plot objects whose immediate parent module is literally
+    # named "Plots" and defines a Plot supertype. This covers packages that
+    # internally use Plots.jl (e.g. StatsPlots) or objects created in nested
+    # modules, while avoiding false positives from modules like MockPlots
+    # whose names merely contain "Plots".
+    try
+        m = parentmodule(t)
+        if nameof(m) === :Plots && isdefined(m, :Plot)
+            return t <: m.Plot
+        end
+    catch
+    end
+    return false
+end
+
+is_plots_object(x) = is_plots_type(typeof(x))
+
 function display(d::InlineDisplay, x)
+    if is_plots_object(x)
+        try
+            tmp_path = tempname() * ".pdf"
+            t = typeof(x)
+            m = parentmodule(t)
+            if isdefined(m, :savefig)
+                m.savefig(x, tmp_path)
+                tm_out("file:", tmp_path)
+                return
+            elseif isdefined(Main, :Plots) && isdefined(Main.Plots, :savefig)
+                Main.Plots.savefig(x, tmp_path)
+                tm_out("file:", tmp_path)
+                return
+            end
+        catch e
+            tm_out("Error rendering Plots: $(e)\n")
+            return
+        end
+    end
+
     if is_symbolic_object(x)
         if showable(MIME("text/latex"), x)
             display(d, MIME("text/latex"), x)
