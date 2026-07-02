@@ -1572,6 +1572,15 @@ function main()
                 }
             },
             {
+                scm_name = "cpp-kill-tabpage",
+                cpp_name = "cpp_kill_tabpage",
+                ret_type = "void",
+                arg_list = {
+                    "url",
+                    "url"
+                }
+            },
+            {
                 scm_name = "view-passive",
                 cpp_name = "get_passive_view",
                 ret_type = "url",
@@ -1777,6 +1786,15 @@ function main()
                 ret_type = "void",
                 arg_list = {
                     "url"
+                }
+            },
+            {
+                scm_name = "cpp-confirm-close",
+                cpp_name = "cpp_confirm_close",
+                ret_type = "string",
+                arg_list = {
+                    "string",
+                    "bool"
                 }
             },
             {
