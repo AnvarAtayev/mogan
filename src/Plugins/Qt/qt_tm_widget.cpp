@@ -16,6 +16,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDockWidget>
+#include <QEvent>
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -489,6 +490,25 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
 
   // 初始设置VIP按钮可见性：商业版且（未登录或普通用户/体验会员）时显示
   updateVipButtonVisibility (false, QString ());
+
+  // 窗口尺寸变化时重算 VIP 按钮显隐（半屏下未付费用户隐藏升级按钮）
+  if (mw) {
+    class VipBtnResizeWatcher : public QObject {
+    public:
+      VipBtnResizeWatcher (QWidget* parent, qt_tm_widget_rep* w)
+          : QObject (parent), widget_ (w) {}
+      bool eventFilter (QObject* obj, QEvent* event) override {
+        if (event->type () == QEvent::Resize) {
+          widget_->updateHalfScreenUi_onResize ();
+        }
+        return QObject::eventFilter (obj, event);
+      }
+
+    private:
+      qt_tm_widget_rep* widget_;
+    };
+    mw->installEventFilter (new VipBtnResizeWatcher (mw, this));
+  }
 
   // 创建 SCM 通知条容器（放在标题栏下方）
   QWidget*     notificationContainer= new QWidget (mw);
@@ -3059,6 +3079,16 @@ qt_tm_widget_rep::updateLoginButtonState (bool           isLoggedIn,
                                           const QString& displayName) {
   if (!loginButton) return;
 
+  // 半屏（窗口宽度 ≤ 屏幕可用宽度的一半）下空间紧张，未登录也视为已登录，
+  // 让按钮从 ~120px 缩回 60px，给标签页腾空间
+  QMainWindow* mw= mainwindow ();
+  if (!isLoggedIn && mw) {
+    int screen_w= QApplication::primaryScreen ()->availableGeometry ().width ();
+    if (mw->width () * 2 <= screen_w) {
+      isLoggedIn= true;
+    }
+  }
+
   // 设置登录状态属性，用于QSS样式区分
   loginButton->setProperty ("login-state",
                             isLoggedIn ? "logged-in" : "not-logged-in");
@@ -3119,6 +3149,7 @@ qt_tm_widget_rep::updateDialogContent (bool isLoggedIn, const QString& username,
                                        const QString& productType) {
   // 保存会员类型
   m_memberType= memberType;
+  m_isLoggedIn= isLoggedIn;
 
   updateLoginButtonState (isLoggedIn, isLoggedIn ? username : QString ());
 
@@ -3193,33 +3224,44 @@ qt_tm_widget_rep::updateVipButtonVisibility (bool           isLoggedIn,
     return;
   }
 
-  // 社区版不显示VIP按钮
-  if (is_community_stem ()) {
-    vipButton->hide ();
-    return;
+  bool shouldShow= false;
+  if (!is_community_stem ()) {
+    if (!isLoggedIn) {
+      shouldShow= true;
+    }
+    else if (!memberType.isEmpty ()) {
+      // Regular User / Trial Member 显示；其他正式会员类型不显示
+      shouldShow= memberType == QStringLiteral ("Regular User") ||
+                  memberType == QStringLiteral ("Trial Member");
+    }
+    // memberType 为空（已登录但用户信息未到位）：保持当前状态
+
+    // 半屏（窗口宽度 < 屏幕可用宽度的一半）下空间紧张，未付费用户隐藏升级按钮，
+    // 优先保证标签页可用宽度
+    if (shouldShow) {
+      QMainWindow* mw= mainwindow ();
+      if (mw) {
+        int screen_w=
+            QApplication::primaryScreen ()->availableGeometry ().width ();
+        if (mw->width () * 2 <= screen_w) {
+          shouldShow= false;
+        }
+      }
+    }
   }
 
-  // 未登录用户：显示VIP按钮
-  if (!isLoggedIn) {
-    vipButton->show ();
-    return;
+  vipButton->setVisible (shouldShow);
+  if (tabPageContainer) {
+    tabPageContainer->setVipButtonReserved (shouldShow);
   }
+}
 
-  // 已登录用户：根据memberType决定是否显示
-  // 如果memberType为空，说明还未获取用户信息，保持当前状态（不隐藏）
-  if (memberType.isEmpty ()) {
-    return;
-  }
-
-  // "Regular User"(普通用户)或"Trial Member"(体验会员)时显示
-  // 其他(Fruit User, Sprout User, Seed User, Member)时不显示
-  if (memberType == QStringLiteral ("Regular User") ||
-      memberType == QStringLiteral ("Trial Member")) {
-    vipButton->show ();
-  }
-  else {
-    vipButton->hide ();
-  }
+void
+qt_tm_widget_rep::updateHalfScreenUi_onResize () {
+  // 半屏下未登录视为已登录，按钮缩到 60px 腾出空间；具体逻辑由两个
+  // update 函数内部根据窗口宽度判定，这里只需重新触发即可
+  updateVipButtonVisibility (m_isLoggedIn, m_memberType);
+  updateLoginButtonState (m_isLoggedIn, QString ());
 }
 
 void
