@@ -1691,6 +1691,7 @@
 ("odd page" "奇数页")
 ("off" "关闭")
 ("ok" "确认")
+("OK" "确认")
 ("old english" "")
 ("old slavonic" "")
 ("old style" "旧风格")
