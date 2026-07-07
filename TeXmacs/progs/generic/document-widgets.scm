@@ -292,7 +292,7 @@
     ("1, 2, 3" . "arabic")
     ("i, ii, iii" . "roman")
     ("I, II, III" . "Roman")
-    ("一, 二, 三" . "hanzi")
+    ("hanzi style" . "hanzi")
     ("(blank page number)" . "blank"))
 ) ;define
 ;; pn-text-alist 为其反向映射 (内部值 . 显示文本)，供 enum 显示当前项
@@ -381,6 +381,7 @@
                                ) ;
                            (when (and (filled? ps) (filled? pe) (filled? nt))
                              (assign-page-number u ps pe nt)
+                             (set! nt "")
                              (delayed (:pause 100) (refresh-now "pn-editor"))
                            ) ;when
                          ) ;let*
