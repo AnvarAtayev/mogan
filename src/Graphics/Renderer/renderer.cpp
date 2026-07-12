@@ -11,7 +11,8 @@
 
 #include "renderer.hpp"
 #include "Freetype/tt_face.hpp"
-#include "colors.hpp"
+#include <moebius/data/colors.hpp>
+using namespace moebius::data;
 #include "frame.hpp"
 #include "image_files.hpp"
 #include "rectangles.hpp"
@@ -653,6 +654,8 @@ delete_renderer (renderer ren) {
 }
 
 #ifndef QTTEXMACS
+#ifndef USE_MUPDF_RENDERER
+// MuPDF 模块中已经实现了渲染器
 
 picture
 native_picture (int w, int h, int ox, int oy) {
@@ -696,4 +699,5 @@ save_picture (url dest, picture p) {
   TM_FAILED ("not yet implemented");
 }
 
+#endif
 #endif

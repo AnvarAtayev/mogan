@@ -66,9 +66,12 @@ extern int    geometry_x, geometry_y;
 extern url    tm_init_file;
 extern url    tm_init_buffer_file;
 extern string my_init_cmds;
-extern bool   char_clip;
-extern bool   texmacs_started;
-extern bool   headless_mode;
+#ifdef QTTEXMACS
+// char_clip defined in qt_gui.cpp
+extern bool char_clip;
+#endif
+extern bool texmacs_started;
+extern bool headless_mode;
 
 #ifdef QTTEXMACS
 bool        g_startup_login_requested= false;
@@ -178,10 +181,12 @@ init_texmacs_path (int& argc, char** argv) {
   // so just allow everything that is reachable.
 
   // plugins need to be installed in TeXmacs.app/Contents/Plugins
+#ifdef QTTEXMACS
   QCoreApplication::addLibraryPath (QDir::cleanPath (
       QCoreApplication::applicationDirPath ().append ("/../Plugins")));
   // cout << from_qstring ( QCoreApplication::libraryPaths () .join("\n") ) <<
   // LF;
+#endif
   {
     // ensure that private versions of the Qt frameworks have priority on
     // other instances.
@@ -575,9 +580,11 @@ init_texmacs_front () {
 
 void
 init_texmacs () {
+#ifdef QTTEXMACS
   if (g_startup_login_executed == true) {
     return;
   }
+#endif
 
   // cout << "Initialize -- Boot lock\n";
   acquire_boot_lock ();
@@ -591,13 +598,6 @@ init_texmacs () {
   // cout << "Initialize -- font_database_load\n";
   font_database_load ();
   // cout << "Initialize -- font_database_load end\n";
-}
-
-void
-load_welcome_doc () {
-  if (DEBUG_STD) debug_boot << "Loading welcome message...\n";
-  string cmd= "(mogan-welcome)";
-  exec_delayed (scheme_cmd (cmd));
 }
 
 /******************************************************************************
@@ -794,8 +794,10 @@ TeXmacs_main (int argc, char** argv) {
       }
       else if (s == "-server") start_server_flag= true;
       else if (s == "-log-file") i++;
+#ifdef QTTEXMACS
       else if ((s == "-Oc") || (s == "-no-char-clipping")) char_clip= false;
       else if ((s == "+Oc") || (s == "-char-clipping")) char_clip= true;
+#endif
       else if ((s == "-S") || (s == "-setup") || (s == "-delete-cache") ||
                (s == "-delete-font-cache") || (s == "-delete-style-cache") ||
                (s == "-delete-file-cache") || (s == "-delete-doc-cache") ||
@@ -895,11 +897,16 @@ TeXmacs_main (int argc, char** argv) {
   set_default_font (the_default_font);
   if (DEBUG_STD) debug_boot << "Starting server...\n";
   { // opening scope for server sv
+#ifdef QTTEXMACS
     server sv (app_type::RESEARCH);
+#else
+    // TODO: need Sanitäter :(
+    // 目前非 QTTEXMACS sv 正常析构函数会重复释放
+    // 暂且延长生命周期到程序结束
+    (void) new server (app_type::RESEARCH);
+#endif
     string where     = "";
     bool   first_file= true;
-
-    if (install_status == 1) load_welcome_doc ();
 
     ensure_window ();
 
@@ -970,6 +977,27 @@ TeXmacs_main (int argc, char** argv) {
 
     if (N (extra_init_cmd) > 0) exec_delayed (scheme_cmd (extra_init_cmd));
     ensure_hidden_package_set ();
+#ifndef QTTEXMACS
+    // Qt 后端会在构建主菜单时顺带强制加载已发现的插件
+    // （tm_window_rep::menu_main → "(lazy-initialize-force)"）。
+    //
+    // ImGui 后端不构建菜单，因此这一触发点不会执行，导致
+    // init-research.scm 中登记的插件始终保持 lazy 状态，未被加载。
+    //
+    // 因此这里暂时在启动之后手动加载插件
+    eval ("(plugin-initialize 'latex)");
+    eval ("(plugin-initialize 'data)");
+    eval ("(plugin-initialize 'goldfish)");
+    eval ("(plugin-initialize 'image)");
+    eval ("(plugin-initialize 'image_xmgrace)");
+    // eval ("(plugin-initialize 'json)");
+    // eval ("(plugin-initialize 'julia)");
+    // eval ("(plugin-initialize 'llm)");
+    // eval ("(plugin-initialize 'maxima)");
+    // eval ("(plugin-initialize 'quiver)");
+    // eval ("(plugin-initialize 'python)");
+    // eval ("(plugin-initialize 'tikz)");
+#endif
     gui_start_loop ();
 
     if (DEBUG_STD) debug_boot << "Stopping server...\n";

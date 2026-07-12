@@ -31,19 +31,31 @@
   ) ;let*
 ) ;tm-define
 
+;; tab 显示标题（含修改标记 *）。菜单与签名共用，避免逻辑重复。
+
+(define (tabpage-display-title buf)
+  (let* ((title (buffer-get-title buf))
+         (title* (if (== title "") (url->system (url-tail buf)) title))
+         (is-startup? (== (utf8->cork (url->system buf)) "tmfs://startup-tab"))
+         (title* (if is-startup? (if (community-stem?) "Mogan STEM" "Liii STEM") title*))
+         (mod? (buffer-modified? buf))
+        ) ;
+    (string-append title* (if mod? " *" ""))
+  ) ;let*
+) ;define
+
+(define (tabpage-doc-path buf)
+  (let ((is-startup? (== (utf8->cork (url->system buf)) "tmfs://startup-tab")))
+    (if is-startup? "" (utf8->cork (url->system buf)))
+  ) ;let
+) ;define
+
 (tm-menu (texmacs-tab-pages)
   (for (view (tabpage-list #t))
     (let* ((buf (view->buffer view))
            (view-win (view->window-of-tabpage view))
-           (title (buffer-get-title buf))
-           (title* (if (== title "") (url->system (url-tail buf)) title))
-           (is-startup? (== (utf8->cork (url->system buf)) "tmfs://startup-tab"))
-           ;; 特殊处理启动标签页标题
-           (title* (if is-startup? (if (community-stem?) "Mogan STEM" "Liii STEM") title*))
-           (mod? (buffer-modified? buf))
-           (tab-title (string-append title* (if mod? " *" "")))
-           (doc-path (if is-startup? "" (utf8->cork (url->system buf))))
-           (active? (== (current-view) view))
+           (tab-title (tabpage-display-title buf))
+           (doc-path (tabpage-doc-path buf))
           ) ;
       (tab-page (eval view)
        ((balloon (eval `(verbatim ,tab-title)) (eval `(verbatim ,doc-path)))
@@ -51,8 +63,25 @@
        ) ;
        ;; #t stansd for focus
        ((balloon "" "Close") (safely-kill-tabpage-by-url view-win view buf))
-       (eval active?)
+       ;; active 不进展开树（否则切 tab 让展开树变化、缓存失效、整条重建），
+       ;; 改由 Qt 端 updateActiveTab 维护。这里恒为 #f。
+       (eval #f)
       ) ;tab-page
     ) ;let*
   ) ;for
 ) ;tm-menu
+
+;; tab 栏稳定签名：view-url + 显示标题序列（不含 lambda/command）。
+;; get_menu_widget 对 which==4 用它判等——menu-expand 后的 xmenu 含每次新建的
+;; lambda，equal 无法比较；切 tab 时签名不变 => 跳过重建。
+
+(define (tabpage-entry-signature view)
+  (string-append (object->string view)
+    "\n"
+    (tabpage-display-title (view->buffer view))
+  ) ;string-append
+) ;define
+
+(tm-define (tabpage-menu-signature)
+  (apply string-append (map tabpage-entry-signature (tabpage-list #t)))
+) ;tm-define

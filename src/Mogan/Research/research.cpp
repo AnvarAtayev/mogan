@@ -15,6 +15,7 @@
 #ifndef OS_WIN
 #include <unistd.h>
 #endif
+#include "locale.hpp"
 #include <locale.h> // for setlocale
 #include <lolly/system/args.hpp>
 #include <lolly/system/timer.hpp>
@@ -34,7 +35,6 @@
 #include "server.hpp"
 #include "sys_utils.hpp"
 #include "tm_file.hpp"
-#include "tm_locale.hpp"
 #include "tm_ostream.hpp"
 #include "tm_timer.hpp"
 #include "tm_url.hpp"
@@ -141,7 +141,8 @@ immediate_options (int argc, char** argv) {
   }
 
   url u= url_system (string ("$TEXMACS_HOME_PATH/system/") *
-                     get_date ("english", "%Y%m%d%H") * string (".log"));
+                     lolly::locale::get_date ("english", "%Y%m%d%H") *
+                     string (".log"));
   if (enale_logging) {
     cout << "Logging into >> " << u << LF;
     tm_ostream logf (c_string (concretize (u)));
@@ -241,6 +242,7 @@ main (int argc, char** argv) {
       docsDir= QStandardPaths::writableLocation (QStandardPaths::HomeLocation);
     set_env ("TEXMACS_DOCUMENTS_PATH", from_qstring_utf8 (docsDir));
   }
+#endif
 
   // before startup login dialog
   init_texmacs_path (argc, argv);
@@ -248,15 +250,15 @@ main (int argc, char** argv) {
   load_settings_and_check_version ();
   init_plugins ();
 
+#ifdef QTTEXMACS
   // Show startup login dialog
   if (!show_startup_login_dialog ()) {
     return 0;
   }
+#endif
 
   // 如果show_startup_login_dialog没执行，继续初始化TeXmacs
   init_texmacs ();
-
-#endif
 
 // 4.GUI配置和Scheme启动
 #ifdef QTTEXMACS

@@ -17,7 +17,9 @@
 #include "tm_window.hpp"
 #include <QCursor>
 #include <QEvent>
+#include <QHash>
 #include <QIcon>
+#include <QList>
 #include <QSize>
 
 // Base tab widths
@@ -107,6 +109,18 @@ url                  g_mostRecentlyClosedTab = url_none ();
 url                  g_mostRecentlyDraggedTab= url_none ();
 QTMTabPageContainer* g_mostRecentlyDraggedBar= nullptr;
 QTMTabPageContainer* g_mostRecentlyEnteredBar= nullptr;
+
+/**
+ * @brief 真正关闭标签页前标记 g_mostRecentlyClosedTab。
+ *
+ * 该标记用于在 ACTIVE tab 第一次刷新时隐藏它，避免闪烁。不能提前到关闭按钮
+ * 点击时设置，否则确认对话框点「取消」后 tab 仍会保持隐藏。
+ */
+void
+cpp_kill_tabpage (url p_win, url p_view) {
+  g_mostRecentlyClosedTab= p_view;
+  kill_tabpage (p_win, p_view);
+}
 
 static url
 startup_tab_buffer_name () {
@@ -198,6 +212,18 @@ QTMTabPage::applyDisplayTitle (const QString& rawTitle) {
 }
 
 void
+QTMTabPage::syncDisplay (const QString& cleanTitle, bool dirty) {
+  // dirty 变化或标题变化都需要重画：前者改关闭按钮位置的 `*`，后者改文本。
+  bool changed= (m_isDirty != dirty) || (text () != cleanTitle);
+  m_isDirty   = dirty;
+  setText (cleanTitle);
+  if (changed) {
+    updateCloseButtonVisibility ();
+    update ();
+  }
+}
+
+void
 QTMTabPage::initializeCloseButton (QAction* closeAction) {
   m_closeBtn= new QWK::WindowButton (this);
   m_closeBtn->setObjectName ("tabpage-close-button");
@@ -214,8 +240,16 @@ QTMTabPage::initializeCloseButton (QAction* closeAction) {
     QPointer<QAction> safeAction (closeAction);
     connect (m_closeBtn, &QPushButton::clicked, this, [=] () {
       if (!safeAction) return;
-      g_mostRecentlyClosedTab= m_viewUrl;
+      // 弹窗期间先隐藏关闭按钮高亮；取消后按鼠标位置恢复。
+      m_hoverOnCloseArea= false;
+      updateCloseButtonVisibility ();
+      QPointer<QTMTabPage> guard (this);
       safeAction->trigger ();
+      if (guard) {
+        QPoint pos               = guard->mapFromGlobal (QCursor::pos ());
+        guard->m_hoverOnCloseArea= guard->isPointerOnCloseArea (pos);
+        guard->updateCloseButtonVisibility ();
+      }
     });
   }
   updateCloseButtonVisibility ();
@@ -455,11 +489,109 @@ QTMTabPageContainer::~QTMTabPageContainer () { removeAllTabPages (); }
 
 void
 QTMTabPageContainer::replaceTabPages (QList<QAction*>* p_src) {
-  removeAllTabPages ();    // remove  old tabs
-  extractTabPages (p_src); // extract new tabs
+  // 增量 diff：按 view-url 复用已有 tab、摄取新增、移除多余，不全量重建。
+  if (!p_src) return;
+
+  // 现有 tab 按 url 索引，便于复用与移除判定。
+  QHash<QString, QTMTabPage*> existing;
+  for (QTMTabPage* tab : m_tabPageList)
+    existing.insert (to_qstring (as_string (tab->m_viewUrl)), tab);
+
+  QList<QTMTabPage*> next;
+  for (int i= 0; i < p_src->size (); ++i) {
+    QTMTabPageAction* carrier= qobject_cast<QTMTabPageAction*> ((*p_src)[i]);
+    ASSERT (carrier, "QTMTabPageAction expected")
+    QTMTabPage* srcTab= qobject_cast<QTMTabPage*> (carrier->m_widget);
+    if (!srcTab) {
+      delete carrier->m_widget;
+      continue;
+    }
+    QString key= to_qstring (as_string (srcTab->m_viewUrl));
+    auto    it = existing.find (key);
+    if (it != existing.end ()) {
+      // 复用：已有同 url 的 tab，同步标题即可（active 由 updateActiveTab
+      // 维护）。
+      QTMTabPage* tab= it.value ();
+      existing.erase (it);
+      // srcTab 构造时已 applyDisplayTitle 解析过尾部 `*`：其 text() 为干净
+      // 标题、isDirty() 为最新脏状态。复用 tab 必须同步这两者，否则 m_isDirty
+      // 停留在首次构造的旧值，编辑标脏/保存去脏都不会反映到 `*` 显示。
+      tab->syncDisplay (srcTab->text (), srcTab->isDirty ());
+      next.append (tab);
+      // srcTab 是本次 carrier 新建的 widget，未被接管。QTMTabPageAction 的
+      // dtor 不会删 m_widget（见 hpp 注释），此处须手动释放，否则每次重建都
+      // 把全套新 carrier widget 泄漏一遍。
+      delete srcTab;
+    }
+    else {
+      // 新增：从 carrier 摄取 srcTab，接管其所有权。
+      srcTab->setParent (this);
+      next.append (srcTab);
+#ifdef LIII_DEBUG
+      debug_added_count++;
+#endif
+    }
+    // carrier 由其父 widget（QTMTabPageBar）经 schedule_destruction 统一销毁，
+    // 这里不手动 delete。
+  }
+
+  // existing 中剩下的 url 不在新列表里 => 已被移除，deleteLater。
+  for (auto it= existing.begin (); it != existing.end (); ++it) {
+    it.value ()->setParent (nullptr);
+    it.value ()->deleteLater ();
+#ifdef LIII_DEBUG
+    debug_removed_count++;
+#endif
+  }
+
+  m_tabPageList= next;
+  // startup/chat 标签固定置顶。
+  int startupIndex= startup_tab_index (m_tabPageList);
+  if (startupIndex > 0) {
+    QTMTabPage* startupTab= m_tabPageList.takeAt (startupIndex);
+    m_tabPageList.prepend (startupTab);
+  }
+  int chatIndex= chat_tab_index (m_tabPageList);
+  if (chatIndex > 1) {
+    QTMTabPage* chatTab= m_tabPageList.takeAt (chatIndex);
+    m_tabPageList.insert (1, chatTab);
+  }
+  else if (chatIndex == 0 && m_tabPageList.size () > 1) {
+    QTMTabPage* chatTab= m_tabPageList.takeAt (chatIndex);
+    m_tabPageList.insert (1, chatTab);
+  }
 
   arrangeTabPages ();
+#ifdef LIII_DEBUG
+  cout << "[tabpage] rebuild tabs=" << m_tabPageList.size ()
+       << " added=" << debug_added_count << " removed=" << debug_removed_count
+       << LF;
+#endif
 }
+
+void
+QTMTabPageContainer::updateActiveTab (const url& currentView) {
+#ifdef LIII_DEBUG
+  debug_active_count++;
+  cout << "[tabpage] active #" << debug_active_count
+       << " added=" << debug_added_count << " removed=" << debug_removed_count
+       << LF;
+#endif
+  for (int i= 0; i < m_tabPageList.size (); ++i) {
+    QTMTabPage* tab= m_tabPageList[i];
+    tab->setChecked (as_string (tab->m_viewUrl) == as_string (currentView));
+  }
+}
+
+#ifdef LIII_DEBUG
+QTMTabPage*
+QTMTabPageContainer::debug_findTab (const url& viewUrl) const {
+  string key= as_string (viewUrl);
+  for (int i= 0; i < m_tabPageList.size (); ++i)
+    if (as_string (m_tabPageList[i]->m_viewUrl) == key) return m_tabPageList[i];
+  return nullptr;
+}
+#endif
 
 void
 QTMTabPageContainer::removeAllTabPages () {
@@ -472,61 +604,27 @@ QTMTabPageContainer::removeAllTabPages () {
 }
 
 void
-QTMTabPageContainer::extractTabPages (QList<QAction*>* p_src) {
-  if (!p_src) return;
-  for (int i= 0; i < p_src->size (); ++i) {
-    // see the definition of QTMTabPageAction why we're using it
-    QTMTabPageAction* carrier= qobject_cast<QTMTabPageAction*> ((*p_src)[i]);
-    ASSERT (carrier, "QTMTabPageAction expected")
-
-    QTMTabPage* tab= qobject_cast<QTMTabPage*> (carrier->m_widget);
-    if (tab) {
-      tab->setParent (this);
-      m_tabPageList.append (tab);
-    }
-    else {
-      delete carrier->m_widget; // we don't use it so we should delete it
-    }
-
-    // We don't need to manually delete carrier, because it(p_src) is a QAction,
-    // which will be deleted by the parent widget (QTMTabPageBar) when it
-    // is destroyed (by shedule_destruction).
-  }
-
-  int startupIndex= startup_tab_index (m_tabPageList);
-  if (startupIndex > 0) {
-    QTMTabPage* startupTab= m_tabPageList.takeAt (startupIndex);
-    m_tabPageList.prepend (startupTab);
-  }
-
-  int chatIndex= chat_tab_index (m_tabPageList);
-  if (chatIndex > 1) {
-    QTMTabPage* chatTab= m_tabPageList.takeAt (chatIndex);
-    m_tabPageList.insert (1, chatTab);
-  }
-  else if (chatIndex == 0 && m_tabPageList.size () > 1) {
-    // Chat tab should be after startup tab, not before
-    QTMTabPage* chatTab= m_tabPageList.takeAt (chatIndex);
-    m_tabPageList.insert (1, chatTab);
-  }
-}
-
-void
 QTMTabPageContainer::arrangeTabPages () {
   if (!parentWidget ()) return;
   const int windowWidth=
       parentWidget () ? parentWidget ()->width () : this->width ();
-  // 动态计算右侧预留空间，防止标签页覆盖系统按钮
+  // 动态计算右侧预留空间，防止标签页覆盖系统按钮 / 邀请按钮 / 新增标签按钮
   double scale      = getDPIScaleFactor ();
-  int    buttonWidth= int (72 * scale); // 按钮宽度
-  int    buttonCount= 5;                // pin, min, max, close,login
+  int    buttonWidth= int (60 * scale); // 系统按钮宽度
+  int    buttonCount= 5;                // pin, min, max, close, login
 #ifdef Q_OS_MAC
   buttonCount= 1; // macOS 仅保留 login
 #endif
   int reservedRight= buttonCount * buttonWidth;
 #ifndef IS_COMMUNITY
-  reservedRight+= DpiUtils::scaled (90); // VIP 按钮及间距预留
+  if (m_vipButtonReserved) {
+    reservedRight+= DpiUtils::scaled (90); // 邀请按钮
+  }
 #endif
+  // 末尾的新增标签按钮（紧跟在最后一个 tab 之后）也要占位
+  reservedRight+= getScaledAddButtonHeight ();
+  reservedRight+=
+      DpiUtils::scaled (20); // 新增标签按钮与右侧控件之间留 20pt 间距
 
   int visibleTabCount= 0;
   // cout << "most recently closed tab:" << g_mostRecentlyClosedTab << LF;
