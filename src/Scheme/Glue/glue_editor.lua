@@ -11,8 +11,18 @@
 
 function main()
     return {
+        group_name = "glue_editor",
         binding_object = "get_current_editor()->",
         initializer_name = "initialize_glue_editor",
+        standalone = true,
+        includes = {
+            "object_l1.hpp",
+            "object_l2.hpp",
+            "object_l3.hpp",
+            "object_l5.hpp",
+            "scheme.hpp",
+            "glue_l5_extra.hpp",
+        },
         glues = {
             -- important paths and trees
             {
@@ -440,6 +450,14 @@ function main()
                 scm_name = "get-page-count",
                 cpp_name = "get_page_count",
                 ret_type = "int"
+            },
+            {
+                scm_name = "get-page-number-text",
+                cpp_name = "get_page_number_text",
+                ret_type = "string",
+                arg_list = {
+                    "int"
+                }
             },
             {
                 scm_name = "get-page-width",

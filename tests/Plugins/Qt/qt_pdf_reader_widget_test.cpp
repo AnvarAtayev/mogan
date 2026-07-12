@@ -44,6 +44,8 @@ private slots:
 
   void init () { init_lolly (); }
 
+  void cleanup () { cleanup_qt_top_level_widgets (); }
+
   void test_creation () {
     PDFReaderWidget* widget= new PDFReaderWidget ();
     QVERIFY (widget != nullptr);
@@ -448,8 +450,9 @@ private slots:
     QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, end);
     QApplication::processEvents ();
 
-    // QScroller 的滚动更新是异步的，给一点时间让动画生效
-    QTest::qWait (100);
+    // QScroller 的滚动更新是异步的，轮询等待拖拽动画把滚动条值推进到预期
+    QVERIFY (
+        QTest::qWaitFor ([&] () { return vbar->value () < initialPos; }, 1000));
 
     int newPos= vbar->value ();
     QVERIFY (newPos < initialPos);
@@ -661,8 +664,9 @@ private slots:
     QTest::mouseRelease (vp, Qt::LeftButton, Qt::NoModifier, QPoint (50, 100));
     int releasePos= vbar->value ();
 
-    // 释放后等待一小段时间，惯性滚动应使值继续变化
-    QTest::qWait (80);
+    // 释放后惯性滚动应使值继续变化，轮询等待动画推进
+    QVERIFY (QTest::qWaitFor ([&] () { return vbar->value () != releasePos; },
+                              1000));
     int afterInertia= vbar->value ();
     QVERIFY (afterInertia != releasePos);
 

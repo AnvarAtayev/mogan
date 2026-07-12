@@ -126,31 +126,22 @@ QWK--WindowBar>QAbstractButton#close-button:pressed {
 
 QWK--WindowBar>QAbstractButton#login-button {
   qproperty-iconNormal: url(":/window-bar/login-white.svg");
-}
-
-/* 未登录状态 - 使用蓝色强调 */
-QWK--WindowBar>QAbstractButton#login-button[login-state="not-logged-in"] {
-  color: #4fc3f7;
-}
-
-/* 已登录状态 - 使用常规颜色 */
-QWK--WindowBar>QAbstractButton#login-button[login-state="logged-in"] {
   color: #ffffff;
 }
 
-/* VIP升级按钮 */
-QWK--WindowBar>QPushButton#vip-button {
+/* 邀请好友按钮 */
+QWK--WindowBar>QPushButton#invite-button {
   background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #215a6a, stop:1 #2791ad);
   border: none;
   color: #ffffff;
   font-weight: bold;
 }
 
-QWK--WindowBar>QPushButton#vip-button:hover {
+QWK--WindowBar>QPushButton#invite-button:hover {
   background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2a6f82, stop:1 #30a5c5);
 }
 
-QWK--WindowBar>QPushButton#vip-button:pressed {
+QWK--WindowBar>QPushButton#invite-button:pressed {
   background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1a4652, stop:1 #1e7a94);
 }
 
@@ -1488,6 +1479,22 @@ QWidget#centralWidget QToolButton#chat-tab-thinking-btn {
 }
 QToolButton#chat-tab-thinking-btn:checked,
 QWidget#centralWidget QToolButton#chat-tab-thinking-btn:checked {
+  background: #215a6a33;
+  border: 1px solid #2791ad;
+  color: #2791ad;
+}
+
+/* 搜索按钮 */
+QToolButton#chat-tab-search-btn,
+QWidget#centralWidget QToolButton#chat-tab-search-btn {
+  color: #ffffff;
+  border: 1px solid #7a7a7a;
+  background: transparent;
+  qproperty-iconNormal: url(":/llm-chat/search-white.svg");
+  qproperty-iconChecked: url(":/llm-chat/search-dark.svg");
+}
+QToolButton#chat-tab-search-btn:checked,
+QWidget#centralWidget QToolButton#chat-tab-search-btn:checked {
   background: #215a6a33;
   border: 1px solid #2791ad;
   color: #2791ad;

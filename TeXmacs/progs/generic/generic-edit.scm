@@ -22,6 +22,8 @@
   ) ;:use
 ) ;texmacs-module
 
+(import (liii http))
+
 (tm-define (generic-context? t) #t)
 ;; overridden in, e.g., graphics mode
 
@@ -574,7 +576,7 @@
 ) ;tm-define
 
 (tm-define (kbd-remove t forwards?)
-  (:require (at-image-start?))
+  (:require (if forwards? (just-before-image?) (just-after-image?)))
   (let ((image (any-image-context?)))
     (tree-cut image)
   ) ;let
@@ -1360,26 +1362,101 @@
 ;;
 ;; TODO: 在文本模式中，可以自动识别剪贴板中的内容，并魔法粘贴。比如，内容格式经过识别，发现是LaTeX格式，
 ;; 那么应该粘贴为LaTeX格式
+(tm-define (check-magic-paste)
+  (when (not (defined? 'account-load-token))
+    (use-modules (liii account))
+  ) ;when
+  (let* ((token (account-load-token))
+         (base-url (current-stem-site))
+         (check-url (string-append base-url "/api/v1/oauth2/magicPaste/check"))
+         (headers (list (cons "Authorization" (string-append "Bearer " token))
+                    (cons "Content-Type" "application/json")
+                  ) ;list
+         ) ;headers
+        ) ;
+    (if (string=? token "")
+      "not-logged-in"
+      (catch #t
+        (lambda ()
+          (let* ((r (http-post check-url '() "{}" headers)) (status (r 'status-code)))
+            (cond ((= status 200) "allowed")
+                  ((= status 401) "not-logged-in")
+                  ((= status 403) "limit-exceeded")
+                  (else "allowed")
+            ) ;cond
+          ) ;let*
+        ) ;lambda
+        (lambda (key . args) "allowed")
+      ) ;catch
+    ) ;if
+  ) ;let*
+) ;tm-define
+
+(tm-widget (magic-paste-login-widget cmd)
+  (padded (text "Please log in to use Magic Paste")
+    ======
+    (centered (explicit-buttons ("Login" (cmd "ok"))))
+  ) ;padded
+) ;tm-widget
+
+(tm-widget (magic-paste-upgrade-widget cmd)
+  (padded (text "Daily Magic Paste limit reached. Upgrade for unlimited access.")
+    ======
+    (centered (explicit-buttons ("Upgrade" (cmd "ok"))))
+  ) ;padded
+) ;tm-widget
+
+(define (show-magic-paste-login-dialog)
+  (dialogue-window magic-paste-login-widget
+    (lambda (answ) (when (== answ "ok") (login)))
+    "Magic Paste"
+  ) ;dialogue-window
+) ;define
+
+(define (show-magic-paste-upgrade-dialog)
+  (dialogue-window magic-paste-upgrade-widget
+    (lambda (answ) (when (== answ "ok") (open-pricing-url)))
+    "Magic Paste"
+  ) ;dialogue-window
+) ;define
+
+(tm-define (with-magic-paste-check cont)
+  (if (community-stem?)
+    (cont)
+    (let ((result (check-magic-paste)))
+      (cond ((== result "allowed") (cont))
+            ((== result "not-logged-in") (show-magic-paste-login-dialog))
+            ((== result "limit-exceeded") (show-magic-paste-upgrade-dialog))
+      ) ;cond
+    ) ;let
+  ) ;if
+) ;tm-define
+
 (tm-define (kbd-magic-paste)
   (if (string-starts? (qt-clipboard-format) "image")
     (begin
       (ocr-paste)
       (track-event "OCR_RECOGNIZE" '(("mode" . "paste")))
     ) ;begin
-    (with mode
-      (get-env "mode")
-      (cond ((== mode "prog")
-             (clipboard-paste-import "code" "primary")
-             (track-event "MAGIC_PASTE" '(("mode" . "prog")))
-            ) ;
-            ((== mode "math")
-             (clipboard-paste-import "latex" "primary")
-             (track-event "MAGIC_PASTE" '(("mode" . "math")))
-            ) ;
-            (else (smart-format-paste) (track-event "MAGIC_PASTE" '(("mode"
-                                                                     . "text"))))
-      ) ;cond
-    ) ;with
+    (with-magic-paste-check (lambda ()
+                              (with mode
+                                (get-env "mode")
+                                (cond ((== mode "prog")
+                                       (clipboard-paste-import "code" "primary")
+                                       (track-event "MAGIC_PASTE" '(("mode"
+                                                                     . "prog")))
+                                      ) ;
+                                      ((== mode "math")
+                                       (clipboard-paste-import "latex" "primary")
+                                       (track-event "MAGIC_PASTE" '(("mode"
+                                                                     . "math")))
+                                      ) ;
+                                      (else (smart-format-paste) (track-event "MAGIC_PASTE" '(("mode"
+                                                                                               . "text"))))
+                                ) ;cond
+                              ) ;with
+                            ) ;lambda
+    ) ;with-magic-paste-check
   ) ;if
   (when (chat-input-buffer? (current-buffer-url))
     (qt-chat-notify-input-height)
@@ -1393,15 +1470,21 @@
   (tree-innermost (lambda (t) (tree-is? t 'image)) #t)
 ) ;tm-define
 
-(tm-define (at-image-start?)
-  (with image
-    (any-image-context?)
-    (and image
-      (let* ((p (cursor-path)) (ip (tree->path image)))
-        (or (== p ip) (and (== (cDr p) ip) (<= (cAr p) 1)))
-      ) ;let*
-    ) ;and
-  ) ;with
+;; 判断光标是否紧贴在 image 节点之后
+;; 光标在 image 这种原子节点上只有两个停留位：offset 0（图片前）与 offset 1（图片后）
+;; 故用 cDr==ip 且 cAr>=1 判定“图片后”，退格时据此整体删图，避免误删图片前的换行
+(tm-define (just-after-image?)
+  (let* ((p (cursor-path)) (img (any-image-context?)))
+    (and img (== (cDr p) (tree->path img)) (>= (cAr p) 1))
+  ) ;let*
+) ;tm-define
+
+;; 判断光标是否紧贴在 image 节点之前（offset 0）
+;; Delete 键向右删，仅在光标位于图片前时才整体删图
+(tm-define (just-before-image?)
+  (let* ((p (cursor-path)) (img (any-image-context?)))
+    (and img (== (cDr p) (tree->path img)) (== (cAr p) 0))
+  ) ;let*
 ) ;tm-define
 
 (tm-define (notify-activated t) (noop))

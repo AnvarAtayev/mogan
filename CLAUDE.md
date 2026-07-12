@@ -28,6 +28,17 @@
    bench_end ("my_task");
    ```
 
+### 注释规范
+
+1. **文档注释用 Doxygen 风格**：文件级、函数级说明用 `/** ... */` 或 `/*! ... */`，配合 `@file`、`@brief`、`@param`、`@return`、`@note`、`@par` 等标签，便于工具解析。中文撰写。
+
+2. **代码注释精简，避免冗余**：
+   - 函数内注释只写「为什么」（Why），不写「做什么」（What）——后者代码本身已表达。
+   - 不逐行复述代码。整段显而易见的逻辑不需注释。
+   - 一行注释能说清的不拆成多行段落。
+
+3. **版权块保持独立**：`MODULE / DESCRIPTION / COPYRIGHT / LICENSE` 标准版权块单独成块闭合，Doxygen 设计说明放在它之外（另起一个注释块），不混在一块。
+
 ## 分支命名规则
 
 分支格式：`username/200_27/xxx`
@@ -40,12 +51,18 @@
 - `da/200_27/xmake_debug`
 - `da/200_27/fix_pdf_rendering`
 
+## 任务文档
+
+每个任务在 `devel/<编号>.md` 维护一份文档。分支名中的任务编号即文档名,
+例如分支 `da/1113/backward` 对应 `devel/1113.md`。开始工作前先按分支定位
+任务文档,完成后把本次改动(What/Why/How/涉及文件)追加到文档里。
+
 ## 提交规范
 
 1. 一个 PR 至少分为两个 commit：
    - 第一个 commit 更新 `devel/xxxx.md` 任务文档
    - 后续 commit 为代码改动
-2. **提交前必须运行 `gf fmt --changed-since=main`** 格式化变更的 `.scm` 文件
+2. **提交前必须运行 `gf fmt --changed-since=main`** 格式化变更的 `.scm` 和 C++（`.cpp`/`.hpp`）文件
 3. 保持提交信息清晰、简洁，格式：`[编号] 简述`
 
 ## 代码推送规则
@@ -61,9 +78,74 @@
 2. 构建方式：`xmake b xxx_test`
 3. 运行方式：`xmake r xxx_test`
 
+### Qt 窗口测试
+
+测试中 `show()` 了顶层 `QWidget` 的用例，必须在测试类的 `cleanup()` 槽里调用共享工具函数 `cleanup_qt_top_level_widgets()`（声明在 `tests/Base/base.hpp`）：
+
+```cpp
+class TestMyWidget : public QObject {
+  Q_OBJECT
+private slots:
+  void init () { init_lolly (); }
+  void cleanup () { cleanup_qt_top_level_widgets (); }
+  // ...
+};
+```
+
+**原因**：用例中途断言失败时，`new` 出来的 widget 不会被 `delete`，泄漏的窗口会持续显示，导致：
+- 批量跑 `xmake run --group=tests` 时整个套件卡住，需要手动关弹窗
+- 下一个测试进程启动时 Qt 的 `DllMain` 初始化失败（Windows 错误码 `0xC000013A`）
+
+`cleanup()` 会在每条用例结束后执行，即使断言失败也会兜底隐藏窗口。
+
+### GUI 集成测试
+
+排查 GUI 专属代码路径（如 tab 切换、菜单重建）时，headless 模式无法复现。
+`TeXmacs/tests/*.scm`（`add_target_integration_test`）支持在真实 GUI 进程里跑：
+
+```bash
+xmake b stem
+MOGAN_TEST_GUI=1 xmake r <test名>
+```
+
+- `MOGAN_TEST_GUI=1`：去掉 `-headless`，在真实 GUI 跑，调试日志直接进终端；
+  且不自动 `(quit-TeXmacs)`，由测试脚本自己延迟退出。
+- 不带该环境变量则保持默认 headless + 自动 quit 行为，对其他测试无影响。
+
+测试脚本（`TeXmacs/tests/<name>.scm`，入口 `(test_<name>)`）用 `exec-delayed-at`
+串异步链驱动 GUI（不要用同步 sleep，会阻塞 Qt 事件循环），链尾自己
+`(quit-TeXmacs)`。夹具放 `TeXmacs/tests/tmu/`，运行时复制到 `/tmp` 避免
+save/编辑污染检入副本。配合 `#ifdef LIII_DEBUG` 的临时日志定位根因
+（参考 `TeXmacs/tests/2014.scm`）。
+
+### Scheme 诊断
+
+1. **纯 scheme 逻辑用 `gf eval` 快速验证**：不依赖 mogan 内置（`translate` /
+   `get-pretty-preference` 等 tm 库）的纯函数，可用项目自带的 Goldfish Scheme
+   解释器直接跑，秒级反馈，无需构建 mogan：
+   ```bash
+   gf eval '(define (f x) `(a ,x)) (display (f 1)) (newline)'
+   ```
+   适合验证 quasiquote、列表处理等纯语言行为。
+
+2. **mogan scheme 列表字面量在求值位置会被求值**：裸写 `("a" "b")` 出现在
+   函数实参位置时，car `"a"` 被当函数应用而崩（`string ref: too many
+   indices`）。传常量列表必须 quote：`(f key '("a" "b"))`。quasiquote 内无
+   前置 `,` 的列表字面量原样保留，可裸写。
+
+3. **需 mogan 内置的脚本用真实二进制跑**：依赖 tm 库的诊断脚本，写临时
+   `.scm` 文件，用构建产物加载：
+   ```bash
+   TEXMACS_PATH=$(pwd)/TeXmacs \
+     build/macosx/arm64/release/MoganSTEM.app/Contents/MacOS/MoganSTEM \
+     -headless -d -x "(load \"/tmp/diag.scm\")"
+   ```
+
 ## 构建命令
 
 主项目构建：`xmake b stem`
+
+如果构建失败（例如配置缓存陈旧、依赖路径错乱），执行 `xmake f -c --yes` 清理配置缓存后重新构建。
 
 ## 工作流程
 
