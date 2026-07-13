@@ -461,6 +461,15 @@ void
 gui_root_extents (SI& width, SI& height) {
   // get the screen size: the GLFW counterpart of Qt's
   // QGuiApplication::primaryScreen()->size()
+#ifdef __EMSCRIPTEN__
+  // Browsers do not expose a meaningful primary monitor to GLFW.
+  // Use the current canvas CSS size as the root extent instead.
+  double css_w, css_h;
+  emscripten_get_element_css_size ("#main-canvas", &css_w, &css_h);
+  width = (SI) css_w * PIXEL;
+  height= (SI) css_h * PIXEL;
+  return;
+#else
   int w= 1920, h= 1080;
   if (s_glfw_initialized) {
 #ifdef __EMSCRIPTEN__
@@ -482,6 +491,7 @@ gui_root_extents (SI& width, SI& height) {
   }
   width = w * PIXEL;
   height= h * PIXEL;
+#endif
 }
 
 void
