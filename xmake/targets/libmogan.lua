@@ -90,7 +90,7 @@ target("libmogan") do
     if not is_plat("wasm") then
         add_packages("cpr")
     end
-    add_packages("argh")
+    add_packages("argh", {public = true})
     if not is_plat("macosx") then
         add_packages("libiconv")
     end
