@@ -50,6 +50,22 @@ function main()
                 }
             },
             {
+                scm_name = "cpp-font-selector-dialog",
+                cpp_name = "cpp_font_selector_dialog",
+                ret_type = "tree",
+                arg_list = {
+                    "int"
+                }
+            },
+            {
+                scm_name = "cpp-rasterize-widget",
+                cpp_name = "cpp_rasterize_widget",
+                ret_type = "string",
+                arg_list = {
+                    "widget"
+                }
+            },
+            {
                 scm_name = "qt-clipboard-format",
                 cpp_name = "qt_clipboard_format",
                 ret_type = "string"

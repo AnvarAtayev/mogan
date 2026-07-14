@@ -728,6 +728,8 @@
     "cpp-buffer-close"
     "cpp-confirm-close"
     "cpp-form-dialog"
+    "cpp-font-selector-dialog"
+    "cpp-rasterize-widget"
     "kill-window"
     "kill-current-window-and-buffer"
     "project-attach"
