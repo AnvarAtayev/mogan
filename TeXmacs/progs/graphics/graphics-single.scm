@@ -64,12 +64,12 @@
 
 ;; Basic operations (create)
 
-(define (sketch-get1)
+(tm-define (sketch-get1)
   (if (not (and (pair? (sketch-get)) (eq? 1 (length (sketch-get)))))
     (graphics-error "(sketch-get1)")
   ) ;if
   (sketch-get)
-) ;define
+) ;tm-define
 
 (tm-define (object_create tag x y)
   (texmacs-error "object-create" "invalid tag")
@@ -166,11 +166,11 @@
 
 ;; Basic operations (set & add point)
 
-(define (object_set-point no xcur ycur)
+(tm-define (object_set-point no xcur ycur)
   (define obj (stree-radical (car (sketch-get1))))
   (set-point-sub obj no xcur ycur)
   (object-set! (car (sketch-get)))
-) ;define
+) ;tm-define
 
 (define (object_add-point no xcur ycur x y dirn)
   (define obj (stree-radical (car (sketch-get1))))
@@ -335,24 +335,6 @@
   ) ;and
 ) ;define
 
-(define (move-over)
-  (set-message (string-append "Left click: new object; "
-                 "Drag: edit object; "
-                 "Shift+Left click or Right click: remove; "
-                 "Return: apply properties; "
-                 "S-Return: fetch properties"
-               ) ;string-append
-    "Mouse over object"
-  ) ;set-message
-  (graphics-decorations-update)
-  (if current-path
-    (with p2
-      (tm-upwards-path current-path (graphical-text-tag-list) '(graphics))
-      (if (not p2) (go-to (rcons current-path 0)))
-    ) ;with
-  ) ;if
-) ;define
-
 (define (edit-clean-up)
   ;; remove cruft which uncareful editing may create
   (with-innermost t
@@ -372,22 +354,6 @@
 (define (edit-insert x y)
   (edit-clean-up)
   (object_create (cadr (graphics-mode)) x y)
-) ;define
-
-(define (start-move)
-  (define edge current-edge-sel?)
-  (graphics-store-state 'start-move)
-  (object_checkout)
-  (graphics-group-start)
-  (set! current-edge-sel? #t)
-  (set! leftclick-waiting #f)
-  (if (and edge (not (graphics-complete? current-obj)))
-    (begin
-      (object_add-point current-point-no #f #f current-x current-y #t)
-      (graphics-decorations-update)
-    ) ;begin
-  ) ;if
-  (graphics-store-state #f)
 ) ;define
 
 (define (move-point)
@@ -526,10 +492,10 @@
   (:require (== mode 'edit))
   (:state graphics-state)
   (set-texmacs-pointer 'graphics-cross #t)
-  (if current-obj
+  (if sticky-point
     (begin
       (if (current-in? (graphical-text-tag-list)) (set! current-point-no 1))
-      (if sticky-point (move-point) (move-over))
+      (move-point)
     ) ;begin
     (begin
       (set-message "Left click: new object" "Graphics")
@@ -592,38 +558,19 @@
 (tm-define (edit_start-drag mode x y t p)
   (:require (== mode 'edit))
   (:state graphics-state)
-  (set-texmacs-pointer 'graphics-cross)
-  (set! dragging-busy? #t)
-  (set! dragging-create? (or sticky-point (not current-obj)))
-  (if (or sticky-point current-obj)
-    (begin
-      (if (current-in? (graphical-text-tag-list)) (set! current-point-no 1))
-      (if sticky-point (next-point) (start-move))
-    ) ;begin
-    (edit-insert x y)
-  ) ;if
-  (set! previous-leftclick `(point ,current-x ,current-y))
+  (noop)
 ) ;tm-define
 
 (tm-define (edit_drag mode x y t p)
   (:require (== mode 'edit))
   (:state graphics-state)
   (edit_move mode x y)
-  (set-message "Release left button: finish editing" "Dragging")
 ) ;tm-define
 
 (tm-define (edit_end-drag mode x y t p)
   (:require (== mode 'edit))
   (:state graphics-state)
-  (when dragging-busy?
-    (set-texmacs-pointer 'graphics-cross)
-    (if (or sticky-point current-obj)
-      (if dragging-create? (edit_move mode x y) (last-point))
-    ) ;if
-    (set! dragging-busy? #f)
-    (set! dragging-create? #f)
-    (set! previous-leftclick `(point ,current-x ,current-y))
-  ) ;when
+  (noop)
 ) ;tm-define
 
 (tm-define (edit_tab-key mode inc)
