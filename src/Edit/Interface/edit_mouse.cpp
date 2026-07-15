@@ -1314,6 +1314,24 @@ edit_interface_rep::hide_text_popup () {
 #endif
 }
 
+void
+edit_interface_rep::show_ghost_popup () {
+#ifdef QTTEXMACS
+  if (qt_simple_widget_rep* qsw= dynamic_cast<qt_simple_widget_rep*> (this)) {
+    qsw->show_ghost_popup ();
+  }
+#endif
+}
+
+void
+edit_interface_rep::hide_ghost_popup () {
+#ifdef QTTEXMACS
+  if (qt_simple_widget_rep* qsw= dynamic_cast<qt_simple_widget_rep*> (this)) {
+    qsw->hide_ghost_popup ();
+  }
+#endif
+}
+
 bool
 edit_interface_rep::is_point_in_text_popup (SI x, SI y) {
 #ifdef QTTEXMACS
