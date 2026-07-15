@@ -9,6 +9,7 @@
 
 #include "QTMQmlDialog.hpp"
 #include "FontSelectorBridge.hpp"
+#include "ParagraphFormatBridge.hpp"
 #include "QTMQmlDialogBridge.hpp"
 #include "QTMQmlDialogInternal.hpp"
 
@@ -440,5 +441,38 @@ cpp_font_selector_dialog (int specs_key) {
       980, 600);
   // 非阻塞 show 立即返回，用户尚未点 OK/Cancel，无结论——返回空 tree（与 Cancel
   // 一致）。
+  return tree (TUPLE);
+}
+
+/**
+ * @brief 段落格式 QML 对话框 glue 入口（声明/语义见 QTMQmlDialog.hpp）。
+ * @details 同字体选择器：run_modal_qml_dialog 非阻塞模态 + destroyed 自清
+ * bridges；测试钩子 MOGAN_TEST_PARAGRAPH_FORMAT=ok|cancel 命中时不弹窗。
+ */
+tree
+cpp_paragraph_format_dialog (int specs_key) {
+  string preset= get_env ("MOGAN_TEST_PARAGRAPH_FORMAT");
+  if (preset == "cancel") {
+    return tree (TUPLE);
+  }
+  if (preset == "ok") {
+    eval_scheme ("(paragraph-format-commit " * as_string (specs_key) * ")");
+    tree r (TUPLE);
+    r << tree ("ok");
+    return r;
+  }
+  run_modal_qml_dialog (
+      "qrc:/qml/ParagraphFormat.qml", "ParagraphFormat.qml",
+      [&] (QQuickWidget* qw, QDialog* host) {
+        QmlDialogBridge*       closeBridge= inject_common_context (qw, *host);
+        ParagraphFormatBridge* paraBridge=
+            new ParagraphFormatBridge (host, specs_key);
+        qw->rootContext ()->setContextProperty ("paraBridge", paraBridge);
+        QObject::connect (host, &QDialog::destroyed, closeBridge,
+                          &QObject::deleteLater);
+        QObject::connect (host, &QDialog::destroyed, paraBridge,
+                          &QObject::deleteLater);
+      },
+      520, 590);
   return tree (TUPLE);
 }
