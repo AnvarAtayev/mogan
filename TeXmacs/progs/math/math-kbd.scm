@@ -1394,7 +1394,6 @@
  ("% -" "<veebar>")
  ("% - . ." "<veebar><cdots><veebar>")
 
- ("/ /" "<varparallel>")
  ("/ / var" "<parallel>")
  ("/ / var var" "//")
  ("| /" "<nmid>")
@@ -1416,6 +1415,7 @@
  ("| | var var var var" "<varparallel>")
  ("| | var var var var /" "<nvarparallel>")
  ("| | | var" "<interleave>")
+ ("/ /" "<varparallel>")
 
  ("| - var" "<vdash>")
  ("| - var -" "<longvdash>")
@@ -1612,7 +1612,6 @@
  ("math:misc | | /" "<nparallel>")
  ("math:misc | | var" "<shortparallel>")
  ("math:misc | | var /" "<nshortparallel>")
- ("math:misc | | var var" "<varparallel>")
  ("math:misc | | var var /" "<nvarparallel>")
 
  ("math:greek a" "<alpha>")
