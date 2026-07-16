@@ -26,7 +26,6 @@ local stem_files = {
 }
 
 target("stem") do 
-    add_deps("goldfish")
     if is_plat("windows") and is_mode("release") then
         add_deps("liii_windows_icon")
     end
@@ -121,11 +120,14 @@ target("stem") do
         add_frameworks("QtQml", "QtQuick", "QtBodymovin")
     end
 
-    add_packages("goldfish")
     add_packages("mupdf")
     if not has_config("qt_frontend") and not is_plat("wasm") then -- WASM GLFW is in EMCC
         add_packages("glfw") 
     end
+    if has_config("goldfish") then
+        add_deps("goldfish-bin")
+    end
+    add_deps("goldfish")
     add_deps("liblolly")
     add_deps("libmogan")
     add_deps("libmoebius")

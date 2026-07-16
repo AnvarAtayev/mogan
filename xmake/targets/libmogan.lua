@@ -27,6 +27,7 @@ target("libmogan") do
 
     add_deps("libmoebius")
     add_deps("liblolly")
+    add_deps("goldfish")
     if has_config("qt_frontend") then
         add_deps("QWKCore", "QWKWidgets")
         add_rules("qt.static")
@@ -85,7 +86,6 @@ target("libmogan") do
         add_packages("liii-pdfhummus")
     end
     add_packages("freetype")
-    add_packages("goldfish")
     add_packages("liii-tbox")
     if not is_plat("wasm") then
         add_packages("cpr")
@@ -247,10 +247,7 @@ target("libmogan") do
             "$(projectdir)/src/Mogan/TemplateCenter",
             "$(projectdir)/src/Mogan/Telemetry",
             "$(projectdir)/TeXmacs/include",
-            "$(builddir)/glue",
-            "$(projectdir)/TeXmacs/plugins/goldfish/src/",
-            "$(projectdir)/3rdparty/nlohmann_json/include",
-            "$(projectdir)/3rdparty/json-schema-validator/src"
+            "$(builddir)/glue"
         }, {public = true})
 
     add_files({
@@ -278,9 +275,7 @@ target("libmogan") do
             "$(projectdir)/src/Plugins/Tex/**.cpp",
             "$(projectdir)/src/Plugins/Xml/**.cpp",
             "$(projectdir)/src/Plugins/Html/**.cpp",
-            "$(projectdir)/src/Plugins/Updater/**.cpp",
-            "$(projectdir)/TeXmacs/plugins/goldfish/src/**.cpp",
-            "$(projectdir)/3rdparty/json-schema-validator/src/**.cpp"})
+            "$(projectdir)/src/Plugins/Updater/**.cpp",})
 
     if has_config("pdfhummus") then
         add_includedirs("$(projectdir)/src/Plugins/Pdf/**.hpp", {public=true})
@@ -298,7 +293,6 @@ target("libmogan") do
         add_files("$(projectdir)/src/Plugins/Qt/moganqml.qrc")
     else
         add_files("$(projectdir)/src/Plugins/ImGui/**.cpp")
-        remove_files("$(projectdir)/TeXmacs/plugins/goldfish/src/liii_http.cpp")
     end
 
     if is_plat("macosx") then

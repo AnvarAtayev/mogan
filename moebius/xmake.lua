@@ -30,8 +30,6 @@ local moe_includedirs = {
 
 add_requires("liii-doctest", {system=false})
 add_requires("nanobench", {system=false})
-add_requires("goldfish", {system=false})
-
 
 target("libmoebius") do
     set_kind ("static")
@@ -43,7 +41,7 @@ target("libmoebius") do
     add_files(moe_files)
 
     add_deps("liblolly")
-    add_packages("goldfish")
+    add_deps("goldfish")
 
     add_headerfiles("Data/Convert/(*.hpp)")
     add_headerfiles("Data/History/(*.hpp)")

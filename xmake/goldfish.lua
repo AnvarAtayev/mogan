@@ -13,49 +13,19 @@
 -- binary target 内联编译的那一份完全相同。不使用 set_sourcedir() 直接指向
 -- 工作树（否则 package.tools.xmake 会把 port 出来的 xmake.lua 写进工作树，
 -- 污染源码目录），而是在 on_install 里把源码拷贝到包缓存目录后构建。
-local goldfish_src = "$(projectdir)/TeXmacs/plugins/goldfish/src"
-
-package("goldfish")
-    set_homepage("https://github.com/goldfishscheme/goldfish")
-    set_description("Goldfish Scheme: a Scheme interpreter intended as an extension language for other applications.")
-
-    add_deps("liii-tbox")
-
-    on_load(function (package)
-        package:addenv("PATH", "bin")
-        package:add("deps", "argh v1.3.2")
-    end)
-
-    on_test(function (package)
-        assert(package:check_csnippets([[
-            static s7_pointer old_add;           /* the original "+" function for non-string cases */
-            static s7_pointer old_string_append; /* same, for "string-append" */
-
-            static s7_pointer our_add(s7_scheme *sc, s7_pointer args)
-            {
-                /* this will replace the built-in "+" operator, extending it to include strings:
-                *   (+ "hi" "ho") -> "hiho" and  (+ 3 4) -> 7
-                */
-                if ((s7_is_pair(args)) &&
-                    (s7_is_string(s7_car(args))))
-                    return(s7_apply_function(sc, old_string_append, args));
-                return(s7_apply_function(sc, old_add, args));
-            }
-        ]], {includes = "s7.h"}))
-    end)
-package_end()
 
 target("libgoldfish") do
-    set_kind("$(kind)")
+    set_kind("static")
     set_languages("c11")
     add_packages("liii-tbox")
+    add_packages("argh", {public = true})
     add_defines("WITH_SYSTEM_EXTRAS=0")
     if not is_plat("wasm") then
         add_defines("HAVE_OVERFLOW_CHECKS=0")
     end
     add_defines("WITH_WARNINGS")
     add_defines("WITH_R7RS=1")
-    set_basename("goldfish")
+    set_basename("libgoldfish")
     add_files(
         "$(projectdir)/TeXmacs/plugins/goldfish/src/s7.c",
         "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_continuation.c",
@@ -77,8 +47,7 @@ target("libgoldfish") do
         "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_liii_string.c",
         "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_liii_vector.c"
     )
-    add_headerfiles("$(curdir)/s7.h")
-    add_includedirs(".", {public = true})
+    add_headerfiles("$(projectdir)/TeXmacs/plugins/goldfish/src/s7.h")
     if is_plat("windows") then
         set_optimize("faster")
         add_cxxflags("/fp:precise")
@@ -89,10 +58,9 @@ target("libgoldfish") do
 end
 
 target ("goldfish") do
+    set_kind("static")
     set_languages("c++17")
     add_deps("libgoldfish")
-    set_targetdir("$(projectdir)/TeXmacs/plugins/goldfish/bin/")
-    add_files ("$(projectdir)/TeXmacs/plugins/goldfish/src/goldfish.cpp")
     add_files({
         "$(projectdir)/TeXmacs/plugins/goldfish/src/liii_base64.cpp",
         "$(projectdir)/TeXmacs/plugins/goldfish/src/liii_hashlib.cpp",
@@ -102,27 +70,6 @@ target ("goldfish") do
         "$(projectdir)/TeXmacs/plugins/goldfish/src/liii_subprocess.cpp",
         "$(projectdir)/TeXmacs/plugins/goldfish/src/scheme_base.cpp",
     })
-    add_files({
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_continuation.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_ctables.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_dtoa.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_module.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_op_names.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_scheme_base.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_scheme_char.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_scheme_complex.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_scheme_format.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_scheme_inexact.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_scheme_predicate.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_scheme_symbol.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_scheme_write.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_liii_bitwise.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_liii_hash_table.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_liii_list.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_liii_string.c",
-        "$(projectdir)/TeXmacs/plugins/goldfish/src/s7_liii_vector.c",
-    }, {languages = "c11"})
     add_files({
         "$(projectdir)/3rdparty/json-schema-validator/src/smtp-address-validator.cpp",
         "$(projectdir)/3rdparty/json-schema-validator/src/json-schema-draft7.json.cpp",
@@ -139,7 +86,7 @@ target ("goldfish") do
         "$(projectdir)/TeXmacs/plugins/goldfish/src",
         "$(projectdir)/3rdparty/nlohmann_json/include",
         "$(projectdir)/3rdparty/json-schema-validator/src",
-    })
+    }, {public = true})
 
     add_defines("WITH_SYSTEM_EXTRAS=0")
     if not is_plat("wasm") then
@@ -158,7 +105,15 @@ target ("goldfish") do
     if not is_plat("wasm") then
         add_packages("cpr")
     end
-    add_packages("argh")
-    on_install(function (target)
-    end)
+    add_packages("argh", {public = true})
+end
+
+target ("goldfish-bin") do
+    set_kind("binary")
+    add_deps("goldfish")
+    set_basename("goldfish")
+    add_packages("liii-tbox")
+    add_packages("argh", {public = true})
+    set_targetdir("$(projectdir)/TeXmacs/plugins/goldfish/bin/")
+    add_files ("$(projectdir)/TeXmacs/plugins/goldfish/src/goldfish.cpp")
 end
