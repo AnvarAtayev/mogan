@@ -209,6 +209,9 @@ QTMOAuth::handleAuthorizationCode (const QString& code) {
         // 记录 LOGIN 事件
         telemetry_track ("LOGIN");
 
+        // 记录 OAUTH 事件
+        telemetry_track ("OAUTH");
+
         if (!refreshToken.isEmpty ()) {
           m_refreshToken= refreshToken;
           call ("account-save-refresh-token", from_qstring (refreshToken));
@@ -303,7 +306,12 @@ QTMOAuth::refreshToken () {
         // 确保登录状态为true
         if (!m_isLoggedIn) {
           m_isLoggedIn= true;
+          telemetry_track ("LOGIN");
           emit loginStateChanged (true);
+        }
+        else {
+          // 记录 HEART_BEAT 事件
+          telemetry_track ("HEART_BEAT");
         }
       }
       else {
@@ -346,6 +354,7 @@ QTMOAuth::checkTokenStatus () {
   // Token有效且未过期
   if (!m_isLoggedIn) {
     m_isLoggedIn= true;
+    telemetry_track ("LOGIN");
     emit loginStateChanged (true);
   }
 
