@@ -108,8 +108,6 @@
   (kernel old-gui old-gui-form)
   (kernel old-gui old-gui-test)
 ) ;inherit-modules
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting utilities\n")
 (use-modules (utils library cpp-wrap))
@@ -130,15 +128,11 @@
 (lazy-tmfs-handler (utils automate auto-tmfs) automate)
 (lazy-define (utils automate auto-tmfs) auto-load-help)
 (lazy-define (utils misc gui-keyboard) get-keyboard)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting BibTeX style modules\n")
 (use-modules (bibtex bib-utils))
 (lazy-define (bibtex bib-complete) current-bib-file citekey-completions)
 (lazy-menu (bibtex bib-widgets) open-bibliography-inserter)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting main TeXmacs functionality\n")
 (use-modules (texmacs texmacs tm-server)
@@ -166,12 +160,9 @@
 (use-modules (texmacs menus notificationbar))
 (use-modules (texmacs menus tabpage-menu))
 (use-modules (startup-tab startup-tab))
-(use-modules (llm chat-loader))
 (lazy-define (texmacs menus file-menu) recent-file-list recent-directory-list)
 (lazy-define (texmacs menus view-menu) set-bottom-bar test-bottom-bar?)
 (tm-define (notify-set-attachment name key val) (noop))
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting generic mode\n")
 (lazy-menu (generic generic-menu) focus-menu texmacs-focus-icons)
@@ -266,8 +257,6 @@
 (tm-property (open-pattern-selector cmd w) (:interactive #t))
 (tm-property (open-gradient-selector cmd) (:interactive #t))
 (tm-property (open-background-picture-selector cmd) (:interactive #t))
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting text mode\n")
 (lazy-menu (text text-menu)
@@ -280,8 +269,6 @@
   text-block-icons
   text-inline-icons
 ) ;lazy-menu
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting math mode\n")
 (lazy-menu (math math-menu)
@@ -298,8 +285,6 @@
 ) ;lazy-menu
 (lazy-initialize (math math-menu) (in-math?))
 (lazy-define (math math-edit) brackets-refresh)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting programming modes\n")
 (lazy-menu (prog prog-menu)
@@ -308,8 +293,6 @@
   prog-menu
   prog-icons
 ) ;lazy-menu
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting source mode\n")
 (lazy-menu (source source-menu)
@@ -343,8 +326,6 @@
 (when (url-exists? "")
   (delayed (:idle 100) (init-user-shortcuts))
 ) ;when
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting table mode\n")
 (lazy-menu (table table-menu) insert-table-menu)
@@ -352,8 +333,6 @@
 (lazy-define (table table-widgets) open-cell-properties open-table-properties)
 (tm-property (open-cell-properties) (:interactive #t))
 (tm-property (open-table-properties) (:interactive #t))
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting graphics mode\n")
 (lazy-menu (graphics graphics-menu) graphics-menu graphics-icons)
@@ -399,20 +378,14 @@
   sector
   sector-counterclockwise
 ) ;define-secure-symbols
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting formal and natural languages\n")
 (lazy-language (language minimal) minimal)
 (lazy-language (language std-math) std-math)
 (lazy-define (language natural) replace)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting educational features\n")
 (lazy-menu (education edu-menu) edu-insert-menu)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting dynamic features\n")
 (lazy-menu (dynamic fold-menu)
@@ -447,8 +420,6 @@
 (lazy-define (dynamic calc-edit) calc-ready? calc-table-renumber)
 (lazy-define (dynamic scripts-plot) open-plots-editor)
 (lazy-initialize (dynamic session-menu) (in-session?))
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting documentation\n")
 (lazy-menu (doc tmdoc-menu) tmdoc-menu tmdoc-icons)
@@ -483,8 +454,6 @@
 (lazy-tmfs-handler (doc apidoc) apidoc)
 (define-secure-symbols tmdoc-include youtube-select)
 (tm-property (open-website-builder) (:interactive #t))
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting converters\n")
 
@@ -521,15 +490,11 @@
   latex-has-texmacs-style?
   latex-has-texmacs-package?
 ) ;lazy-define
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting partial document facilities\n")
 (lazy-define (part part-shared) buffer-initialize buffer-notify)
 (lazy-menu (part part-menu) document-master-menu)
 (lazy-tmfs-handler (part part-tmfs) part)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting database facilities\n")
 (lazy-define (database db-widget) open-db-chooser)
@@ -546,16 +511,7 @@
 (lazy-menu (database db-menu) db-menu db-toolbar)
 (lazy-tmfs-handler (database db-tmfs) db)
 (tm-property (open-biblio) (:interactive #t))
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
-
-;; (display "Booting remote facilities\n")
-(lazy-menu (server server-menu) start-server-menu server-menu)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting linking facilities\n")
 (lazy-menu (link link-menu) link-menu)
@@ -573,14 +529,10 @@
 (lazy-menu (link ref-menu) ref-menu)
 (lazy-define (link ref-edit) preview-reference)
 (define-secure-symbols preview-reference)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting versioning facilities\n")
 (lazy-menu (version version-menu) version-menu)
 (lazy-define (version version-tmfs) update-buffer commit-buffer)
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting debugging and developer facilities\n")
 (lazy-menu (debug debug-menu) debug-menu)
@@ -593,8 +545,6 @@
   open-debug-console
   open-error-messages
 ) ;lazy-define
-;; (display* "time: " (- (texmacs-time) boot-start) "\n")
-;; (display* "memory: " (texmacs-memory) " bytes\n")
 
 ;; (display "Booting editing modes for various special styles\n")
 (lazy-menu (various poster-menu) poster-block-menu)
