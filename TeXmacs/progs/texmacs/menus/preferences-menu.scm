@@ -26,11 +26,45 @@
 ;; Preferred scripting language
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; 三按钮重启确认的正文（陈述句，无问句——问句由按钮表达）。title 由调用方
+;; 按字段给出（如「切换界面主题」），本函数只产出通用的「需重启才生效」说明。
 (tm-define (restart-required-message)
   (if (community-stem?)
     (translate "Requires restarting Mogan STEM to take full effect. Restart now?")
     (translate "Requires restarting Liii STEM to take full effect. Restart now?")
   ) ;if
+) ;tm-define
+
+(tm-define (restart-effect-message)
+  (if (community-stem?)
+    (translate "This change requires restarting Mogan STEM to take full effect.")
+    (translate "This change requires restarting Liii STEM to take full effect.")
+  ) ;if
+) ;tm-define
+
+;; 三按钮重启确认：弹 ConfirmRestart（重启/稍后/取消），按返回值分别
+;;   restart -> apply-proc + 存盘 + 重启
+;;   later   -> apply-proc（保留新值，不重启）
+;;   cancel  -> rollback-proc（回滚旧值）
+;; apply-proc / rollback-proc 为零参过程；用户未定义 save-all-buffers 时惰性加载。
+(tm-define (confirm-restart-and-act title apply-proc rollback-proc)
+  (with msg
+    (restart-effect-message)
+    (with choice
+      (cpp-confirm-restart title msg)
+      (cond ((== choice "restart")
+             (apply-proc)
+             (when (not (defined? 'save-all-buffers))
+               (use-modules (plugin autosave))
+             ) ;when
+             (save-all-buffers)
+             (restart-TeXmacs)
+            ) ;
+            ((== choice "later") (apply-proc))
+            (else (rollback-proc))
+      ) ;cond
+    ) ;with
+  ) ;with
 ) ;tm-define
 
 (tm-menu (scripts-preferences-menu)
