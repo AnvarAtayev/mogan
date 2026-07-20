@@ -183,7 +183,8 @@
                              (check-true (assoc-ref (list-ref basic 1) 'editable))
                              ;; par-sep 选项含 0.25fn。
                              (check-true (in? "0.25fn" (assoc-ref (list-ref basic 4) 'options)))
-                             ;; meta 的 value 来自 get-env（打开时读一次）。
+                             ;; meta 的 value 来自本地真相表（register 时填入 get-env 值，
+                             ;; 此处 register 后无 set，表值 == get-env）。
                              (check-true (equal? (assoc-ref (car basic) 'value) (get-env "par-mode")))
                              ;; specsKey 往返。
                              (check-true (== (paragraph-format-lookup-specs key) specs))
