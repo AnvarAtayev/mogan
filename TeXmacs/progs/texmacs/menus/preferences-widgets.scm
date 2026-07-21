@@ -22,26 +22,14 @@
 ;; Wrapper
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
-;; 需重启字段的三按钮确认标题映射（内部值 -> 翻译标题）。
-
-(define (restart-preference-title which)
-  (cond ((== which "look and feel") (translate "Switch look and feel"))
-        ((== which "gui theme") (translate "Switch interface theme"))
-        ((== which "keyboard shortcut style")
-         (translate "Switch keyboard shortcut style")
-        ) ;
-        (else (translate "Switch preference"))
-  ) ;cond
-) ;define
-
 (tm-define (set-pretty-preference* which pretty-val)
   (let* ((old (get-pretty-preference which)))
     (when (!= old pretty-val)
-      ;; 三按钮确认：重启 / 稍后（保留新值）/ 取消（回滚旧值，修复旧 no 不回滚的 bug）。
+      ;; 三按钮确认：重启 / 稍后（silent 写值，下次启动生效）/ 取消（回滚旧值）。
       (confirm-restart-and-act (restart-preference-title which)
         (lambda () (set-pretty-preference which pretty-val))
         (lambda () (set-pretty-preference which old))
+        (lambda () (set-pretty-preference-silent which pretty-val))
       ) ;confirm-restart-and-act
     ) ;when
   ) ;let*
