@@ -69,7 +69,11 @@
     (set! ghost-serial (+ ghost-serial 1))
     (let ((current ghost-serial))
       (delayed (:idle 500)
-        (when (and (== ghost-serial current) (not-in-tab-cycling?) (not (in-hybrid?)))
+        (when (and (== ghost-serial current)
+                (not-in-tab-cycling?)
+                (or (in-text?) (in-math?))
+                (in-editor-buffer?)
+              ) ;and
           (generate-ghost-text)
         ) ;when
       ) ;delayed
@@ -123,6 +127,12 @@
 
 (define (not-in-tab-cycling?)
   (not (== last-key-press "tab"))
+) ;define
+
+(define (in-editor-buffer?)
+  (let* ((u (current-buffer-url)) (s (url->unix u)))
+    (or (not (url-rooted-tmfs? u)) (string-starts? s "tmfs://part/"))
+  ) ;let*
 ) ;define
 
 (tm-define (kbd-insert s)
