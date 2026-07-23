@@ -45,6 +45,7 @@ QtObject {
 
     // 字号阶梯（各原子内统一）。
     readonly property real fontBody: 14 * scaleFactor // 正文/标签/列表项字号
+    readonly property real fontGroupHeader: 14 * scaleFactor // 分组标题（GroupHeader）字号
     readonly property real fontBtn: 15 * scaleFactor  // 主按钮（DialogButtons）字号
     readonly property real fontTab: 13 * scaleFactor  // 选项卡（TabBar）字号
     readonly property real fontMini: 11 * scaleFactor // 紧凑按钮（MiniButton）字号
@@ -56,6 +57,7 @@ QtObject {
     readonly property real pad: 8 * scaleFactor       // 标准内边距/缩进（容器内缩、列表 padding）
     readonly property real gapS: 6 * scaleFactor      // 小行间距（EnumComboList 行间）
     readonly property real gapM: 16 * scaleFactor     // 中间距（按钮间、combo 行 label↔控件）
+    readonly property real groupHeaderTopGap: 14 * scaleFactor // GroupHeader 标题上下间距（非首组，上下对称）
     readonly property real inlineGap: 12 * scaleFactor // 行内间隙（Statistics label↔value）
     readonly property real margin: 24 * scaleFactor   // 弹窗正文四周大边距（DialogShell implicitMargins）
 
@@ -71,4 +73,21 @@ QtObject {
     readonly property real miniBtnW: 48 * scaleFactor // MiniButton 默认宽
     readonly property real miniBtnH: 28 * scaleFactor // MiniButton 默认高
     readonly property real miniBtnR: 7 * scaleFactor  // MiniButton 圆角
+
+    // Toggle 原子常量（胶囊开关 + 滑块）。
+    readonly property real toggleW: 64 * scaleFactor   // Toggle 胶囊宽（track 宽）
+    readonly property real toggleH: 28 * scaleFactor   // Toggle 胶囊高（track 高，radius=height/2 全圆角）
+    readonly property real toggleKnob: 0.78            // Toggle 滑块占 track 内高的比例
+    readonly property real toggleTextGap: 2 * scaleFactor // Toggle label↔hint 行间距
+
+    // 行内 label 占行宽比例（Toggle / EnumCombo 各自独立，开关/控件锚行右端）。
+    readonly property real toggleLabelRatio: 0.85       // Toggle 单栏满宽：label 占比
+    readonly property real toggleLabelRatioNarrow: 0.7  // Toggle 双栏半宽列：label 占更多，长文案不换行
+    readonly property real comboLabelRatio: 0.6         // EnumCombo 单栏满宽：label 占比（combo 控件需更宽）
+    readonly property real comboLabelRatioNarrow: 0.5   // EnumCombo 双栏半宽列：label 占更多，长文案不换行
+
+    // 首选项双栏（Math / Other experimental，column flag 字段）布局常量。
+    readonly property real twoColGap: 24 * scaleFactor // 双栏左右列间距（设计稿 two-col gap）
+    readonly property real twoColFontScale: 0.86       // 双栏窄列字体缩放（设计稿 toggle-label 12px / fontBody 14px）
+    readonly property real twoColHalfWidth: 320 * scaleFactor // 双栏单列宽度阈值：parent 宽 < 此值视为半宽列，启用缩放
 }
