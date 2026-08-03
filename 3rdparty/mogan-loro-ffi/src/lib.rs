@@ -41,7 +41,7 @@ use loro::{
     Container, ExportMode, LoroDoc, LoroMap, LoroText, LoroTree, Subscription, TreeID,
     TreeParentId, ValueOrContainer,
 };
-use loro::cursor::{Cursor, Side};
+use loro::cursor::{Cursor, PosType, Side};
 
 // doc 句柄 -> 其 local-update 订阅。Subscription 必须保活，否则自动取消订阅。
 static LOCAL_SUBS: OnceLock<Mutex<HashMap<usize, Subscription>>> = OnceLock::new();
@@ -1222,10 +1222,86 @@ pub unsafe extern "C" fn mogan_loro_encode_cursor(
         });
     match cursor {
         Some(c) => {
-            emit_out(c.encode(), out, out_len);
+            let bytes = c.encode();
+            if !out.is_null() && !out_len.is_null() {
+                let mut b = bytes.into_boxed_slice();
+                *out = b.as_mut_ptr();
+                *out_len = b.len();
+                std::mem::forget(b);
+            }
             0
         }
-        None => -4,
+        None => -1, // Cursor 提取失败（例如不在文本节点内）
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mogan_loro_body_encode_cursor(
+    doc: *mut LoroDoc,
+    byte_offset: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    if doc.is_null() {
+        return -1;
+    }
+    let txt = body_text(&*doc);
+    let event_offset = match txt.convert_pos(byte_offset, PosType::Bytes, PosType::Event) {
+        Some(pos) => pos,
+        None => return -2,
+    };
+    let cursor = txt
+        .get_cursor(event_offset, Side::Middle)
+        .or_else(|| {
+            if event_offset > 0 {
+                txt.get_cursor(event_offset - 1, Side::Right)
+            } else {
+                None
+            }
+        });
+    match cursor {
+        Some(c) => {
+            let bytes = c.encode();
+            if !out.is_null() && !out_len.is_null() {
+                let mut b = bytes.into_boxed_slice();
+                *out = b.as_mut_ptr();
+                *out_len = b.len();
+                std::mem::forget(b);
+            }
+            0
+        }
+        None => -1,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mogan_loro_body_decode_cursor(
+    doc: *mut LoroDoc,
+    bytes: *const u8,
+    len: usize,
+    out_byte_offset: *mut usize,
+) -> i32 {
+    if doc.is_null() || bytes.is_null() || out_byte_offset.is_null() {
+        return -1;
+    }
+    let buf = std::slice::from_raw_parts(bytes, len);
+    let cursor = match Cursor::decode(buf) {
+        Ok(c) => c,
+        Err(_) => return -2,
+    };
+    match (*doc).get_cursor_pos(&cursor) {
+        Ok(pos) => {
+            let event_index = pos.current.pos as usize;
+            let txt = body_text(&*doc);
+            match txt.convert_pos(event_index, PosType::Event, PosType::Bytes) {
+                Some(byte_off) => {
+                    *out_byte_offset = byte_off;
+                    0
+                }
+                None => -4,
+            }
+        }
+        Err(_) => -3,
     }
 }
 
