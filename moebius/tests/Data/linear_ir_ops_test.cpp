@@ -271,6 +271,8 @@ TEST_CASE ("markup_edit: JOIN compound deletes CLOSE+OPEN(label)") {
 TEST_CASE (
     "markup_edit: INSERT_NODE wraps precisely (OPEN before + CLOSE after)") {
   ensure_labels ();
+  tree inner (CONCAT, 1);
+  inner[0]= tree ("hello");
   tree t (DOCUMENT, 1);
   t[0]            = tree ("hello");
   modification mod= mod_insert_node (path (0), 0, tree (CONCAT, 0));
@@ -289,6 +291,33 @@ TEST_CASE ("markup_edit: REMOVE_NODE unwraps precisely (delete OPEN + CLOSE)") {
   CHECK_EQ (markup_edit_roundtrip (t, mod), true);
   markup_edit ed= compute_markup_edit (tree_to_linear_ir (t), mod);
   CHECK_EQ (ed.ok && N (ed.ops) == 2, true); // 脱壳：两处删除
+}
+
+TEST_CASE ("markup_edit: compound INSERT (subtree child) is precise") {
+  ensure_labels ();
+  // (document "a" "b") —— 在 child 1 处插入子树 (concat "x")
+  tree t (DOCUMENT, 2);
+  t[0]= tree ("a");
+  t[1]= tree ("b");
+  tree sub (CONCAT, 1);
+  sub[0]          = tree ("x");
+  modification mod= mod_insert (path (), 1, sub);
+  CHECK_EQ (markup_edit_roundtrip (t, mod), true);
+  markup_edit ed= compute_markup_edit (tree_to_linear_ir (t), mod);
+  CHECK_EQ (ed.ok && N (ed.ops) == 1, true); // 单 splice，非 coarse 重 seed
+}
+
+TEST_CASE ("markup_edit: compound REMOVE (subtree children) is precise") {
+  ensure_labels ();
+  // (document "a" "b" "c") —— 删 child 0 起 2 个
+  tree t (DOCUMENT, 3);
+  t[0]            = tree ("a");
+  t[1]            = tree ("b");
+  t[2]            = tree ("c");
+  modification mod= mod_remove (path (), 0, 2);
+  CHECK_EQ (markup_edit_roundtrip (t, mod), true);
+  markup_edit ed= compute_markup_edit (tree_to_linear_ir (t), mod);
+  CHECK_EQ (ed.ok && N (ed.ops) == 1, true);
 }
 
 /******************************************************************************
