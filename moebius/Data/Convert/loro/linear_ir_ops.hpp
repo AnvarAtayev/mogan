@@ -56,8 +56,9 @@ int linear_ir_offset_of_atomic (array<linear_item> items, path atomic_path,
 path linear_ir_path_at_offset (array<linear_item> items, int byte_off);
 
 int  linear_ir_text_index_of_offset (const array<linear_item>& items,
-                                     int                       byte_off);
+                                     int byte_off, bool& prefer_start);
 path linear_ir_path_at_text_index (const array<linear_item>& items,
-                                   int                       target_text_idx);
+                                   int                       target_text_idx,
+                                   bool prefer_start= false);
 
 #endif // LINEAR_IR_OPS_H
