@@ -62,10 +62,7 @@
            (stree-str (object->string origin-stree))
           ) ;
       (debug-message "debug-io"
-        (string-append "diff-request: stree=["
-          (substring stree-str 0 (min 500 (string-length stree-str)))
-          "]\n"
-        ) ;string-append
+        (string-append "diff-request: stree=[" (herk->utf8 stree-str) "]\n")
       ) ;debug-message
       (diff-cloud-polish stree-str
         (lambda (suggested-str)
@@ -82,10 +79,7 @@
           (selection-active?)
         ) ;and
     (debug-message "debug-io"
-      (string-append "diff-predict: suggested=["
-        (substring suggested-str 0 (min 500 (string-length suggested-str)))
-        "]\n"
-      ) ;string-append
+      (string-append "diff-predict: suggested=[" (herk->utf8 suggested-str) "]\n")
     ) ;debug-message
     (let ((suggested-stree (catch #t (lambda () (string->object suggested-str)) (lambda args #f))
           ) ;suggested-stree
