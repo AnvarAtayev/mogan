@@ -216,9 +216,19 @@ resolve_cursor (mogan_tree_id tid, string off_field, tree buf,
     array<linear_item> loro_items=
         markup_to_linear_ir (loro_doc->body_markup ());
     path raw_p= linear_ir_path_at_offset_with_anchor (loro_items, off, anchor);
+    if (DEBUG_LORO)
+      debug_loro << "DIAG resolve_cursor: off=" << off << " anchor=" << anchor
+                 << " raw_p=" << raw_p << "\n";
 
     if (is_nil (raw_p)) return path ();
     if (anchor == 'T') {
+      if (is_nil (path_up (raw_p))) {
+        if (DEBUG_LORO)
+          debug_loro << "DIAG resolve_cursor: raw_p=" << raw_p
+                     << " too short for concat-flatten (off=" << off
+                     << " anchor=T)\n";
+        return path ();
+      }
       path node_path= path_up (raw_p);
       path pp       = path_up (node_path);
       if (!is_nil (pp) && has_subtree (buf, pp) &&
@@ -243,12 +253,16 @@ resolve_cursor (mogan_tree_id tid, string off_field, tree buf,
             }
           }
           if (concat_off >= 0) {
-            return pp * path (concat_off);
+            path res= pp * path (concat_off);
+            if (!is_nil (path_up (res)) && has_subtree (buf, path_up (res)))
+              return res;
           }
         }
       }
     }
-    return raw_p;
+    if (!is_nil (path_up (raw_p)) && has_subtree (buf, path_up (raw_p)))
+      return raw_p;
+    return path ();
   }
 
   path node_path=
@@ -268,10 +282,14 @@ resolve_cursor (mogan_tree_id tid, string off_field, tree buf,
       }
     }
     if (concat_off >= 0) {
-      return pp * path (concat_off);
+      path res= pp * path (concat_off);
+      if (!is_nil (path_up (res)) && has_subtree (buf, path_up (res)))
+        return res;
     }
   }
-  return node_path * path (off);
+  path res= node_path * path (off);
+  if (!is_nil (path_up (res)) && has_subtree (buf, path_up (res))) return res;
+  return path ();
 }
 
 stable_cursor_snapshot::stable_cursor_snapshot (edit_modify_rep* ed, path tp,
@@ -319,18 +337,30 @@ void
 stable_cursor_snapshot::restore (tree buf2, loro_shadow* loro_doc) {
   array<linear_item> items2= tree_to_linear_ir (buf2);
 
-  path nc= ed->position_get (cur_save);
-  // 用稳定光标进行更高优先级的恢复
-  if (cur_payload != "") {
+  // 恢复优先级：CRDT 稳定光标（Loro op-id 锚定）优先，tree_position
+  // 观察者兜底。 观察者以裸 tree_rep* 跟踪节点，在远端 remove+insert+assign
+  // 重构文档子树 （如段落回车拆分）时，rep 指针会漂移到兄弟节点，position_get
+  // 返回错误位置 （实测从段落3漂到段落2末尾）。而 resolve_cursor 经 Loro op-id
+  // 自动跟随并发 编辑位移，结构变更下仍能定位到正确节点。仅当 payload
+  // 缺失或为退化 I0 （cursor 未就绪，如 JOIN 刚完成）时才回退到观察者。
+  path          nc        = path ();
+  static string degenerate= format_group (mogan_tree_id{0, 0}, "I0");
+  bool          crdt_ok   = false;
+  if (cur_payload != "" && cur_payload != degenerate) {
     mogan_tree_id tid;
     string        off_field;
     if (parse_group (cur_payload, tid, off_field)) {
       path stable_cp= resolve_cursor (tid, off_field, buf2, *loro_doc, items2);
       if (!is_nil (stable_cp)) {
-        nc= rp * stable_cp;
+        nc     = rp * stable_cp;
+        crdt_ok= true;
         if (DEBUG_LORO) debug_loro << "resolved cursor path = " << nc << "\n";
       }
     }
+  }
+  if (!crdt_ok) {
+    path observed= ed->position_get (cur_save);
+    if (!is_nil (observed)) nc= observed;
   }
 
   ed->position_delete (cur_save);
@@ -338,10 +368,9 @@ stable_cursor_snapshot::restore (tree buf2, loro_shadow* loro_doc) {
   else ed->go_to_start (rp); // 游标所在节点被远端删除：回落 buffer 起始
 
   if (had_sel) {
-    path ns= ed->position_get (sel_start_save);
-    path ne= ed->position_get (sel_end_save);
-
-    if (sel_start_payload != "") {
+    // 选区起止同样 CRDT 优先、观察者兜底（理由同 caret 恢复）。
+    path ns= path (), ne= path ();
+    if (sel_start_payload != "" && sel_start_payload != degenerate) {
       mogan_tree_id tid;
       string        off_field;
       if (parse_group (sel_start_payload, tid, off_field)) {
@@ -354,7 +383,8 @@ stable_cursor_snapshot::restore (tree buf2, loro_shadow* loro_doc) {
         }
       }
     }
-    if (sel_end_payload != "") {
+    if (is_nil (ns)) ns= ed->position_get (sel_start_save);
+    if (sel_end_payload != "" && sel_end_payload != degenerate) {
       mogan_tree_id tid;
       string        off_field;
       if (parse_group (sel_end_payload, tid, off_field)) {
@@ -367,6 +397,7 @@ stable_cursor_snapshot::restore (tree buf2, loro_shadow* loro_doc) {
         }
       }
     }
+    if (is_nil (ne)) ne= ed->position_get (sel_end_save);
 
     ed->position_delete (sel_start_save);
     ed->position_delete (sel_end_save);
