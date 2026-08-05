@@ -1146,12 +1146,19 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
 
     if (!pdfViewerWidget) {
       pdfViewerWidget= new PDFReaderWidget (centralwidget ());
-      // 连接大纲提取 → dock 填充（仅连一次）
+      // 连接大纲提取 → dock 填充，dock 点击 → 阅读器跳页（仅连一次）
       if (pdfOutlineDock) {
         QObject::connect (
             pdfViewerWidget, &PDFReaderWidget::outlineLoaded, pdfOutlineDock,
             static_cast<void (OutlineWidget::*) (
                 const QVector<PdfOutlineItem>&)> (&OutlineWidget::setOutline));
+        PDFReaderWidget* viewer= pdfViewerWidget;
+        QObject::connect (pdfOutlineDock, &OutlineWidget::outlineActivated,
+                          viewer, [viewer] (const QString& target) {
+                            bool ok;
+                            int  page= target.toInt (&ok);
+                            if (ok && page >= 0) viewer->goToPage (page);
+                          });
       }
     }
     show_widget_in_layout (pdfViewerWidget, layout);

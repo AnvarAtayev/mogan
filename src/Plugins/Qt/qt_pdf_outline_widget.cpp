@@ -49,7 +49,9 @@ OutlineWidget::buildTree (const QVector<PdfOutlineItem>& items,
                                    ? new QTreeWidgetItem (tree_)
                                    : new QTreeWidgetItem (parent);
     treeItem->setText (0, item.title);
-    treeItem->setData (0, Qt::UserRole, QString::number (item.page));
+    // PdfOutlineItem::page 是 0-based（fz_resolve_link），goToPage 需要 1-based
+    int pageOneBased= (item.page >= 0) ? item.page + 1 : -1;
+    treeItem->setData (0, Qt::UserRole, QString::number (pageOneBased));
     if (!item.title.isEmpty ()) {
       treeItem->setToolTip (0, item.title);
     }
