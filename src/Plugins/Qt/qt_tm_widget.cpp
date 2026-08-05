@@ -45,6 +45,7 @@
 #include "dictionary.hpp"
 #include "qt_chat_controller.hpp"
 #include "qt_gui.hpp"
+#include "qt_pdf_outline_widget.hpp" // OutlineWidget 定义在此
 #include "qt_pdf_reader_widget.hpp"
 #include "qt_pdf_toolbar.hpp"
 #include "qt_picture.hpp"
@@ -232,9 +233,9 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
       startupTabMode (false), startupChromePending_ (false),
       pdfViewerWidget (nullptr), pdfTabMode (false), currentPdfPath (""),
       lastLoadedPdfPath (""), chatContentWidget (nullptr), chatTabMode (false),
-      chatSideDock (nullptr), chatSidebarToggleBtn (nullptr),
-      chatSidebarMode (false), chatSidebarModeMemory_ (false),
-      centralWidgetUpdatesFrozen_ (false) {
+      chatSideDock (nullptr), pdfOutlineDock (nullptr),
+      chatSidebarToggleBtn (nullptr), chatSidebarMode (false),
+      chatSidebarModeMemory_ (false), centralWidgetUpdatesFrozen_ (false) {
   type= texmacs_widget;
 
   main_widget= concrete (::glue_widget (true, true, 1, 1));
@@ -877,6 +878,15 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
     chatSideDock->setMinimumSize (DpiUtils::scaled (320), 0);
     chatSideDock->setVisible (false);
     mw->addDockWidget (Qt::RightDockWidgetArea, chatSideDock);
+  }
+
+  // PDF 目录（大纲）侧边栏 Dock（PDF 模式显示书签，编辑器模式显示章节结构）
+  {
+    pdfOutlineDock= new OutlineWidget ("目录", mw);
+    pdfOutlineDock->setObjectName ("pdfOutlineDock");
+    pdfOutlineDock->setFloating (false);
+    pdfOutlineDock->setVisible (false);
+    mw->addDockWidget (Qt::LeftDockWidgetArea, pdfOutlineDock);
 
     // 文档区域右上角浮动新建对话按钮
     chatSidebarToggleBtn= new QPushButton (cw);
@@ -1136,6 +1146,13 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
 
     if (!pdfViewerWidget) {
       pdfViewerWidget= new PDFReaderWidget (centralwidget ());
+      // 连接大纲提取 → dock 填充（仅连一次）
+      if (pdfOutlineDock) {
+        QObject::connect (
+            pdfViewerWidget, &PDFReaderWidget::outlineLoaded, pdfOutlineDock,
+            static_cast<void (OutlineWidget::*) (
+                const QVector<PdfOutlineItem>&)> (&OutlineWidget::setOutline));
+      }
     }
     show_widget_in_layout (pdfViewerWidget, layout);
     pdfViewerWidget->setFocus (Qt::OtherFocusReason);
@@ -1156,9 +1173,16 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
 
     // Disconnect toolbar when leaving PDF mode
     pdfToolBar->disconnectFrom ();
+    // 离开 PDF/编辑器模式时隐藏目录 dock
+    if (pdfOutlineDock) pdfOutlineDock->setVisible (false);
 
     if (!chatTabMode) {
       show_widget_in_layout (editorWidget, layout);
+
+      // 编辑器模式：加载文档大纲到 outline dock
+      if (pdfOutlineDock) {
+        pdfOutlineDock->loadDocumentOutline ();
+      }
 
       update_visibility ();
       flush_startup_deferred_chrome ();
@@ -1417,6 +1441,8 @@ qt_tm_widget_rep::update_visibility () {
   bool old_statusVisibility    = mainwindow ()->statusBar ()->isVisible ();
   bool old_titleVisibility     = windowAgent->titleBar ()->isVisible ();
   bool old_pdfToolBarVisibility= pdfToolBar->isVisible ();
+  bool old_pdfOutlineVisibility=
+      pdfOutlineDock ? pdfOutlineDock->isVisible () : false;
 
   bool new_mainVisibility      = visibility[1] && visibility[0];
   bool new_menuVisibility      = visibility[0];
@@ -1432,6 +1458,11 @@ qt_tm_widget_rep::update_visibility () {
   bool new_auxVisibility       = visibility[11];
   bool new_titleVisibility     = visibility[0];
   bool new_pdfToolBarVisibility= false;
+  bool new_pdfOutlineVisibility= false;
+  // 编辑器模式：根据文档大纲内容决定是否显示 dock
+  if (!startupTabMode && !pdfTabMode && !chatTabMode && pdfOutlineDock) {
+    new_pdfOutlineVisibility= pdfOutlineDock->hasContent ();
+  }
 
   if (startupTabMode) {
     new_mainVisibility  = false;
@@ -1480,6 +1511,7 @@ qt_tm_widget_rep::update_visibility () {
     new_tabVisibility       = true;
     new_titleVisibility     = true;
     new_pdfToolBarVisibility= true;
+    new_pdfOutlineVisibility= (pdfOutlineDock && pdfOutlineDock->hasContent ());
   }
   if (XOR (old_mainVisibility, new_mainVisibility)) {
     mainToolBar->setVisible (new_mainVisibility);
@@ -1515,6 +1547,10 @@ qt_tm_widget_rep::update_visibility () {
   }
   if (XOR (old_pdfToolBarVisibility, new_pdfToolBarVisibility)) {
     pdfToolBar->setVisible (new_pdfToolBarVisibility);
+  }
+  if (pdfOutlineDock &&
+      XOR (old_pdfOutlineVisibility, new_pdfOutlineVisibility)) {
+    pdfOutlineDock->setVisible (new_pdfOutlineVisibility);
   }
 
   // AI 聊天侧边栏浮动按钮可见性
