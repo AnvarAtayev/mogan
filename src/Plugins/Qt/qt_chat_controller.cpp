@@ -59,17 +59,19 @@ ChatController::createView (QWidget* parent, qt_tm_widget_rep* tm) {
   // llm 插件按 idle 延迟初始化，新建 Chat 标签页时其 scheme 模块可能尚未加载
   bool benching= QTChatTabWidget::isInitBenchPending ();
   if (benching) bench_start ("chat_init: load chat modules");
-  eval ("(use-modules (llm chat-loader))");
+  if (benching) bench_start ("chat_init: load/use-modules");
+  eval ("(use-modules (llm chat-list))");
+  if (benching) bench_end ("chat_init: load/use-modules");
+  if (benching) bench_start ("chat_init: load/persist-load-all");
   call ("chat-persist-load-all");
+  if (benching) bench_end ("chat_init: load/persist-load-all");
   if (benching) bench_end ("chat_init: load chat modules");
   cout << "[chat-persist] ChatController: restored "
        << sessionManager_.sessionCount () << " session metadatas" << LF;
 
   // 2. 构建显示数据 + 确定初始激活会话
-  if (benching) bench_start ("chat_init: buildDisplayInfos");
   QList<SessionDisplayInfo> infos= buildDisplayInfos ();
-  if (benching) bench_end ("chat_init: buildDisplayInfos");
-  string initialId;
+  string                    initialId;
   if (firstOpen_) {
     // 首次打开：切换到新会话（触发 ensureNewConversation）
     initialId = "";
@@ -612,6 +614,7 @@ ChatController::ensureNewConversation () {
   sessionManager_.setPanel (sid, panel);
   sessionManager_.setModel (sid, currentModel_);
 
+  eval ("(use-modules (llm chat-style))");
   call ("chat-tab-sync-dark-style!", sid);
   call ("chat-tab-load-input-styles!", sid);
 
@@ -644,6 +647,7 @@ ChatController::getOrCreatePanel (const string& sessionId) {
 
   sessionManager_.setPanel (sessionId, panel);
 
+  eval ("(use-modules (llm chat-style) (llm chat-protocol))");
   call ("chat-tab-sync-dark-style!", sessionId);
   call ("chat-tab-init-session!", sessionId, s->model);
 
