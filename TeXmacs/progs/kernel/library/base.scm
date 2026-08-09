@@ -106,11 +106,11 @@
   (list->string (reverse cs))
 ) ;provide-public
 
-;; C 实现见 goldfish src/liii_string.cpp 的 g_string-join；
-;; 注意 g_string-join 缺省分隔符是 ""，kernel 契约是 " "，需显式传入
-(provide-public (string-join ss . opt)
-  "Concatenate elements of @ss inserting separators."
-  (if (null? opt) (g_string-join ss " ") (g_string-join ss (car opt)))
+;; C 实现见 goldfish src/liii_string.cpp 的 g_string-join，此处直接转调；
+;; 分隔符必传（progs 内调用点均已显式传入）
+(provide-public (string-join ss sep)
+  "Concatenate elements of @ss inserting @sep."
+  (g_string-join ss sep)
 ) ;provide-public
 
 (provide-public (string-drop-right s n)
@@ -227,15 +227,6 @@
   ) ;with
 ) ;define-public
 
-(define-public (string-recompose l sep)
-  "Turn list @l of strings into one string using @sep as separator."
-  (if (char? sep) (set! sep (list->string (list sep))))
-  (cond ((null? l) "")
-        ((null? (cdr l)) (car l))
-        (else (string-append (car l) sep (string-recompose (cdr l) sep)))
-  ) ;cond
-) ;define-public
-
 (define-public (string-tokenize-comma s)
   "Cut string @s into pieces using comma as a separator and remove whitespace."
   (map tm-string-trim-both (string-tokenize-by-char s #\,))
@@ -243,7 +234,7 @@
 
 (define-public (string-recompose-comma l)
   "Turn list @l of strings into comma separated string."
-  (string-recompose l ", ")
+  (string-join l ", ")
 ) ;define-public
 
 (define (property-pair->string p)
@@ -264,7 +255,7 @@
 
 (define-public (alist->string l)
   "Pretty print the association list @l as a string."
-  (string-recompose (map property-pair->string l) "/")
+  (string-join (map property-pair->string l) "/")
 ) ;define-public
 
 (define-public (raw-quote s) (string-append (string-append "\"" s "\"")))
