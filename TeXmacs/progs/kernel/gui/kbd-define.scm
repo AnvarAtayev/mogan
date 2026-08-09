@@ -16,13 +16,8 @@
 (import (liii hash-table))
 (import (liii queue))
 
-(define (kbd-on-linux?)
-  ;; lolly glue 只有 os-win32?/os-mingw?/os-macos?/os-wasm?,反向推断
-  (not (or (os-win32?) (os-mingw?) (os-macos?) (os-wasm?)))
-) ;define
-
 ;; (liii logging) 仅 Linux 加载，节省其他平台的加载时间
-(when (kbd-on-linux?)
+(when (os-linux?)
   (import (liii logging))
 ) ;when
 
@@ -162,7 +157,7 @@
 (define kbd-pump-log-inited? #f)
 
 (define (kbd-pump-log msg)
-  (when (kbd-on-linux?)
+  (when (os-linux?)
     (when (not kbd-pump-log-inited?)
       (log-set-file-handler! "/tmp/kbd-pump.log")
       (set! kbd-pump-log-inited? #t)

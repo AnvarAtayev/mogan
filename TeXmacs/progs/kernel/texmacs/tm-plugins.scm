@@ -15,7 +15,7 @@
   (:use (kernel texmacs tm-define) (kernel texmacs tm-modes))
 ) ;texmacs-module
 
-(import (liii os) (liii vector))
+(import (liii vector))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lazy exports from other modules
@@ -575,7 +575,7 @@
 ) ;define
 
 (define-public (plugin-add-windows-path rad rel after?)
-  (when (or (os-win32?) (os-mingw?))
+  (when (or (os-windows?) (os-mingw?))
     (add-windows-program-path (url-append rad rel) after?)
   ) ;when
 ) ;define-public
@@ -645,7 +645,7 @@
          (connection-insert-handler name (second cmd) (symbol->string (third cmd)))
         ) ;
         ((func? cmd :winpath 2)
-         (when (or (os-win32?) (os-mingw?))
+         (when (or (os-windows?) (os-mingw?))
            (add-windows-program-path (url-append (second cmd) (third cmd)) #t)
          ) ;when
         ) ;
