@@ -15,6 +15,8 @@
   (:use (kernel texmacs tm-define) (kernel texmacs tm-modes))
 ) ;texmacs-module
 
+(import (liii os) (liii vector))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lazy exports from other modules
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -381,6 +383,44 @@
   (remote-initialize-data)
   (ahash-ref remote-scripts-table name)
 ) ;define
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Plugin list
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (plugin-read-dir path)
+  ;; listdir 对不存在的目录抛错（如 TEXMACS_HOME_PATH/plugins 缺失），先判存在性
+  (let ((u (string->url path)))
+    (if (url-exists? u) (listdir (url->system u)) #())
+  ) ;let
+) ;define
+
+(define-public (plugin-list)
+  ;; 返回已安装插件名（symbol）列表：读两个 plugins 目录 -> 合并排序 ->
+  ;; 滤 "." ".." -> 去连续重复。listdir 返回 vector，直接 sort! 不转 list
+  (let* ((v (vector-append (plugin-read-dir "$TEXMACS_PATH/plugins")
+              (plugin-read-dir "$TEXMACS_HOME_PATH/plugins")
+            ) ;vector-append
+         ) ;v
+         (sorted (sort! v string<?))
+         (entries (vector-filter (lambda (s) (not (member s '("." "..")))) sorted))
+         (n (vector-length entries))
+        ) ;
+    (let loop
+      ((i 0) (prev #f) (acc '()))
+      ;; acc 是本函数新建的临时列表，可用破坏性 reverse!
+      (if (= i n)
+        (reverse! acc)
+        (let ((s (vector-ref entries i)))
+          (if (and prev (== s prev))
+            (loop (+ i 1) prev acc)
+            (loop (+ i 1) s (cons (string->symbol s) acc))
+          ) ;if
+        ) ;let
+      ) ;if
+    ) ;let
+  ) ;let*
+) ;define-public
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Cache plugin reinit
