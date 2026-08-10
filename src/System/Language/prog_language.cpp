@@ -34,7 +34,7 @@ prog_language_rep::prog_language_rep (string name)
   string_start_disallow_after_chars     = array<char> ();
   string_skip_escaped                   = false;
 
-  string use_modules= "(use-modules (code " * name * "-lang))";
+  string use_modules= "(use-modules (" * name * " " * name * "-lang))";
   eval (use_modules);
 
   tree keyword_config= get_parser_config (name, "keyword");
@@ -493,14 +493,10 @@ prog_language_rep::get_color (tree t, int start, int end) {
 bool
 prog_lang_exists (string s) {
   return exists (url_system ("$TEXMACS_PATH/progs/prog/" * s * "-lang.scm")) ||
-         exists (url_system ("$TEXMACS_PATH/plugins/" * s * "/progs/code/" * s *
-                             "-lang.scm")) ||
-         exists (url_system ("$TEXMACS_PATH/plugins/code/progs/code/" * s *
-                             "-lang.scm")) ||
-         exists (url_system ("$TEXMACS_HOME_PATH/plugins/" * s *
-                             "/progs/code/" * s * "-lang.scm")) ||
-         exists (url_system ("$TEXMACS_HOME_PATH/plugins/code/progs/code/" * s *
-                             "-lang.scm"));
+         exists (url_system ("$TEXMACS_PATH/plugins/" * s * "/progs/" * s *
+                             "/" * s * "-lang.scm")) ||
+         exists (url_system ("$TEXMACS_HOME_PATH/plugins/" * s * "/progs/" * s *
+                             "/" * s * "-lang.scm"));
 }
 
 /******************************************************************************
