@@ -134,6 +134,15 @@ collab_session::become_ready () {
   g_loro_broadcast_update= broadcast_to_server;
   g_loro_cursor_flush    = flush_current_cursor;
 
+  // CREATE 模式：把占位 URL 换成服务端分配的 doc_id URL。先更新 session 的
+  // buffer_url，保证改名后 poll/get_editor/find_by_buffer 用新 URL 匹配
+  // （否则 poll 会误判 buffer 已关闭而断开会话）。join 模式建 buffer 时已是
+  // 最终 URL，old==new 跳过；重连同理。
+  if (want_create () && N (doc_id) > 0) {
+    url old_url= buffer_url;
+    url new_url= url ("tmfs://collab/" * doc_id);
+  }
+
   editor ed= get_editor ();
   if (is_nil (ed)) {
     std_error << "become_ready: 当前编辑器为空！\n";
@@ -433,12 +442,6 @@ collab_session_manager::get_or_create (url buf_url) {
     session= new collab_session (buf_url);
     sessions << session;
   }
-  // 无论新建还是复用会话都置位：复用（如 no_name_<n> 的 url 被新一轮
-  // create/join 命中残留会话）时构造函数不跑，而 buffer 可能是新的
-  // tm_buffer_rep（cloud 默认 false），故必须在每次挂接时显式标记，否则
-  // editor::need_save 会把云文档当脏文档。
-  tm_buffer tmb= concrete_buffer (buf_url);
-  if (!is_nil (tmb)) tmb->cloud= true;
   return session;
 }
 

@@ -243,8 +243,17 @@ propose_title (string old_title, url u, tree doc) {
   }
   if ((name == "") || (name == ".")) name= as_string (tail (u * url_parent ()));
   if ((name == "") || (name == ".")) name= as_string (u);
-  if (is_rooted_tmfs (u))
-    name= as_string (call ("tmfs-title", as_string (u), object (doc)));
+  if (is_rooted_tmfs (u)) {
+    // tmfs buffer 的标题由业务层显式设定后（如协作 become_ready 设 doc_name）应
+    // 保留，避免 tmfs-title 默认返回完整 URL（tmfs://collab/<doc_id>）覆盖。
+    // 仅当 old_title 为空 / 默认 (No name) / 已是 tmfs URL 时才重算
+    // tmfs-title。
+    bool keep_old= (N (old_title) > 0) && !starts (old_title, "tmfs://") &&
+                   !starts (old_title, "No name");
+    name= keep_old
+              ? old_title
+              : as_string (call ("tmfs-title", as_string (u), object (doc)));
+  }
 
   int i, j;
   for (j= 1; true; j++) {
