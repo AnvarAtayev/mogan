@@ -217,6 +217,29 @@
     counts
   ) ;let
 ) ;define
+
+(define (collab-real-doc-id? doc-id)
+  (and (string? doc-id)
+    (> (string-length doc-id) 0)
+    (not (collab-string-prefix? "pending-" doc-id))
+  ) ;and
+) ;define
+(tm-define (collab-record-recent doc-id name)
+  (when (collab-real-doc-id? doc-id)
+    (recent-files-learn (url->system (collab-buffer-url->tmfs doc-id)) name)
+    (recent-files-save)
+  ) ;when
+) ;tm-define
+
+(define (collab-schedule-record-on-create)
+  (delayed (:pause 1500)
+    (let ((doc-id (loro-collab-doc-id)))
+      (when (collab-real-doc-id? doc-id)
+        (collab-record-recent doc-id (loro-collab-doc-name))
+      ) ;when
+    ) ;let
+  ) ;delayed
+) ;define
 (tm-define (collab-new-document)
   (:interactive #t)
   (interactive (lambda (name) (collab-new-document-named name)) "Document name")
@@ -244,6 +267,7 @@
                     (collab-buffer-url->tmfs (collab-placeholder-doc-id))
                   ) ;buffer-rename
                   (loro-collab-create (collab-server-url) uname)
+                  (collab-schedule-record-on-create)
                   (set-message (string-append "Creating collaborative document (Server "
                                  (collab-server-url)
                                  ")"
@@ -305,6 +329,7 @@
               (collab-buffer-url->tmfs (collab-placeholder-doc-id))
             ) ;buffer-rename
             (loro-collab-create (collab-server-url) uname)
+            (collab-schedule-record-on-create)
             (set-message (string-append "Uploading file as collaborative document (Server "
                            (collab-server-url)
                            ")"
@@ -345,6 +370,9 @@
           ) ;set-message
         ) ;with-default-view
       ) ;if
+      ;; 记录到最近文档（join 的 doc_id 同步可用，覆盖 switch 与 open 两分支）。
+      ;; 记录到统一最近列表（join 的 doc_id 同步可用，覆盖 switch 与 open 两分支）。
+      (collab-record-recent doc-id name)
     ) ;when
   ) ;let
 ) ;tm-define

@@ -2,9 +2,10 @@
 ;;
 ;; MODULE      : tm-collab-test.scm
 ;; DESCRIPTION : 纯逻辑单元测试：协作文档显示名的校验（collab-valid-doc-name?）、
-;;               /docs 交替列表解构（collab-docs-pairs）与菜单标签
-;;               （collab-doc-label）。规则与服务端 tools/loro-server/validate.js
-;;               保持一致。不弹任何 GUI，headless 可跑。
+;;               /docs 交替列表解构（collab-docs-pairs）、菜单标签
+;;               （collab-doc-label）、URL↔doc_id 互逆（collab-url->doc-id）与
+;;               真实 doc_id 判定（collab-real-doc-id?）。规则与服务端
+;;               tools/loro-server/validate.js 保持一致。不弹任何 GUI，headless 可跑。
 ;; COPYRIGHT   : (C) 2026  Jim Zhou
 ;;
 ;; USAGE
@@ -171,6 +172,17 @@
   (check (string=? (collab-placeholder-doc-id) (collab-placeholder-doc-id)) => #f)
 ) ;define
 
+;; collab-real-doc-id?：真实 UUID/短串为 #t；pending- 占位、空串、非串为 #f。
+;; CREATE 占位 id 形如 pending-<ts>-<n>，记录前需剔除。
+
+(define (test-real-doc-id?)
+  (check (collab-real-doc-id? "550e8400-e29b-41d4-a716-446655440000") => #t)
+  (check (collab-real-doc-id? "abc123") => #t)
+  (check (collab-real-doc-id? "pending-1234567890-1") => #f)
+  (check (collab-real-doc-id? "") => #f)
+  (check (collab-real-doc-id? #f) => #f)
+) ;define
+
 (tm-define (regtest-tm-collab)
   (test-valid-names)
   (test-invalid-names)
@@ -181,5 +193,6 @@
   (test-fields->url)
   (test-url->fields)
   (test-collab-url)
+  (test-real-doc-id?)
   (check-report)
 ) ;tm-define
