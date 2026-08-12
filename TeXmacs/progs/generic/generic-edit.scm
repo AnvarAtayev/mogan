@@ -16,9 +16,8 @@
     (utils library cursor)
     (utils edit variants)
     (utils misc tooltip)
-    (bibtex bib-complete)
+    (latex bibtex-bib-complete)
     (source macro-search)
-    (telemetry telemetry-track)
   ) ;:use
 ) ;texmacs-module
 
@@ -1217,7 +1216,7 @@
 (tm-define (kbd-cut) (clipboard-cut "primary"))
 (tm-define (kbd-paste)
   (clipboard-paste "primary")
-  (when (chat-input-buffer? (current-buffer-url))
+  (when (and (defined? 'chat-input-buffer?) (chat-input-buffer? (current-buffer-url)))
     (qt-chat-notify-input-height)
   ) ;when
   (when (defined? 'tutorial-notify-action)
@@ -1232,14 +1231,28 @@
 ;;
 ;; 语法
 ;; ----
-;; (ocr-paste)
-(tm-define (ocr-paste)
+;; (ocr-paste source-format)
+
+(define (clipboard-tree-image? data)
+  (or (tree-is? data 'image)
+    (and (tree? data) (tree-compound? data) (tree-is? (tree-ref data 0) 'image))
+    (and (tree-is? data 'with) (tree-is? (tree-ref data 2) 'image))
+  ) ;or
+) ;define
+
+;; 0-arg wrapper: keep backward compatibility with callers that call (ocr-paste)
+(tm-define (ocr-paste) (ocr-paste "image"))
+
+(tm-define (ocr-paste source-format)
   (when (not (defined? 'ocr-to-latex-by-cursor))
-    (use-modules (liii ocr))
+    (use-modules (ocr liii-ocr))
   ) ;when
   (with data
-    (parse-texmacs-snippet (tree->string (tree-ref (clipboard-get "primary") 1)))
-    (when (tree-is? (tree-ref data 0) 'image)
+    (if (string=? source-format "texmacs-snippet")
+      (tree-ref (clipboard-get "primary") 0)
+      (parse-texmacs-snippet (tree->string (tree-ref (clipboard-get "primary") 0)))
+    ) ;if
+    (when (clipboard-tree-image? data)
       (ocr-to-latex-by-cursor data)
     ) ;when
   ) ;with
@@ -1253,12 +1266,12 @@
 ;; (image-and-ocr-paste)
 (tm-define (image-and-ocr-paste)
   (with data
-    (parse-texmacs-snippet (tree->string (tree-ref (clipboard-get "primary") 1)))
+    (parse-texmacs-snippet (tree->string (tree-ref (clipboard-get "primary") 0)))
     (when (tree-is? (tree-ref data 0) 'image)
       (kbd-paste)
       (kbd-return)
       (when (not (defined? 'ocr-to-latex-by-cursor))
-        (use-modules (liii ocr))
+        (use-modules (ocr liii-ocr))
       ) ;when
       (ocr-to-latex-by-cursor data)
     ) ;when
@@ -1286,8 +1299,7 @@
     (begin
       (clipboard-paste-import "verbatim" "primary")
       (kbd-return)
-      (let* ((latex-code (string-load (unix->url "$TEXMACS_PATH/plugins/account/data/md.tex"))
-             ) ;latex-code
+      (let* ((latex-code (string-load (unix->url "$TEXMACS_PATH/plugins/ocr/data/md.tex")))
              (parsed-latex (parse-latex latex-code))
              (texmacs-latex (latex->texmacs parsed-latex))
             ) ;
@@ -1306,17 +1318,13 @@
 
 (tm-define (paste-as-texmacs)
   (when (not (defined? 'ocr-to-latex-by-cursor))
-    (use-modules (liii ocr))
+    (use-modules (ocr liii-ocr))
   ) ;when
   (with img-tree
-    (tree-ref (clipboard-get "primary") 1)
+    (tree-ref (clipboard-get "primary") 0)
     (cond ((tree-is? img-tree 'image) (ocr-to-latex-by-cursor img-tree))
-          ((and (tree-is? img-tree 'with) (not (null? (tree-ref img-tree 2))))
-           (let* ((sub-img-tree (tree-ref img-tree 2)))
-             (when (tree-is? sub-img-tree 'image)
-               (ocr-to-latex-by-cursor img-tree)
-             ) ;when
-           ) ;let*
+          ((and (tree-is? img-tree 'with) (tree-is? (tree-ref img-tree 2) 'image))
+           (ocr-to-latex-by-cursor img-tree)
           ) ;
     ) ;cond
   ) ;with
@@ -1364,14 +1372,16 @@
 ;; 那么应该粘贴为LaTeX格式
 (tm-define (check-magic-paste)
   (when (not (defined? 'account-load-token))
-    (use-modules (liii account))
+    (use-modules (account liii))
   ) ;when
   (let* ((token (account-load-token))
          (base-url (current-stem-site))
          (check-url (string-append base-url "/api/v1/oauth2/magicPaste/check"))
-         (headers (list (cons "Authorization" (string-append "Bearer " token))
-                    (cons "Content-Type" "application/json")
-                  ) ;list
+         (headers (stem-preview-request-headers check-url
+                    (list (cons "Authorization" (string-append "Bearer " token))
+                      (cons "Content-Type" "application/json")
+                    ) ;list
+                  ) ;stem-preview-request-headers
          ) ;headers
         ) ;
     (if (string=? token "")
@@ -1433,32 +1443,63 @@
 ) ;tm-define
 
 (tm-define (kbd-magic-paste)
-  (if (string-starts? (qt-clipboard-format) "image")
-    (begin
-      (ocr-paste)
-      (track-event "OCR_RECOGNIZE" '(("mode" . "paste")))
-    ) ;begin
-    (with-magic-paste-check (lambda ()
-                              (with mode
-                                (get-env "mode")
-                                (cond ((== mode "prog")
-                                       (clipboard-paste-import "code" "primary")
-                                       (track-event "MAGIC_PASTE" '(("mode"
-                                                                     . "prog")))
-                                      ) ;
-                                      ((== mode "math")
-                                       (clipboard-paste-import "latex" "primary")
-                                       (track-event "MAGIC_PASTE" '(("mode"
-                                                                     . "math")))
-                                      ) ;
-                                      (else (smart-format-paste) (track-event "MAGIC_PASTE" '(("mode"
-                                                                                               . "text"))))
-                                ) ;cond
-                              ) ;with
-                            ) ;lambda
-    ) ;with-magic-paste-check
-  ) ;if
-  (when (chat-input-buffer? (current-buffer-url))
+  (let ((source-format (qt-clipboard-format)))
+    (cond ((string-starts? source-format "image")
+           (ocr-paste "image")
+           (when (defined? 'track-event)
+             (track-event "OCR_RECOGNIZE" '(("mode" . "paste")))
+           ) ;when
+          ) ;
+          ((string=? source-format "texmacs-snippet")
+           (with data
+             (tree-ref (clipboard-get "primary") 0)
+             (if (clipboard-tree-image? data)
+               (begin
+                 (ocr-paste "texmacs-snippet")
+                 (when (defined? 'track-event)
+                   (track-event "OCR_RECOGNIZE" '(("mode" . "paste")))
+                 ) ;when
+               ) ;begin
+               (begin
+                 (kbd-paste)
+                 (when (defined? 'track-event)
+                   (track-event "MAGIC_PASTE" '(("mode" . "internal")))
+                 ) ;when
+               ) ;begin
+             ) ;if
+           ) ;with
+          ) ;
+          (else (with-magic-paste-check (lambda ()
+                                          (with mode
+                                            (get-env "mode")
+                                            (cond ((== mode "prog")
+                                                   (clipboard-paste-import "code" "primary")
+                                                   (when (defined? 'track-event)
+                                                     (track-event "MAGIC_PASTE" '(("mode"
+                                                                                   . "prog")))
+                                                   ) ;when
+                                                  ) ;
+                                                  ((== mode "math")
+                                                   (clipboard-paste-import "latex" "primary")
+                                                   (when (defined? 'track-event)
+                                                     (track-event "MAGIC_PASTE" '(("mode"
+                                                                                   . "math")))
+                                                   ) ;when
+                                                  ) ;
+                                                  (else (smart-format-paste)
+                                                    (when (defined? 'track-event)
+                                                      (track-event "MAGIC_PASTE" '(("mode"
+                                                                                    . "text")))
+                                                    ) ;when
+                                                  ) ;else
+                                            ) ;cond
+                                          ) ;with
+                                        ) ;lambda
+                ) ;with-magic-paste-check
+          ) ;else
+    ) ;cond
+  ) ;let
+  (when (and (defined? 'chat-input-buffer?) (chat-input-buffer? (current-buffer-url)))
     (qt-chat-notify-input-height)
   ) ;when
   (when (defined? 'tutorial-notify-action)
@@ -2332,6 +2373,8 @@
          (tuple "cartesian" (point "0" "0") "1")
          (graphics))
       (insert-go-to `(draw-over ,"" ,g ,"2cm") '(1 2 1))
+      ;; 默认缩放 200%
+      (graphics-zoom 2.0)
     ) ;with
   ) ;if
 ) ;tm-define

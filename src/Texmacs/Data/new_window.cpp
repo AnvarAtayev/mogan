@@ -178,6 +178,15 @@ get_current_window () {
   return abstract_window (win);
 }
 
+url
+get_current_window_safe () {
+  // Like get_current_view_safe: return url_none instead of asserting when
+  // there is no current window (e.g. headless rendering of a passive view).
+  tm_view vw= concrete_view (get_current_view_safe ());
+  if (vw == NULL || vw->win == NULL) return url_none ();
+  return abstract_window (vw->win);
+}
+
 array<url>
 buffer_to_windows (url name) {
   array<url> r, vs= buffer_to_views (name);
@@ -312,7 +321,7 @@ ensure_window (tree geom) {
     url win = new_buffer_in_new_window (name, tree (DOCUMENT), geom);
 #endif
 
-#if defined(QTTEXMACS) && defined(IS_COMMUNITY)
+#if defined(QTTEXMACS) && !defined(IS_COMMUNITY)
     // 商业版默认创建 AI 聊天标签页，固定在第二个位置
     url chat_name= "tmfs://chat-tab";
     if (is_nil (concrete_buffer (chat_name))) {

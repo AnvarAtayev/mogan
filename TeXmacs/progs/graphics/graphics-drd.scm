@@ -31,6 +31,8 @@
   arc
   std-arc
   std-arc-counterclockwise
+  hyperbola
+  parabola
 ) ;define-group
 
 (define-group graphical-closed-curve-tag
@@ -219,7 +221,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (tm-define (graphics-common-attributes)
-  '("gid" "anim-id" "proviso" "magnify" "color" "opacity")
+  '("gid" "anim-id" "proviso" "color" "opacity")
 ) ;tm-define
 
 (tm-define (graphics-all-attributes)

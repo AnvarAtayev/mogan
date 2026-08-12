@@ -33,6 +33,14 @@ function main()
                 }
             },
             {
+                scm_name = "md5-binary",
+                cpp_name = "md5_binary",
+                ret_type = "string",
+                arg_list = {
+                    "string"
+                }
+            },
+            {
                 scm_name = "version-before?",
                 cpp_name = "version_inf",
                 ret_type = "bool",
@@ -141,11 +149,6 @@ function main()
                 scm_name = "scheme-dialect",
                 cpp_name = "scheme_dialect",
                 ret_type = "string"
-            },
-            {
-                scm_name = "plugin-list",
-                cpp_name = "plugin_list",
-                ret_type = "scheme_tree"
             },
             {
                 scm_name = "set-fast-environments",
@@ -260,6 +263,15 @@ function main()
             {
                 scm_name = "cpp-set-preference",
                 cpp_name = "set_user_preference",
+                ret_type = "void",
+                arg_list = {
+                    "string",
+                    "string"
+                }
+            },
+            {
+                scm_name = "cpp-set-preference-silent",
+                cpp_name = "set_user_preference_silent",
                 ret_type = "void",
                 arg_list = {
                     "string",
@@ -1416,6 +1428,25 @@ function main()
                 }
             },
             {
+                scm_name = "render-doc-to-png",
+                cpp_name = "buffer_render_to_images",
+                ret_type = "bool",
+                arg_list = {
+                    "url",   -- buffer url
+                    "url",   -- destination png (multi-page: out-1.png, out-2.png, ...)
+                    "double" -- zoom factor
+                }
+            },
+            {
+                scm_name = "render-doc-to-pdf",
+                cpp_name = "buffer_render_to_pdf",
+                ret_type = "bool",
+                arg_list = {
+                    "url",   -- buffer url
+                    "url"    -- destination pdf
+                }
+            },
+            {
                 scm_name = "buffer-save",
                 cpp_name = "buffer_save",
                 ret_type = "bool",
@@ -1688,6 +1719,11 @@ function main()
             {
                 scm_name = "current-window",
                 cpp_name = "get_current_window",
+                ret_type = "url"
+            },
+            {
+                scm_name = "current-window-url",
+                cpp_name = "get_current_window_safe",
                 ret_type = "url"
             },
             {

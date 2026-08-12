@@ -7,6 +7,8 @@
 #include "s7_liii_list.h"
 #include "s7_internal_helpers.h"
 
+#include <stddef.h>
+
 s7_pointer g_is_null(s7_scheme *sc, s7_pointer args)
 {
   s7_pointer p = s7_car(args);
@@ -497,6 +499,312 @@ s7_pointer g_list_tail(s7_scheme *sc, s7_pointer args)
 s7_pointer g_cons(s7_scheme *sc, s7_pointer args)
 {
   return(s7_cons(sc, s7_car(args), s7_cadr(args)));
+}
+
+/* -------------------------------- filter -------------------------------- */
+
+s7_pointer g_filter(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_cadr(args);
+  if (!s7_is_pair(lst))
+    {
+      if (s7_is_null(sc, lst)) return(s7_nil(sc));
+      return(s7_wrong_type_arg_error(sc, "filter", 2, lst, "a proper list"));
+    }
+  /* args may live in evaluator-recycled cells, so keep pred and lst in our own pairs.
+   *   anchor = ((pred lst) . work), work's car holds the reversed kept elements before
+   *   the current all-passing run, work's cdr later holds the result; one protected
+   *   pair keeps everything GC-reachable while pred runs */
+  s7_pointer keep = s7_cons(sc, s7_car(args), s7_cons(sc, lst, s7_nil(sc)));
+  s7_pointer anchor = s7_cons(sc, keep, s7_cons(sc, s7_nil(sc), s7_nil(sc)));
+  s7_gc_protect_via_stack(sc, anchor);
+  s7_pointer work = s7_cdr(anchor);
+  s7_pointer pred = s7_car(keep);
+  s7_pointer run_start = NULL;
+  s7_pointer p = lst;
+  while (s7_is_pair(p))
+    {
+      if (s7i_is_true(sc, s7_apply_function(sc, pred, s7i_set_plist_1(sc, s7_car(p)))))
+        {
+          if (!run_start) run_start = p;
+        }
+      else
+        {
+          if (run_start)
+            {
+              for (s7_pointer q = run_start; q != p; q = s7_cdr(q))
+                s7_set_car(work, s7_cons(sc, s7_car(q), s7_car(work)));
+              run_start = NULL;
+            }
+        }
+      p = s7_cdr(p);
+    }
+  if (!s7_is_null(sc, p))
+    {
+      s7_gc_unprotect_via_stack(sc, anchor);
+      return(s7_wrong_type_arg_error(sc, "filter", 2, lst, "a proper list"));
+    }
+  /* share the longest all-passing suffix, like the reference implementation */
+  s7_pointer result = (run_start) ? run_start : s7_nil(sc);
+  s7_set_cdr(work, result);
+  for (s7_pointer q = s7_car(work); s7_is_pair(q); q = s7_cdr(q))
+    {
+      result = s7_cons(sc, s7_car(q), result);
+      s7_set_cdr(work, result);
+    }
+  s7_gc_unprotect_via_stack(sc, anchor);
+  return(result);
+}
+
+/* -------------------------------- find -------------------------------- */
+
+s7_pointer g_find(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_cadr(args);
+  /* args may live in evaluator-recycled cells, so keep pred and lst in our own
+   * protected pair; the walking pointer and the current element stay
+   * GC-reachable through lst while pred runs */
+  s7_pointer keep = s7_cons(sc, s7_car(args), s7_cons(sc, lst, s7_nil(sc)));
+  s7_gc_protect_via_stack(sc, keep);
+  s7_pointer pred = s7_car(keep);
+  s7_pointer p = lst;
+  while (s7_is_pair(p))
+    {
+      s7_pointer elem = s7_car(p);
+      if (s7i_is_true(sc, s7_apply_function(sc, pred, s7i_set_plist_1(sc, elem))))
+        {
+          s7_gc_unprotect_via_stack(sc, keep);
+          return(elem);
+        }
+      p = s7_cdr(p);
+    }
+  s7_gc_unprotect_via_stack(sc, keep);
+  if (!s7_is_null(sc, p))
+    return(s7_wrong_type_arg_error(sc, "find", 2, lst, "a proper list"));
+  return(s7_f(sc));
+}
+
+/* -------------------------------- any -------------------------------- */
+
+s7_pointer g_any(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_cadr(args);
+  /* same GC pattern as g_find: keep pred and lst anchored in our own
+   * protected pair while pred runs */
+  s7_pointer keep = s7_cons(sc, s7_car(args), s7_cons(sc, lst, s7_nil(sc)));
+  s7_gc_protect_via_stack(sc, keep);
+  s7_pointer pred = s7_car(keep);
+  s7_pointer p = lst;
+  while (s7_is_pair(p))
+    {
+      if (s7i_is_true(sc, s7_apply_function(sc, pred, s7i_set_plist_1(sc, s7_car(p)))))
+        {
+          s7_gc_unprotect_via_stack(sc, keep);
+          return(s7_t(sc));
+        }
+      p = s7_cdr(p);
+    }
+  s7_gc_unprotect_via_stack(sc, keep);
+  if (!s7_is_null(sc, p))
+    return(s7_wrong_type_arg_error(sc, "any", 2, lst, "a proper list"));
+  return(s7_f(sc));
+}
+
+/* -------------------------------- every -------------------------------- */
+
+s7_pointer g_every(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_cadr(args);
+  /* same GC pattern as g_find: keep pred and lst anchored in our own
+   * protected pair while pred runs */
+  s7_pointer keep = s7_cons(sc, s7_car(args), s7_cons(sc, lst, s7_nil(sc)));
+  s7_gc_protect_via_stack(sc, keep);
+  s7_pointer pred = s7_car(keep);
+  s7_pointer p = lst;
+  while (s7_is_pair(p))
+    {
+      if (!s7i_is_true(sc, s7_apply_function(sc, pred, s7i_set_plist_1(sc, s7_car(p)))))
+        {
+          s7_gc_unprotect_via_stack(sc, keep);
+          return(s7_f(sc));
+        }
+      p = s7_cdr(p);
+    }
+  s7_gc_unprotect_via_stack(sc, keep);
+  if (!s7_is_null(sc, p))
+    return(s7_wrong_type_arg_error(sc, "every", 2, lst, "a proper list"));
+  return(s7_t(sc));
+}
+
+/* -------------------------------- fold / fold-right -------------------------------- */
+
+s7_pointer g_fold(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_caddr(args);
+  if (!s7_is_pair(lst))
+    {
+      if (s7_is_null(sc, lst)) return(s7_cadr(args));
+      return(s7_wrong_type_arg_error(sc, "fold", 3, lst, "a proper list"));
+    }
+  /* args may live in evaluator-recycled cells: keep f and lst in our own pairs,
+   * and the accumulator in a dedicated cell we rewrite each iteration, so every
+   * intermediate value stays GC-reachable while f runs */
+  s7_pointer keep = s7_cons(sc, s7_car(args), lst);
+  s7_pointer anchor = s7_cons(sc, keep, s7_cons(sc, s7_cadr(args), s7_nil(sc)));
+  s7_gc_protect_via_stack(sc, anchor);
+  s7_pointer f = s7_car(keep);
+  s7_pointer acc_cell = s7_cdr(anchor);
+  s7_pointer p = lst;
+  while (s7_is_pair(p))
+    {
+      s7_set_car(acc_cell, s7_apply_function(sc, f, s7i_set_plist_2(sc, s7_car(p), s7_car(acc_cell))));
+      p = s7_cdr(p);
+    }
+  if (!s7_is_null(sc, p))
+    {
+      s7_gc_unprotect_via_stack(sc, anchor);
+      return(s7_wrong_type_arg_error(sc, "fold", 3, lst, "a proper list"));
+    }
+  s7_pointer result = s7_car(acc_cell);
+  s7_gc_unprotect_via_stack(sc, anchor);
+  return(result);
+}
+
+s7_pointer g_fold_right(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_caddr(args);
+  if (!s7_is_pair(lst))
+    {
+      if (s7_is_null(sc, lst)) return(s7_cadr(args));
+      return(s7_wrong_type_arg_error(sc, "fold-right", 3, lst, "a proper list"));
+    }
+  /* fold-right(f, init, (e1 ... en)) applies f from the right:
+   * f(e1, f(e2, ... f(en, init))), i.e. acc = f(elem, acc) walking elements
+   * in reverse; first copy the elements into a reversed list so the walk
+   * needs no Scheme-stack recursion */
+  s7_pointer keep = s7_cons(sc, s7_car(args), lst);
+  s7_pointer anchor = s7_cons(sc, keep, s7_cons(sc, s7_cadr(args), s7_nil(sc)));
+  s7_gc_protect_via_stack(sc, anchor);
+  s7_pointer rev = s7_nil(sc);
+  s7_set_cdr(s7_cdr(anchor), rev);
+  s7_pointer p = lst;
+  while (s7_is_pair(p))
+    {
+      rev = s7_cons(sc, s7_car(p), rev);
+      s7_set_cdr(s7_cdr(anchor), rev);
+      p = s7_cdr(p);
+    }
+  if (!s7_is_null(sc, p))
+    {
+      s7_gc_unprotect_via_stack(sc, anchor);
+      return(s7_wrong_type_arg_error(sc, "fold-right", 3, lst, "a proper list"));
+    }
+  s7_pointer f = s7_car(keep);
+  s7_pointer acc_cell = s7_cdr(anchor);
+  while (s7_is_pair(rev))
+    {
+      s7_set_car(acc_cell, s7_apply_function(sc, f, s7i_set_plist_2(sc, s7_car(rev), s7_car(acc_cell))));
+      rev = s7_cdr(rev);
+    }
+  s7_pointer result = s7_car(acc_cell);
+  s7_gc_unprotect_via_stack(sc, anchor);
+  return(result);
+}
+
+/* -------------------------------- take -------------------------------- */
+
+s7_pointer g_take(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_car(args);
+  s7_pointer k = s7_cadr(args);
+  if (!s7_is_integer(k))
+    return(s7_wrong_type_arg_error(sc, "take", 2, k, "an integer"));
+  s7_int n = s7_integer(k);
+  if (n < 0)
+    return(s7_wrong_type_arg_error(sc, "take", 2, k, "a non-negative integer"));
+  if (n == 0) return(s7_nil(sc));
+  /* no Scheme callbacks here, so args stay put; only the result being built
+   * needs a GC anchor, with each new pair linked in right after s7_cons */
+  s7_pointer head = s7_cons(sc, s7_nil(sc), s7_nil(sc));
+  s7_gc_protect_via_stack(sc, head);
+  s7_pointer tail = head;
+  s7_pointer p = lst;
+  for (s7_int i = 0; i < n; i++)
+    {
+      if (!s7_is_pair(p))
+        {
+          s7_gc_unprotect_via_stack(sc, head);
+          return(s7_wrong_type_arg_error(sc, "take", 1, lst, "a list of sufficient length"));
+        }
+      s7_set_cdr(tail, s7_cons(sc, s7_car(p), s7_nil(sc)));
+      tail = s7_cdr(tail);
+      p = s7_cdr(p);
+    }
+  s7_gc_unprotect_via_stack(sc, head);
+  return(s7_cdr(head));
+}
+
+/* -------------------------------- take-right / drop-right -------------------------------- */
+
+/* shared lead walk: returns NULL on success (lead advanced n pairs),
+ * otherwise the error object to return */
+static s7_pointer take_right_lead(s7_scheme *sc, const char *name, s7_pointer lst, s7_pointer k, s7_int n, s7_pointer *lead)
+{
+  if (!s7_is_integer(k))
+    return(s7_wrong_type_arg_error(sc, name, 2, k, "an integer"));
+  if (n < 0)
+    return(s7_out_of_range_error(sc, name, 2, k, "it is negative"));
+  if (!s7_is_pair(lst) && !s7_is_null(sc, lst))
+    return(s7_wrong_type_arg_error(sc, name, 1, lst, "a list"));
+  s7_pointer p = lst;
+  for (s7_int i = 0; i < n; i++)
+    {
+      if (!s7_is_pair(p))
+        return(s7_out_of_range_error(sc, name, 2, k, "it is too large"));
+      p = s7_cdr(p);
+    }
+  (*lead) = p;
+  return(NULL);
+}
+
+s7_pointer g_take_right(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_car(args);
+  s7_pointer k = s7_cadr(args);
+  s7_pointer lead;
+  s7_pointer err = take_right_lead(sc, "take-right", lst, k, s7_is_integer(k) ? s7_integer(k) : 0, &lead);
+  if (err) return(err);
+  /* no allocation and no Scheme callbacks: result is a sublist of lst */
+  s7_pointer lag = lst;
+  while (s7_is_pair(lead))
+    {
+      lag = s7_cdr(lag);
+      lead = s7_cdr(lead);
+    }
+  return(lag);
+}
+
+s7_pointer g_drop_right(s7_scheme *sc, s7_pointer args)
+{
+  s7_pointer lst = s7_car(args);
+  s7_pointer k = s7_cadr(args);
+  s7_pointer lead;
+  s7_pointer err = take_right_lead(sc, "drop-right", lst, k, s7_is_integer(k) ? s7_integer(k) : 0, &lead);
+  if (err) return(err);
+  /* dummy head anchor, same GC pattern as g_take */
+  s7_pointer head = s7_cons(sc, s7_nil(sc), s7_nil(sc));
+  s7_gc_protect_via_stack(sc, head);
+  s7_pointer tail = head;
+  s7_pointer lag = lst;
+  while (s7_is_pair(lead))
+    {
+      s7_set_cdr(tail, s7_cons(sc, s7_car(lag), s7_nil(sc)));
+      tail = s7_cdr(tail);
+      lag = s7_cdr(lag);
+      lead = s7_cdr(lead);
+    }
+  s7_gc_unprotect_via_stack(sc, head);
+  return(s7_cdr(head));
 }
 
 s7_pointer g_list(s7_scheme *sc, s7_pointer args)

@@ -101,7 +101,6 @@
               ) ;:or
   ) ;:menu-item
   (:menu-item-list (:repeat :menu-item))
-  (:tab-page (tab-page :%4))
 ) ;define-regexp-grammar
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -579,14 +578,27 @@
 ) ;define
 
 (define (make-menu-entry-dots label action)
+  (if (menu-action-interactive? action) (menu-label-add-dots label) label)
+) ;define
+
+(define (menu-action-interactive? action)
   (with source
     (promise-source action)
-    (if (and source (pair? source) (property (car source) :interactive))
-      (menu-label-add-dots label)
-      label
-    ) ;if
+    (and source (pair? source) (property (car source) :interactive))
   ) ;with
 ) ;define
+
+(define (imgui-supported-action? action)
+  ;; action 是否为「ImGui 后端尚未支持的交互式命令」（点击会弹出 ImGui 未
+  ;; 实现的对话框/新窗口）。判定基准与 make-menu-entry-dots 一致（带
+  ;; :interactive 属性者，即标签会被加省略号 '...' 的菜单项），但排除已用
+  ;; :imgui-supported 显式标记为 ImGui 已实现的命令（如 choose-file → Save as）。
+  (with source
+    (promise-source action)
+    (and source (property (car source) :imgui-supported))
+  ) ;with
+) ;define
+
 
 (define (make-menu-entry-style style action)
   (with source
@@ -672,22 +684,6 @@
           (else but)
     ) ;cond
   ) ;let
-) ;define
-
-(define (make-tab-page entry-data style bar?)
-
-  (let* ((args (cdar entry-data))
-         (url (first args))
-         (title (second args))
-         (close-btn (third args))
-         (active? (fourth args))
-        ) ;
-    (widget-tab-page url
-      (car (make-menu-items title style bar?))
-      (car (make-menu-items close-btn style bar?))
-      active?
-    ) ;widget-tab-page
-  ) ;let*
 ) ;define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1106,12 +1102,21 @@
   (append-map (lambda (p) (make-menu-items p style bar?)) l)
 ) ;define
 
-(define (make-menu-items p style bar?)
+(define-public (make-menu-items p style bar?)
   "Make menu items @p. The items are on a bar if @bar? and of a given @style."
   ;; (display* "Make items " p ", " style "\n")
   (if (pair? p)
     (cond ((match? p '(input :%1 :string? :%1 :string?)) (list (make-menu-input p style)))
-          ((translatable? (car p)) (list (make-menu-entry p style bar?)))
+          ((translatable? (car p))
+           ;; ImGui 前端不支持交互式命令弹出的对话框/新窗口，跳过这类叶子项
+           (if (and (not (qt-gui?))
+                 (menu-action-interactive? (cAr p))
+                 (not (imgui-supported-action? (cAr p)))
+               ) ;and
+             (list)
+             (list (make-menu-entry p style bar?))
+           ) ;if
+          ) ;
           ((symbol? (car p))
            (with result
              (ahash-ref make-menu-items-table (car p))
@@ -1121,8 +1126,15 @@
              ) ;if
            ) ;with
           ) ;
-          ((match? (car p) ':menu-wide-label) (list (make-menu-entry p style bar?)))
-          ((match? (car p) ':tab-page) (list (make-tab-page p style bar?)))
+          ((match? (car p) ':menu-wide-label)
+           (if (and (not (qt-gui?))
+                 (menu-action-interactive? (cAr p))
+                 (not (imgui-supported-action? (cAr p)))
+               ) ;and
+             (list)
+             (list (make-menu-entry p style bar?))
+           ) ;if
+          ) ;
           (else (make-menu-items-list p style bar?))
     ) ;cond
     (cond ((== p '---) (list (make-menu-hsep)))
@@ -1132,7 +1144,7 @@
           (else (list (make-menu-bad-format p style)))
     ) ;cond
   ) ;if
-) ;define
+) ;define-public
 
 (define-table make-menu-items-table
   (glue (:boolean? :boolean? :integer? :integer?)
@@ -1709,7 +1721,7 @@
 (tm-define (report-system-error win-name cmd out err)
   (:synopsis "Display command @cmd with its standard outputs @out and @err")
   (when (list? cmd)
-    (set! cmd (string-recompose cmd " "))
+    (set! cmd (string-join cmd " "))
   ) ;when
   (set! out (utf8->cork out))
   (set! err (utf8->cork err))
@@ -1854,8 +1866,32 @@
   ) ;with
 ) ;tm-define
 
+;; 菜单重建类别掩码
+
+(define (menu-category-mask category)
+  (case category
+   ((main) 1)
+   ((icons-main) 2)
+   ((icons-mode) 4)
+   ((icons-focus) 8)
+   ((icons-extra) 16)
+   ((tab-pages) 32)
+   ((notification) 64)
+   ((side-tools) 128)
+   ((all) 255)
+   (else 0)
+  ) ;case
+) ;define
+
+(tm-define (update-menus . categories)
+  (:synopsis "Rebuild the given menu categories (see editor.hpp MENU_*)")
+  (menu-update-mask (apply logior (map menu-category-mask categories)))
+) ;tm-define
+
 (tm-define (update-bottom-tools . opt-win)
   (show-bottom-tools 0 (apply has-bottom-tools? opt-win))
+  ;; 底部工具栏内容随 toolbar-*-active? 变化，需重建
+  (delayed (:idle 1) (when (current-view) (update-menus 'side-tools)))
   (when (not (extra-bottom-tools?))
     (keyboard-focus-on "canvas")
   ) ;when

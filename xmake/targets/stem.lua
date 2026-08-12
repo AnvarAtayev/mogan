@@ -26,7 +26,6 @@ local stem_files = {
 }
 
 target("stem") do 
-    add_deps("goldfish")
     if is_plat("windows") and is_mode("release") then
         add_deps("liii_windows_icon")
     end
@@ -101,13 +100,45 @@ target("stem") do
     
     if is_plat("wasm") then
         add_cxxflags("-O3")
-        add_cxxflags("-sUSE_GLFW=3")
+        add_cxxflags("--use-port=contrib.glfw3")
         add_ldflags("-O3")
-        add_ldflags("-sUSE_GLFW=3")
+        add_ldflags("--use-port=contrib.glfw3")
         add_ldflags("-sINITIAL_MEMORY=512MB")
         add_ldflags("-sALLOW_MEMORY_GROWTH=1")
         add_ldflags("-sSTACK_SIZE=32MB", {force = true})
-        add_ldflags("--preload-file=" .. path.join(os.projectdir(), "TeXmacs") .. "@/TeXmacs")
+        -- Export the C functions the React shell (web/) calls back into via
+        -- Module.ccall, plus the runtime helpers (ccall/cwrap, UTF8_ToString).
+        -- Only the three React-shell entry points are listed here; the IME,
+        -- file-chooser and collab bridges keep themselves alive via
+        -- EMSCRIPTEN_KEEPALIVE in their own TUs and are already exported that
+        -- way (hardcoding them here would break builds with --loro=no etc.).
+        add_ldflags("-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString", {force = true})
+        add_ldflags("-sEXPORTED_FUNCTIONS=" ..
+            "_main," ..
+            "_mogan_menu_invoke," ..
+            "_mogan_menu_expand," ..
+            "_mogan_menu_close_popup," ..
+            "_mogan_set_chrome_metrics", {force = true})
+        add_ldflags("--preload-file=" .. path.join(os.projectdir(), "TeXmacs/doc/about/mogan/stem.en.tmu") .. "@/TeXmacs/doc/about/mogan/stem.en.tmu")
+        add_ldflags("--preload-file=" .. path.join(os.projectdir(), "TeXmacs/progs") .. "@/TeXmacs/progs")
+        add_ldflags("--preload-file=" .. path.join(os.projectdir(), "TeXmacs/langs") .. "@/TeXmacs/langs")
+        add_ldflags("--preload-file=" .. path.join(os.projectdir(), "TeXmacs/packages") .. "@/TeXmacs/packages")
+        add_ldflags("--preload-file=" .. path.join(os.projectdir(), "TeXmacs/styles") .. "@/TeXmacs/styles")
+        add_ldflags("--preload-file=" .. path.join(os.projectdir(), "TeXmacs/texts") .. "@/TeXmacs/texts")
+        add_ldflags("--preload-file=" .. path.join(os.projectdir(), "TeXmacs/templates") .. "@/TeXmacs/templates")
+        add_ldflags(
+            "--preload-file=" .. path.join(os.projectdir(), "TeXmacs/fonts") .. "@/TeXmacs/fonts",
+            "--exclude-file=*/fonts/truetype/Mogan-NotoColorEmoji.ttf",
+            "--exclude-file=*/fonts/opentype/cm-unicode/*"
+        )
+        local plugins_dir = path.join(os.projectdir(), "TeXmacs/plugins")
+        for _, dir in ipairs(os.dirs(path.join(plugins_dir, "*"))) do
+            local name = path.filename(dir)
+            if name ~= "goldfish" then
+                add_ldflags("--preload-file=" .. dir .. "@/TeXmacs/plugins/" .. name)
+            end
+        end
+        add_ldflags("--preload-file=" .. path.join(plugins_dir, "goldfish/goldfish") .. "@/TeXmacs/plugins/goldfish/goldfish")
     end
 
     if has_config("qt_frontend") then
@@ -121,23 +152,44 @@ target("stem") do
         add_frameworks("QtQml", "QtQuick", "QtBodymovin")
     end
 
-    add_packages("goldfish")
     add_packages("mupdf")
-    if not has_config("qt_frontend") and not is_plat("wasm") then -- WASM GLFW is in EMCC
-        add_packages("glfw") 
+    if not has_config("qt_frontend") and not has_config("cli_frontend") and not is_plat("wasm") then -- WASM GLFW is in EMCC
+        add_packages("glfw")
     end
+    if has_config("goldfish") then
+        add_deps("goldfish-bin")
+    end
+    add_deps("goldfish")
     add_deps("liblolly")
     add_deps("libmogan")
     add_deps("libmoebius")
+    -- WASM: build the React shell (web/) before linking so the after_build
+    -- hook can copy web/dist into the target dir. No-op on other platforms.
+    if is_plat("wasm") then
+        add_deps("web_shell")
+    end
     if not is_plat("windows") then
         add_syslinks("pthread", "dl", "m")
     end
     if is_plat("linux") then
         add_syslinks("X11")
     end
+    -- CLI 前端无 Qt/glfw 自带的 macOS 框架；Plugins/MacOS（HIDRemote/mac_utilities/
+    -- mac_spellservice）仍被编译，需显式链接 Cocoa(=AppKit+Foundation) 与 IOKit。
+    if is_plat("macosx") and has_config("cli_frontend") then
+        add_frameworks("Cocoa", "IOKit")
+    end
 
     add_includedirs("$(builddir)", {public = true})
     add_files("$(projectdir)/src/Mogan/Research/research.cpp")
+
+    -- Velopack C++ runtime：启动钩子编译/链接 + 动态库随 bin/ 发布
+    if is_plat("windows") and is_arch("x64") then
+        add_velopack_runtime ()
+        -- 导入库内嵌 DLL 名为 velopack_libc.dll，发布时改名，exe 才能加载
+        add_installfiles ("$(projectdir)/3rdparty/velopack/lib/velopack_libc_win_x64_msvc.dll",
+                          {prefixdir = "bin", filename = "velopack_libc.dll"})
+    end
 
     -- install tm files for testing purpose
     if is_mode("releasedbg") then
@@ -159,6 +211,34 @@ target("stem") do
     if is_plat("windows") and has_config("qt_frontend")  then
         set_values("qt.deploy.flags", {"-printsupport", "--no-opengl-sw", "--no-translations", "--release"})
     end
+    if is_plat("windows") and has_config("loro") then
+        -- /WHOLEARCHIVE 会把 staticlib 中重复的 bcryptprimitives.dll 导入桩全部
+        -- 拉入导致 LNK2005，/FORCE:MULTIPLE 取首个定义规避（rust#129218）
+        add_ldflags("/WHOLEARCHIVE:mogan_loro_ffi.lib", "/FORCE:MULTIPLE", {force = true})
+    end
+
+    after_build(function (target)
+        if is_plat("wasm") then
+            local web_dist = path.join(os.projectdir(), "web", "dist")
+            local legacy_shell = path.join(os.projectdir(), "tools", "wasm", "stem.html")
+            local td = target:targetdir()
+            if os.exists(path.join(web_dist, "index.html")) then
+                -- React shell (Vite build of web/). Flatten web/dist into the
+                -- target dir so stem.js / stem.wasm / stem.data and the React
+                -- assets all sit side by side. The dev server (wasm_server.py)
+                -- and the CD workflow both load stem.html as the entry point,
+                -- so mirror the built index.html to stem.html.
+                cprint("${yellow}installing React shell from web/dist${clear}")
+                os.cp(path.join(web_dist, "*"), td)
+                os.cp(path.join(td, "index.html"), path.join(td, "stem.html"))
+            else
+                -- Fallback: no JS build available (e.g. a C++-only CI branch).
+                cprint("${yellow}web/dist not found; using legacy stem.html${clear}")
+                cprint("${yellow}Run `npm run build` in web/ to enable the React shell.${clear}")
+                os.cp(legacy_shell, td)
+            end
+        end
+    end)
 
     on_run(function (target)
         import("core.base.option")

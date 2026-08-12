@@ -10,7 +10,7 @@
 
 inline bool
 use_plugin_updater () {
-#ifdef USE_PLUGIN_SPARKLE
+#if defined(USE_PLUGIN_VELOPACK)
   return true;
 #else
   return false;
@@ -29,6 +29,15 @@ use_plugin_tex () {
 inline bool
 use_plugin_bibtex () {
 #ifdef USE_PLUGIN_BIBTEX
+  return true;
+#else
+  return false;
+#endif
+}
+
+inline bool
+loro_enabled () {
+#ifdef LORO_ENABLED
   return true;
 #else
   return false;

@@ -42,11 +42,68 @@ function main()
                 }
             },
             {
+                scm_name = "cpp-confirm-restart",
+                cpp_name = "cpp_confirm_restart",
+                ret_type = "string",
+                arg_list = {
+                    "string",
+                    "string"
+                }
+            },
+            {
                 scm_name = "cpp-form-dialog",
                 cpp_name = "cpp_form_dialog",
                 ret_type = "tree",
                 arg_list = {
                     "tree"
+                }
+            },
+            {
+                scm_name = "cpp-font-selector-dialog",
+                cpp_name = "cpp_font_selector_dialog",
+                ret_type = "tree",
+                arg_list = {
+                    "int"
+                }
+            },
+            {
+                scm_name = "cpp-paragraph-format-dialog",
+                cpp_name = "cpp_paragraph_format_dialog",
+                ret_type = "tree",
+                arg_list = {
+                    "int"
+                }
+            },
+            {
+                scm_name = "cpp-statistics-dialog",
+                cpp_name = "cpp_statistics_dialog",
+                ret_type = "void",
+                arg_list = {
+                    "string",
+                    "tree"
+                }
+            },
+            {
+                scm_name = "cpp-version-dialog",
+                cpp_name = "cpp_version_dialog",
+                ret_type = "bool",
+                arg_list = {
+                    "string",
+                    "string"
+                }
+            },
+            {
+                scm_name = "cpp-preferences-dialog",
+                cpp_name = "cpp_preferences_dialog",
+                ret_type = "tree",
+                arg_list = {}
+            },
+            {
+                scm_name = "cpp-rasterize-widget",
+                cpp_name = "cpp_rasterize_widget",
+                ret_type = "string",
+                arg_list = {
+                    "widget"
                 }
             },
             {

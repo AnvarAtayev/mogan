@@ -117,7 +117,7 @@ void
 init_texmacs_home_path () {
   if (!is_empty (get_env ("TEXMACS_HOME_PATH"))) return;
 
-  if (os_mingw () || os_win ()) {
+  if (os_win ()) {
     set_env ("TEXMACS_HOME_PATH", get_env ("APPDATA") * "/" * PREFIX_DIR);
   }
   else if (os_macos ()) {
@@ -139,7 +139,7 @@ url
 get_documents_path () {
   string docs= get_env ("TEXMACS_DOCUMENTS_PATH");
   if (!is_empty (docs)) return url_system (docs);
-  return url_system (get_env ("HOME") * "/Documents");
+  return url_system (get_env ("HOME"), "Documents");
 }
 
 url

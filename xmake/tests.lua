@@ -29,13 +29,18 @@ function add_target_cpp_test(filepath, dep1, dep2)
         if not is_plat("windows") then
             add_syslinks("pthread")
         end
-        add_packages("goldfish")
+        if has_config("goldfish") then
+            add_deps("goldfish")
+        end
         add_packages("liii-pdfhummus")
 
         add_includedirs({"$(builddir)", "tests/Base"})
         add_includedirs(libstem_headers)
         add_rules("mogan.glue")
         add_files("src/Scheme/**/glue_*.lua", {rule = "mogan.glue"})
+        if not has_config("loro") then
+            remove_files("$(projectdir)/src/Scheme/Plugins/glue_collab.lua")
+        end
         add_files("tests/Base/base.cpp")
         add_files(filepath)
         add_files(filepath, {rules = "qt.moc"})
@@ -78,13 +83,18 @@ function add_target_cpp_bench(filepath, dep)
         if not is_plat("windows") then
             add_syslinks("pthread")
         end
-        add_packages("goldfish")
+        if has_config("goldfish") then
+            add_deps("goldfish")
+        end
         add_packages("liii-pdfhummus")
 
         add_includedirs({"$(builddir)", "tests/Base"})
         add_includedirs(libstem_headers)
         add_rules("mogan.glue")
         add_files("src/Scheme/**/glue_*.lua", {rule = "mogan.glue"})
+        if not has_config("loro") then
+            remove_files("$(projectdir)/src/Scheme/Plugins/glue_collab.lua")
+        end
         add_files("tests/Base/base.cpp")
         add_files(filepath)
         add_files(filepath, {rules = "qt.moc"})

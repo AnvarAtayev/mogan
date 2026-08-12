@@ -174,10 +174,7 @@
 (define (converter-shell-cmd l from to)
   (with x
     (car l)
-    (string-append (if (or (os-win32?) (os-mingw?))
-                     (escape-shell (url-concretize (url-resolve-in-path x)))
-                     x
-                   ) ;if
+    (string-append (if (os-windows?) (escape-shell (url-concretize (url-resolve-in-path x))) x)
       " "
       (converter-shell-cmd-args (cdr l) from to)
     ) ;string-append
@@ -601,7 +598,9 @@
   (with end
     (+ pos (string-length what))
     (and (>= (string-length s) end)
-      (== (string-downcase (substring s pos end)) what)
+      ;; 用 ASCII-only 折叠：避免对含损坏 UTF-8 的输入触发 string-downcase
+      ;; 内部的 string->utf8 整段校验而崩溃（HTML/LaTeX 关键字都是 ASCII）。
+      (== (safe-ascii-string-downcase (substring s pos end)) what)
     ) ;and
   ) ;with
 ) ;define-public
@@ -622,7 +621,7 @@
 ) ;define
 
 (define (format-get-suffixes fm)
-  (cond ((and (== fm "image") (os-win32?))
+  (cond ((and (== fm "image") (os-windows?))
          '("ps"
            "eps"
            "bmp"

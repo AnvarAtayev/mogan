@@ -68,7 +68,7 @@
 #include <isocline.h>
 #endif
 
-#define GOLDFISH_VERSION "18.11.16"
+#define GOLDFISH_VERSION "18.11.22"
 
 #define GOLDFISH_PATH_MAXN TB_PATH_MAXN
 
@@ -112,9 +112,11 @@ void glue_http_async (s7_scheme* sc);
 #endif
 void glue_liii_base64 (s7_scheme* sc);
 void glue_scheme_base (s7_scheme* sc);
+void glue_scheme_char (s7_scheme* sc);
 void glue_liii_hashlib (s7_scheme* sc);
 void glue_liii_os (s7_scheme* sc);
 void glue_liii_path (s7_scheme* sc);
+void glue_liii_string (s7_scheme* sc);
 void glue_subprocess_run_values (s7_scheme* sc);
 
 inline s7_pointer
@@ -699,12 +701,14 @@ glue_for_community_edition (s7_scheme* sc) {
   glue_subprocess_run_values (sc);
   glue_liii_path (sc);
   glue_liii_list (sc);
+  glue_liii_string (sc);
   glue_liii_time (sc);
   glue_liii_datetime (sc);
   glue_liii_uuid (sc);
   glue_liii_hashlib (sc);
   glue_liii_base64 (sc);
   glue_scheme_base (sc);
+  glue_scheme_char (sc);
   glue_njson (sc);
 #ifdef GOLDFISH_ENABLE_HTTP
   glue_http (sc);

@@ -15,6 +15,7 @@ local moe_files = {
 }
 local moe_includedirs = {
     path.join(moe_root, "Data/Convert"),
+    path.join(moe_root, "Data/Convert/loro"),
     path.join(moe_root, "Data/History"),
     path.join(moe_root, "Data/Tree"),
     path.join(moe_root, "Kernel/Types"),
@@ -30,8 +31,10 @@ local moe_includedirs = {
 
 add_requires("liii-doctest", {system=false})
 add_requires("nanobench", {system=false})
-add_requires("goldfish", {system=false})
 
+if has_config("loro") then
+    includes("../xmake/targets/loro.lua")
+end
 
 target("libmoebius") do
     set_kind ("static")
@@ -43,9 +46,22 @@ target("libmoebius") do
     add_files(moe_files)
 
     add_deps("liblolly")
-    add_packages("goldfish")
+    add_deps("goldfish")
+    if has_config("loro") then
+        add_deps("loro")
+        add_defines("LORO_ENABLED")
+        add_headerfiles("Data/Convert/loro/loro.hpp")
+        add_headerfiles("Data/Convert/loro/loro_ir.hpp")
+        add_headerfiles("Data/Convert/loro/loro_ir_codec.hpp")
+        add_headerfiles("Data/Convert/loro/loro_shadow.hpp")
+    else
+        remove_files("Data/Convert/loro/loro.cpp")
+        remove_files("Data/Convert/loro/loro_ir.cpp")
+        remove_files("Data/Convert/loro/loro_ir_codec.cpp")
+        remove_files("Data/Convert/loro/loro_shadow*.cpp")
+    end
 
-    add_headerfiles("Data/Convert/(*.hpp)")
+    add_headerfiles("Data/Convert/tmu.hpp")
     add_headerfiles("Data/History/(*.hpp)")
     add_headerfiles("Data/Tree/(*.hpp)")
     add_headerfiles("Kernel/Types/(*.hpp)")
@@ -67,6 +83,9 @@ target("moebius_tests") do
     set_default (false)
 
     add_deps("libmoebius")
+    if has_config("loro") then
+        add_defines("LORO_ENABLED")
+    end
 
     add_includedirs(moe_includedirs)
     add_includedirs("tests")

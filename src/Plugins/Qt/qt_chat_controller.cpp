@@ -18,6 +18,7 @@
 #include "new_buffer.hpp"
 #include "s7_tm.hpp"
 #include "scheme.hpp"
+#include "tm_debug.hpp"
 
 #include <QApplication>
 #include <QDir>
@@ -55,7 +56,12 @@ ChatController::destroyView () {
 QWidget*
 ChatController::createView (QWidget* parent, qt_tm_widget_rep* tm) {
   // 1. Load session metadata
+  // llm 插件按 idle 延迟初始化，新建 Chat 标签页时其 scheme 模块可能尚未加载
+  bool benching= QTChatTabWidget::isInitBenchPending ();
+  if (benching) bench_start ("chat_init: load chat modules");
+  eval ("(use-modules (llm chat-list))");
   call ("chat-persist-load-all");
+  if (benching) bench_end ("chat_init: load chat modules");
   cout << "[chat-persist] ChatController: restored "
        << sessionManager_.sessionCount () << " session metadatas" << LF;
 
@@ -126,12 +132,14 @@ ChatController::createView (QWidget* parent, qt_tm_widget_rep* tm) {
   }
 
   // 4. 激活初始会话（按需创建 Panel）
+  if (benching) bench_start ("chat_init: activate session");
   if (!is_empty (initialId)) {
     activateSession (initialId);
   }
   else {
     ensureNewConversation ();
   }
+  if (benching) bench_end ("chat_init: activate session");
 
   // 5. 恢复当前模型（使用激活的会话）
   if (!is_empty (initialId)) {
@@ -600,6 +608,7 @@ ChatController::ensureNewConversation () {
   sessionManager_.setPanel (sid, panel);
   sessionManager_.setModel (sid, currentModel_);
 
+  eval ("(use-modules (llm chat-style))");
   call ("chat-tab-sync-dark-style!", sid);
   call ("chat-tab-load-input-styles!", sid);
 
@@ -632,6 +641,7 @@ ChatController::getOrCreatePanel (const string& sessionId) {
 
   sessionManager_.setPanel (sessionId, panel);
 
+  eval ("(use-modules (llm chat-style) (llm chat-protocol))");
   call ("chat-tab-sync-dark-style!", sessionId);
   call ("chat-tab-init-session!", sessionId, s->model);
 

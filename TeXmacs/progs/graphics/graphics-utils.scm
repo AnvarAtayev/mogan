@@ -175,13 +175,16 @@
 ;; Subroutines for accessing trees & managing listprops
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; FIXME: Should use (tm-adjust-path), otherwise, crashes in some cases
+;; Guard against invalid paths (e.g. #f returned by graphics-graphics-path)
 (tm-define (tm-upwards-path p tags nottags)
-  (if (in? (tree-label (path->tree p)) tags)
-    p
-    (if (in? (tree-label (path->tree p)) nottags)
-      #f
-      (if (> (length p) 2) (tm-upwards-path (cDr p) tags nottags) #f)
+  (if (not (list? p))
+    #f
+    (if (in? (tree-label (path->tree p)) tags)
+      p
+      (if (in? (tree-label (path->tree p)) nottags)
+        #f
+        (if (> (length p) 2) (tm-upwards-path (cDr p) tags nottags) #f)
+      ) ;if
     ) ;if
   ) ;if
 ) ;tm-define
@@ -215,7 +218,7 @@
       (set-car! list-find-prop-cons val)
       l
     ) ;begin
-    `(with ,var ,val unquote (if (eq? (car l) 'with) (cdr l) l))
+    `(with ,var ,val . ,(if (eq? (car l) 'with) (cdr l) l))
   ) ;if
 ) ;tm-define
 
@@ -348,11 +351,19 @@
         ,"gr-edit-grid-aspect"
         (tuple (tuple "axes" "none") (tuple "1" "none") (tuple "10" "none"))
         ,"gr-edit-grid"
-        (tuple "cartesian" (point "0" "0") "1"))
+        (tuple "cartesian" (point "0" "0") "1")
+        ,"gr-props-text-at"
+        (tuple "text-at-halign" "center" "text-at-valign" "center")
+        ,"gr-props-math-at"
+        (tuple "text-at-halign" "center" "text-at-valign" "center")
+        ,"gr-props-document-at"
+        (tuple "text-at-halign" "center" "doc-at-valign" "center"))
     ) ;set!
   ) ;when
   (graphics-reset-context 'begin)
   (insert-raw-go-to `(with ,@init (graphics "")) `(,(length init) ,1))
+  ;; 默认缩放 200%
+  (graphics-zoom 2.0)
 ) ;tm-define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -395,7 +406,10 @@
 
 ;; Magnification
 (tm-define (graphics-eval-magnify)
-  (graphical-get-attribute (path->tree (graphics-graphics-path)) "magnify")
+  (with p
+    (graphics-graphics-path)
+    (if p (graphical-get-attribute (path->tree p) "magnify") "default")
+  ) ;with
 ) ;tm-define
 
 (tm-define (graphics-eval-magnify-at path)
@@ -540,6 +554,7 @@
 (tm-define (graphics-enrich-bis t id tab)
   (set! tab (list->ahash-table (ahash-table->list tab)))
   (ahash-remove! tab "gid")
+  (ahash-remove! tab "magnify")
   (let* ((attrs (graphical-relevant-attributes t))
          (sel (ahash-table-select tab attrs))
          (l1 (cons (cons "gid" id) (ahash-table->list sel)))

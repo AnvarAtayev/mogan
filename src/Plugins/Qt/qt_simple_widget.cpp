@@ -22,6 +22,7 @@
 #include "QTMMenuHelper.hpp"
 #include "QTMStyle.hpp"
 #include "QTMTextPopup.hpp"
+#include "QTMUserPromptPopup.hpp"
 #include "QTMWidget.hpp"
 #ifdef Q_OS_LINUX
 #include <QGuiApplication>
@@ -245,6 +246,11 @@ qt_simple_widget_rep::send (slot s, blackbox val) {
     qp-= QPoint (sz.width () / 2, sz.height () / 2);
     // NOTE: adjust because child is centered
     scrollarea ()->setOrigin (qp);
+    // origin 变化会改变 popup 全局坐标映射，及时刷新 popup
+    if (ghostTextPopup && ghostTextPopup->isVisible ())
+      ghostTextPopup->updatePosition ();
+    if (diffTextPopup && diffTextPopup->isVisible ())
+      diffTextPopup->updatePosition ();
   } break;
 
   case SLOT_ZOOM_FACTOR: {
@@ -277,10 +283,19 @@ qt_simple_widget_rep::send (slot s, blackbox val) {
     check_type<coord2> (val, s);
     coord2 p= open_box<coord2> (val);
     canvas ()->setCursorPos (to_qpoint (p));
-#ifdef Q_OS_LINUX
+    // 光标坐标在此刷新，及时刷新 popup
+    if (ghostTextPopup && ghostTextPopup->isVisible ())
+      ghostTextPopup->updatePosition ();
+    if (diffTextPopup && diffTextPopup->isVisible ())
+      diffTextPopup->updatePosition ();
     QInputMethod* im= QGuiApplication::inputMethod ();
-    if (im) im->update (Qt::ImCursorRectangle);
+    if (im) {
+      // 光标进出数学模式时通知平台重查 ImEnabled，切换输入法启用状态
+      im->update (Qt::ImEnabled);
+#ifdef Q_OS_LINUX
+      im->update (Qt::ImCursorRectangle);
 #endif
+    }
   } break;
 
   default:
@@ -620,8 +635,11 @@ qt_simple_widget_rep::repaint_all () {
   iterator<pointer> i= iterate (qt_simple_widget_rep::all_widgets);
   while (i->busy ()) {
     qt_simple_widget_rep* w= static_cast<qt_simple_widget_rep*> (i->next ());
-    if (w->canvas () && w->canvas ()->isVisible ())
+    if (w->canvas () && w->canvas ()->isVisible ()) {
+      bench_start ("repaint_invalid_regions");
       w->repaint_invalid_regions ();
+      bench_end ("repaint_invalid_regions", 10);
+    }
   }
 }
 
@@ -870,4 +888,78 @@ qt_simple_widget_rep::is_point_in_text_popup (SI x, SI y) {
 
   // 检查点是否在工具栏内
   return toolbarRect.contains (px, py);
+}
+
+void
+qt_simple_widget_rep::ensure_ghost_popup () {
+  if (ghostTextPopup) {
+    if (ghostTextPopup->parent () != canvas ()) {
+      ghostTextPopup->setParent (canvas ());
+    }
+    return;
+  }
+  ghostTextPopup= new QTMGhostTextPopup (canvas (), this);
+  if (is_empty (tm_style_sheet)) {
+    ghostTextPopup->setStyle (qtmstyle ());
+  }
+}
+
+void
+qt_simple_widget_rep::show_ghost_popup () {
+  ensure_ghost_popup ();
+  ghostTextPopup->showPopup ();
+}
+
+void
+qt_simple_widget_rep::hide_ghost_popup () {
+  if (ghostTextPopup) {
+    ghostTextPopup->hide ();
+  }
+}
+
+void
+qt_simple_widget_rep::scroll_ghost_popup_by (SI x, SI y) {
+  if (ghostTextPopup) {
+    QPoint qp (x, y);
+    coord2 p= from_qpoint (qp);
+    ghostTextPopup->scrollBy (p.x1, p.x2);
+    ghostTextPopup->updatePosition ();
+  }
+}
+
+void
+qt_simple_widget_rep::ensure_diff_popup () {
+  if (diffTextPopup) {
+    if (diffTextPopup->parent () != canvas ()) {
+      diffTextPopup->setParent (canvas ());
+    }
+    return;
+  }
+  diffTextPopup= new QTMDiffTextPopup (canvas (), this);
+  if (is_empty (tm_style_sheet)) {
+    diffTextPopup->setStyle (qtmstyle ());
+  }
+}
+
+void
+qt_simple_widget_rep::show_diff_popup () {
+  ensure_diff_popup ();
+  diffTextPopup->showPopup ();
+}
+
+void
+qt_simple_widget_rep::hide_diff_popup () {
+  if (diffTextPopup) {
+    diffTextPopup->hide ();
+  }
+}
+
+void
+qt_simple_widget_rep::scroll_diff_popup_by (SI x, SI y) {
+  if (diffTextPopup) {
+    QPoint qp (x, y);
+    coord2 p= from_qpoint (qp);
+    diffTextPopup->scrollBy (p.x1, p.x2);
+    diffTextPopup->updatePosition ();
+  }
 }

@@ -239,15 +239,6 @@ function main()
                 }
             },
             {
-                scm_name = "cpp-string-recompose",
-                cpp_name = "recompose",
-                ret_type = "string",
-                arg_list = {
-                    "array_string",
-                    "string"
-                }
-            },
-            {
                 scm_name = "string-trim-spaces-left",
                 cpp_name = "trim_spaces_left",
                 ret_type = "string",
@@ -319,18 +310,8 @@ function main()
                 ret_type = "string"
             },
             {
-                scm_name = "os-win32?",
-                cpp_name = "os_win",
-                ret_type = "bool"
-            },
-            {
-                scm_name = "os-mingw?",
-                cpp_name = "os_mingw",
-                ret_type = "bool"
-            },
-            {
-                scm_name = "os-macos?",
-                cpp_name = "os_macos",
+                scm_name = "os-wasm?",
+                cpp_name = "os_wasm",
                 ret_type = "bool"
             },
             {

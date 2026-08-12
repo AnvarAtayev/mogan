@@ -12,6 +12,7 @@
 #include "QTMOAuth.hpp"
 #include "qt_utilities.hpp"
 #include "scheme.hpp"
+#include "telemetry.hpp"
 #include "tm_sys_utils.hpp"
 
 #include <QtGui/qdesktopservices.h>
@@ -24,7 +25,6 @@
 
 #include <QtCore/qcryptographichash.h>
 #include <QtCore/qdatetime.h>
-#include <QtCore/qdebug.h>
 #include <QtCore/qjsonarray.h>
 #include <QtCore/qjsondocument.h>
 #include <QtCore/qrandom.h>
@@ -35,7 +35,7 @@
 
 QTMOAuth::QTMOAuth (QObject* parent) {
   // 加载 OAuth2 配置
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
 
   c_string clientIdentifier (
       as_string (call ("account-oauth2-config", "client-identifier")));
@@ -80,10 +80,10 @@ QTMOAuth::QTMOAuth (QObject* parent) {
   // 如果所有端口都被占用，使用第一个端口
   if (m_port == -1) {
     m_port= portList.first ();
-    debug_boot << "All ports occupied, using:" << m_port << "\n";
+    if (DEBUG_IO) debug_io << "All ports occupied, using:" << m_port << "\n";
   }
   else {
-    debug_boot << "Using available port:" << m_port << "\n";
+    if (DEBUG_IO) debug_io << "Using available port:" << m_port << "\n";
   }
 
   m_reply= new QOAuthHttpServerReplyHandler (
@@ -178,6 +178,8 @@ QTMOAuth::handleAuthorizationCode (const QString& code) {
                         to_qstring (stem_user_agent ()).toUtf8 ());
   request.setRawHeader ("X-Device-Id",
                         to_qstring (stem_device_id ()).toUtf8 ());
+  QByteArray previewCookie= getPreviewCookieHeader ();
+  if (!previewCookie.isEmpty ()) request.setRawHeader ("Cookie", previewCookie);
 
   QNetworkAccessManager* manager= new QNetworkAccessManager (this);
   QNetworkReply*         reply=
@@ -199,11 +201,17 @@ QTMOAuth::handleAuthorizationCode (const QString& code) {
         oauth2.setToken (accessToken);
 
         // 保存token信息
-        eval ("(use-modules (liii account))");
+        eval ("(use-modules (account liii))");
         call ("account-save-token", from_qstring (accessToken));
 
         // 设置登录状态
         m_isLoggedIn= true;
+
+        // 记录 LOGIN 事件
+        telemetry_track ("LOGIN");
+
+        // 记录 OAUTH 事件
+        telemetry_track ("OAUTH");
 
         if (!refreshToken.isEmpty ()) {
           m_refreshToken= refreshToken;
@@ -256,6 +264,8 @@ QTMOAuth::refreshToken () {
                         to_qstring (stem_user_agent ()).toUtf8 ());
   request.setRawHeader ("X-Device-Id",
                         to_qstring (stem_device_id ()).toUtf8 ());
+  QByteArray previewCookie= getPreviewCookieHeader ();
+  if (!previewCookie.isEmpty ()) request.setRawHeader ("Cookie", previewCookie);
 
   // 发送刷新请求
   QNetworkAccessManager* manager= new QNetworkAccessManager (this);
@@ -278,7 +288,7 @@ QTMOAuth::refreshToken () {
         oauth2.setToken (newAccessToken);
 
         // 保存新的token信息
-        eval ("(use-modules (liii account))");
+        eval ("(use-modules (account liii))");
         call ("account-save-token", from_qstring (newAccessToken));
 
         if (!newRefreshToken.isEmpty ()) {
@@ -299,7 +309,12 @@ QTMOAuth::refreshToken () {
         // 确保登录状态为true
         if (!m_isLoggedIn) {
           m_isLoggedIn= true;
+          telemetry_track ("LOGIN");
           emit loginStateChanged (true);
+        }
+        else {
+          // 记录 HEART_BEAT 事件
+          telemetry_track ("HEART_BEAT");
         }
       }
       else {
@@ -342,6 +357,7 @@ QTMOAuth::checkTokenStatus () {
   // Token有效且未过期
   if (!m_isLoggedIn) {
     m_isLoggedIn= true;
+    telemetry_track ("LOGIN");
     emit loginStateChanged (true);
   }
 
@@ -353,7 +369,7 @@ QTMOAuth::checkTokenStatus () {
 
 void
 QTMOAuth::loadExistingToken () {
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
 
   // 加载access_token
   c_string tokenStr (as_string (call ("account-load-token")));
@@ -378,7 +394,7 @@ QTMOAuth::loadExistingToken () {
 
 void
 QTMOAuth::clearInvalidTokens () {
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   call ("account-clear-tokens");
 
   // 清除内存中的token信息
@@ -425,7 +441,7 @@ QTMOAuth::generateCodeChallenge (const QString& verifier) {
 
 QUrl
 QTMOAuth::getAuthorizationUrl () {
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   c_string authorizationUrl (
       as_string (call ("account-oauth2-config", "authorization-url")));
   return QUrl ((char*) authorizationUrl);
@@ -433,7 +449,7 @@ QTMOAuth::getAuthorizationUrl () {
 
 QUrl
 QTMOAuth::getAccessTokenUrl () {
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   c_string accessTokenUrl (
       as_string (call ("account-oauth2-config", "access-token-url")));
   return QUrl ((char*) accessTokenUrl);
@@ -441,9 +457,17 @@ QTMOAuth::getAccessTokenUrl () {
 
 QString
 QTMOAuth::getGrowthUrl () {
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   c_string growthUrl (as_string (call ("account-oauth2-config", "growth-url")));
   return QString::fromUtf8 ((const char*) growthUrl);
+}
+
+QByteArray
+QTMOAuth::getPreviewCookieHeader () {
+  eval ("(use-modules (account liii))");
+  c_string previewCookie (
+      as_string (call ("account-oauth2-config", "preview-cookie-header")));
+  return QByteArray ((const char*) previewCookie);
 }
 
 void

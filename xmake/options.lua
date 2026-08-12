@@ -24,9 +24,19 @@ option("qt_frontend")
     set_description("Build the Qt frontend (default: ImGui frontend)")
 option_end()
 
+option("cli_frontend")
+    set_default(false)
+    set_description("Build the UI-free CLI frontend (no Qt/ImGui/glfw); for mogan-render")
+option_end()
+
 option("pdfhummus")
     set_default(true)
     set_description("Enable PDFHummus plugin")
+option_end()
+
+option("goldfish")
+    set_default(true)
+    set_description("Enable Goldfish plugin")
 option_end()
 
 option("mupdf")
@@ -53,14 +63,12 @@ option("is_community")
     set_description("Adjust community or commercial version")
 option_end()
 
-local enable_tutorial = not has_config("is_community")
-
-option("tutorial")
-    set_default(enable_tutorial)
-    set_description("Enable tutorial infrastructure and first-launch tutorial; derived from is_community")
-option_end()
-
 option("debug_with_timestamp")
     set_default(true)
     set_description("Enable timestamps in debug messages")
+option_end()
+
+option("loro")
+    set_default(false)
+    set_description("Enable Loro CRDT FFI (builds 3rdparty/mogan-loro-ffi via cargo)")
 option_end()

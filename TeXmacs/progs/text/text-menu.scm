@@ -18,8 +18,8 @@
     (prog prog-menu)
     (generic format-edit)
     (generic document-style)
-    (various comment-edit)
-    (various comment-widgets)
+    (comment comment-edit)
+    (comment comment-widgets)
   ) ;:use
 ) ;texmacs-module
 
@@ -60,13 +60,16 @@
    ("Hyphenate as" (interactive hyphenate-selection-as))
  ) ;when
  ---
- (-> "Color"
-   (if (== (get-preference "experimental alpha") "on")
-     (-> "Opacity" (link opacity-menu))
-     ---
-   ) ;if
-   (link color-menu)
- ) ;->
+ (if (qt-gui?)
+   ;; ImGui 前端精简：移除 Format 的 Color
+   (-> "Color"
+     (if (== (get-preference "experimental alpha") "on")
+       (-> "Opacity" (link opacity-menu))
+       ---
+     ) ;if
+     (link color-menu)
+   ) ;->
+ ) ;if
  (-> "Adjust" (link adjust-menu))
  (-> "Transform" (link linear-transform-menu))
  (-> "Specific" (link specific-menu))

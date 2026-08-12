@@ -19,6 +19,7 @@
     (graphics graphics-edit)
   ) ;:use
 ) ;texmacs-module
+(debug-message "keyboard" "(graphics graphics-kbd): registering kbd-map ...\n")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Various contexts
@@ -47,8 +48,9 @@
 ;; Extra abbreviations
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(tm-define (graphics-zoom-in) (graphics-zoom 1.189207115))
-(tm-define (graphics-zoom-out) (graphics-zoom 0.840896415))
+(define graphics-zoom-factor 1.189207115002721)
+(tm-define (graphics-zoom-in) (graphics-zoom graphics-zoom-factor))
+(tm-define (graphics-zoom-out) (graphics-zoom (/ 1.0 graphics-zoom-factor)))
 
 (tm-define (graphics-move-origin-left) (graphics-move-origin "+0.01gw" "0gh"))
 (tm-define (graphics-move-origin-right) (graphics-move-origin "-0.01gw" "0gh"))
@@ -115,6 +117,7 @@
 
 (kbd-map (:mode in-active-graphics?)
  ("+" (graphics-zoom-in))
+ ("=" (graphics-zoom-in))
  ("-" (graphics-zoom-out))
  ("A-1" (graphics-set-zoom 1))
  ("A-2" (graphics-set-zoom 0.5))
@@ -125,19 +128,18 @@
  ("A-7" (graphics-set-zoom 0.142857142857))
  ("A-8" (graphics-set-zoom 0.125))
  ("A-9" (graphics-set-zoom 0.111111111111))
- ("1" (graphics-set-zoom 1.0))
- ("2" (graphics-set-zoom 2.0))
- ("3" (graphics-set-zoom 3.0))
- ("4" (graphics-set-zoom 4.0))
- ("5" (graphics-set-zoom 5.0))
- ("6" (graphics-set-zoom 6.0))
- ("7" (graphics-set-zoom 7.0))
- ("8" (graphics-set-zoom 8.0))
- ("9" (graphics-set-zoom 9.0))
+ ("1" (graphics-set-mode '(edit point)))
+ ("2" (graphics-set-mode '(edit line)))
+ ("3" (graphics-set-mode '(edit cline)))
+ ("4" (graphics-set-mode '(edit spline)))
+ ("5" (graphics-set-mode '(edit cspline)))
+ ("6" (graphics-set-mode '(edit std-arc-counterclockwise)))
+ ("7" (graphics-set-mode '(edit circle)))
  ("c" (graphics-set-origin "0.5gw" "0.5gh"))
  ("t" (graphics-set-origin "0gw" "1gh"))
  ("l" (graphics-set-origin "0gw" "0.5gh"))
  ("b" (graphics-set-origin "0gw" "0gh"))
+ ("e" (graphics-resume-last-insert))
  ("#" (graphics-toggle-grid))
  ("!" (open-plots-editor "scheme" "default" ""))
  ("left" (graphics-arrow-left))
@@ -190,6 +192,7 @@
 
 (define graphics-keys
   '("+"
+    "="
     "-"
     "1"
     "2"
@@ -207,6 +210,7 @@
     "l"
     "b"
     "t"
+    "e"
     "left"
     "right"
     "down"
@@ -234,6 +238,42 @@
   (cond ((string-occurs? "-" key) (key-press key))
         ((in? key graphics-keys) (key-press key))
   ) ;cond
+) ;tm-define
+
+;; 有对应插入模式 (edit <tag>) 的对象 tag（见 graphics-menu.scm 的插入菜单）
+
+(define graphics-insertable-tags
+  '(point line
+     cline
+     spline
+     smooth
+     bezier
+     cspline
+     csmooth
+     cbezier
+     std-arc-counterclockwise
+     sector-counterclockwise
+     circle
+     ellipse
+     hyperbola
+     parabola
+     rectangle
+     text-at
+     math-at
+     document-at)
+) ;define
+
+;; 按下 e：从更改属性模式切换到当前选中对象对应的插入模式
+(tm-define (graphics-resume-last-insert)
+  (:mode in-active-graphics?)
+  (when (and (== (graphics-mode) '(group-edit edit-props)) (== (length (sketch-get)) 1))
+    (with obj
+      (stree-radical (tree->stree (car (sketch-get))))
+      (when (and (pair? obj) (in? (car obj) graphics-insertable-tags))
+        (graphics-set-mode `(edit ,(car obj)))
+      ) ;when
+    ) ;with
+  ) ;when
 ) ;tm-define
 
 (tm-define (mouse-drop-event x y obj)
@@ -395,3 +435,4 @@
 (kbd-map (:mode inside-graphical-over-under?)
  ("C-*" (graphics-toggle-over-under))
 ) ;kbd-map
+(debug-message "keyboard" "(graphics graphics-kbd): kbd-map registered\n")
