@@ -8,12 +8,17 @@
  ******************************************************************************/
 
 #include "QTMQmlDialog.hpp"
+#include "FontSelectorBridge.hpp"
+#include "ParagraphFormatBridge.hpp"
+#include "PreferencesBridge.hpp"
 #include "QTMQmlDialogBridge.hpp"
 #include "QTMQmlDialogInternal.hpp"
+#include "VersionDialogBridge.hpp"
 
 #include "analyze.hpp" // occurs
 #include "gui.hpp"     // tm_style_sheet
 #include "qt_utilities.hpp"
+#include "s7_tm.hpp"     // eval_scheme
 #include "sys_utils.hpp" // lolly: get_env
 
 #include <moebius/data/scheme.hpp> // tree_to_scheme_tree / scm_unquote
@@ -180,6 +185,50 @@ run_qml_dialog (const string& qml_url, const char* debug_tag,
 }
 
 /**
+ * @brief 非阻塞模态引擎（setModal + show）—— live 重绘对话框专用。
+ *
+ * 区别于 run_qml_dialog 的 exec：show() 不嵌套事件循环，主窗口 paint 照常（live
+ * 写回 实时可见）；setModal(true) 让 Qt
+ * 拦截其他窗口输入，仍保持模态独占（防切窗口/动光标/ 重复打开）。即「exec
+ * 的输入独占」+「show 的不阻塞重绘」兼得。字体选择器等需 live
+ * 重绘文档的对话框用本引擎；一次性提交的（ConfirmClose/FormDialog）用
+ * run_qml_dialog 即可。
+ *
+ * 生命期：QDialog 堆分配 + WA_DeleteOnClose，bridge 不挂 parent，靠 host
+ * destroyed 信号 deleteLater 自清。
+ *
+ * @return 恒 0（不阻塞；调用方返回值仅测试钩子路径用）。
+ */
+static int
+run_modal_qml_dialog (
+    const string& qml_url, const char* debug_tag,
+    std::function<void (QQuickWidget*, QDialog*)> inject_context, int logic_w,
+    int logic_h) {
+  static const bool resourceInitialized= [] () {
+    Q_INIT_RESOURCE (moganqml);
+    return true;
+  }();
+  (void) resourceInitialized;
+  QDialog* d=
+      new QDialog (nullptr, Qt::FramelessWindowHint | Qt::Dialog | Qt::Tool);
+  d->setAttribute (Qt::WA_DeleteOnClose);
+  d->setModal (true);
+  QQuickWidget* qw= setup_frameless_qml_host (*d);
+  QVBoxLayout*  vl= static_cast<QVBoxLayout*> (d->layout ());
+  inject_context (qw, d);
+  qw->setSource (QUrl (to_qstring (qml_url)));
+  if (qw->status () != QQuickWidget::Ready) {
+    log_qml_load_failure (qw, debug_tag);
+    delete d;
+    return -1;
+  }
+  vl->addWidget (qw);
+  lock_fixed_size (qw, vl, *d, logic_w, logic_h);
+  d->show ();
+  return 0;
+}
+
+/**
  * @brief 「确认关闭」弹窗的 glue 入口。
  * @param message 已翻译的正文。
  * @param scratch 为真时肯定按钮显示「另存为」。
@@ -215,6 +264,40 @@ cpp_confirm_close (string message, bool scratch) {
     return "Don't save";
   default:
     return "Cancel";
+  }
+}
+
+/**
+ * @brief 需重启字段的三按钮确认弹窗的 glue 入口。
+ */
+string
+cpp_confirm_restart (string title, string message) {
+  string preset= get_env ("MOGAN_TEST_CONFIRM_RESTART");
+  if (preset == "restart" || preset == "later" || preset == "cancel")
+    return preset;
+  array<string>    buttons   = {string ("Restart"), string ("Later"),
+                                string ("Cancel")};
+  QStringList      qmlButtons= translate_buttons (buttons);
+  QmlDialogBridge* bridge    = nullptr;
+  int              choice    = run_qml_dialog (
+      "qrc:/qml/ConfirmRestart.qml", "restart confirm dialog",
+      [&] (QQuickWidget* qw, QDialog& host) {
+        bridge= inject_common_context (qw, host);
+        qw->rootContext ()->setContextProperty ("dialogTitle",
+                                                                 to_qstring (title));
+        qw->rootContext ()->setContextProperty ("dialogMessage",
+                                                                 to_qstring (message));
+        qw->rootContext ()->setContextProperty ("dialogButtons", qmlButtons);
+      },
+      420, 170);
+  delete bridge;
+  switch (choice) {
+  case 1:
+    return "restart";
+  case 2:
+    return "later";
+  default:
+    return "cancel";
   }
 }
 
@@ -350,4 +433,194 @@ cpp_form_dialog (tree fields) {
     r << kv;
   }
   return r;
+}
+
+// ---- 字体选择器 ------------------------------------------------------------
+
+/**
+ * @brief 字体选择器 QML 对话框（声明见 QTMQmlDialog.hpp）。
+ *
+ * @details 走 run_modal_qml_dialog（setModal + show，非阻塞模态）——字体选择器需
+ * live 写回文档并实时看到效果，exec 的嵌套事件循环会让主窗口不重绘，故用
+ * setModal+show 兼得「输入独占」与「live 重绘」。FontSelectorBridge 注入为
+ * fontBridge context property 承载 QML↔scheme 交互；字体状态在 scheme（specsKey
+ * 句柄），bridge 透传。 Cancel 经打开时快照写回撤销，OK 补齐差异落定。 测试钩子
+ * MOGAN_TEST_FONT_SELECTOR=ok|cancel 命中时不弹窗，返回 tree 供测试区分。
+ */
+tree
+cpp_font_selector_dialog (int specs_key) {
+  string preset= get_env ("MOGAN_TEST_FONT_SELECTOR");
+  if (preset == "cancel") {
+    return tree (TUPLE);
+  }
+  if (preset == "ok") {
+    // 测试钩子：走 font-selector-commit（补齐差异落定），返回非空 tuple
+    // 供测试区分 OK。
+    eval_scheme ("(font-selector-commit " * as_string (specs_key) * ")");
+    tree r (TUPLE);
+    r << tree ("ok");
+    return r;
+  }
+  // 非阻塞模态（setModal + show）：host 堆分配，destroyed 自清 bridges。
+  run_modal_qml_dialog (
+      "qrc:/qml/FontSelector.qml", "FontSelector.qml",
+      [&] (QQuickWidget* qw, QDialog* host) {
+        QmlDialogBridge*    closeBridge= inject_common_context (qw, *host);
+        FontSelectorBridge* fontBridge=
+            new FontSelectorBridge (host, specs_key);
+        qw->rootContext ()->setContextProperty ("fontBridge", fontBridge);
+        QObject::connect (host, &QDialog::destroyed, closeBridge,
+                          &QObject::deleteLater);
+        QObject::connect (host, &QDialog::destroyed, fontBridge,
+                          &QObject::deleteLater);
+      },
+      980, 600);
+  // 非阻塞 show 立即返回，用户尚未点 OK/Cancel，无结论——返回空 tree（与 Cancel
+  // 一致）。
+  return tree (TUPLE);
+}
+
+/**
+ * @brief 段落格式 QML 对话框 glue 入口（声明/语义见 QTMQmlDialog.hpp）。
+ * @details 同字体选择器：run_modal_qml_dialog 非阻塞模态 + destroyed 自清
+ * bridges；测试钩子 MOGAN_TEST_PARAGRAPH_FORMAT=ok|cancel 命中时不弹窗。
+ */
+tree
+cpp_paragraph_format_dialog (int specs_key) {
+  string preset= get_env ("MOGAN_TEST_PARAGRAPH_FORMAT");
+  if (preset == "cancel") {
+    return tree (TUPLE);
+  }
+  if (preset == "ok") {
+    eval_scheme ("(paragraph-format-commit " * as_string (specs_key) * ")");
+    tree r (TUPLE);
+    r << tree ("ok");
+    return r;
+  }
+  run_modal_qml_dialog (
+      "qrc:/qml/ParagraphFormat.qml", "ParagraphFormat.qml",
+      [&] (QQuickWidget* qw, QDialog* host) {
+        QmlDialogBridge*       closeBridge= inject_common_context (qw, *host);
+        ParagraphFormatBridge* paraBridge=
+            new ParagraphFormatBridge (host, specs_key);
+        qw->rootContext ()->setContextProperty ("paraBridge", paraBridge);
+        QObject::connect (host, &QDialog::destroyed, closeBridge,
+                          &QObject::deleteLater);
+        QObject::connect (host, &QDialog::destroyed, paraBridge,
+                          &QObject::deleteLater);
+      },
+      520, 590);
+  return tree (TUPLE);
+}
+
+// ---- 文档统计信息 ----------------------------------------------------------
+
+/**
+ * @brief 文档统计信息 QML 对话框的 glue 入口（声明见 QTMQmlDialog.hpp）。
+ *
+ * @details 纯展示对话框，走 run_qml_dialog（exec 阻塞模态）。statsModel 每项为
+ * {label, value} 的 QVariantMap；QML 侧 Statistics.qml 用 Repeater 渲染为
+ * label: value 行。用户点 Close / Esc / X 关闭窗口即结束，无返回值。
+ */
+void
+cpp_statistics_dialog (string title, tree items) {
+  QVariantList model;
+  if (is_compound (items)) {
+    for (int i= 0; i < N (items); i++) {
+      // (stats (item <label> <value>) ...)
+      if (is_compound (items[i]) && N (items[i]) >= 2 &&
+          is_atomic (items[i][0]) && is_atomic (items[i][1])) {
+        QVariantMap row;
+        row["label"]= to_qstring (get_label (items[i][0]));
+        row["value"]= to_qstring (get_label (items[i][1]));
+        model << row;
+      }
+    }
+  }
+
+  array<string> buttons;
+  buttons << string ("Close");
+  run_qml_dialog (
+      "qrc:/qml/Statistics.qml", "Statistics.qml",
+      [&] (QQuickWidget* qw, QDialog& host) {
+        QmlDialogBridge* bridge= inject_common_context (qw, host);
+        qw->rootContext ()->setContextProperty ("statsTitle",
+                                                to_qstring (title));
+        qw->rootContext ()->setContextProperty ("statsItems", model);
+        qw->rootContext ()->setContextProperty ("dialogButtons",
+                                                translate_buttons (buttons));
+        // bridge 无 parent，靠 host destroyed 信号 deleteLater 自清。
+        QObject::connect (&host, &QDialog::destroyed, bridge,
+                          &QObject::deleteLater);
+      },
+      380, 300);
+}
+
+bool
+cpp_version_dialog (string title, string message) {
+  string preset= get_env ("MOGAN_TEST_VERSION_DIALOG");
+  if (preset == "ok") return true;
+  if (preset == "cancel") return false;
+
+  array<string> buttons;
+  buttons << string ("OK");
+  QmlDialogBridge*     closeBridge= nullptr;
+  VersionDialogBridge* bridge     = nullptr;
+  int                  choice     = run_qml_dialog (
+      "qrc:/qml/Version.qml", "Version.qml",
+      [&] (QQuickWidget* qw, QDialog& host) {
+        closeBridge= inject_common_context (qw, host);
+        bridge= new VersionDialogBridge (&host, title, message,
+                                                               translate_buttons (buttons));
+        qw->rootContext ()->setContextProperty ("versionBridge", bridge);
+      },
+      560, 220);
+  delete closeBridge;
+  delete bridge;
+  return choice == 1;
+}
+
+/**
+ * @brief 首选项 QML 对话框的 glue 入口（声明/语义见 QTMQmlDialog.hpp）。
+ *
+ * @details 走 run_qml_dialog（exec 阻塞模态，同
+ * FormDialog——首选项是一次性提交， 无需 live
+ * 重绘文档）。prefBridge（PreferencesBridge）注入为 context property 承载
+ * QML↔scheme 交互——打开时 meta() 一次性拉全部 tab/字段描述符树、OK 时
+ * submit(diff) 一次性应用 diff（需重启字段先弹 cpp-confirm-restart 再 apply）。
+ * Cancel 丢弃本地改动。bridge 不持有任何偏好数据（无状态透传——preferences
+ * 是全局的）。
+ *
+ * 测试钩子 MOGAN_TEST_PREFERENCES=ok|cancel 命中时不弹窗（供自动化测试）：ok
+ * 返回
+ * `(tuple "ok")` 作标记、cancel 返回空 tree（与其它对话框的非阻塞 show 一致）。
+ */
+tree
+cpp_preferences_dialog () {
+  string preset= get_env ("MOGAN_TEST_PREFERENCES");
+  if (preset == "cancel") return tree (TUPLE);
+  if (preset == "ok") {
+    tree r (TUPLE);
+    r << tree ("ok");
+    return r;
+  }
+  array<string>    buttons= {string ("OK"), string ("Cancel")};
+  QmlDialogBridge* bridge = nullptr;
+  run_qml_dialog (
+      "qrc:/qml/Preferences.qml", "Preferences.qml",
+      [&] (QQuickWidget* qw, QDialog& host) {
+        bridge                       = inject_common_context (qw, host);
+        PreferencesBridge* prefBridge= new PreferencesBridge (&host);
+        qw->rootContext ()->setContextProperty ("prefBridge", prefBridge);
+        // 已翻译的 OK/Cancel 注入（同 FormDialog / 确认弹窗），QML 据此显示。
+        qw->rootContext ()->setContextProperty ("dialogButtons",
+                                                translate_buttons (buttons));
+        // bridge 无 parent，靠 host destroyed 信号 deleteLater
+        // 自清（form-pattern）。
+        QObject::connect (&host, &QDialog::destroyed, prefBridge,
+                          &QObject::deleteLater);
+      },
+      620, 600);
+  delete bridge;
+  return tree (TUPLE);
 }

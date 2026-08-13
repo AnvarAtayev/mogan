@@ -251,21 +251,12 @@
   ) ;let*
 ) ;tm-define
 
-(define (exit-fullscreen)
+(tm-define (exit-fullscreen)
   (if (full-screen-edit?)
     (toggle-full-screen-edit-mode)
     (toggle-full-screen-mode)
   ) ;if
-) ;define
-
-(delayed (:idle 0)
-  (lazy-keyboard-force #t)
-  (kbd-map (:require (or (full-screen?) (full-screen-edit?)))
-   ("escape" (exit-fullscreen) "Exit full screen")
-   ("M-" (exit-fullscreen) "Exit full screen")
-   ("A-" (exit-fullscreen) "Exit full screen")
-  ) ;kbd-map
-) ;delayed
+) ;tm-define
 
 (define panorama-revert (make-ahash-table))
 

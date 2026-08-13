@@ -20,6 +20,7 @@ includes("lolly")
 includes("xmake/stem.lua")
 includes("xmake/rules/glue.lua")
 includes("xmake/goldfish.lua")
+includes("xmake/velopack.lua")
 
 set_project(stem_project_name)
 set_policy("run.autobuild", false)
@@ -75,7 +76,7 @@ end
 
 if is_plat("wasm") then
     set_configvar("OS_WASM", true)
-    add_requires("emscripten 3.1.56")
+    add_requires("emscripten 3.1.74")
     set_toolchains("emcc@emscripten")
 else
     set_configvar("OS_WASM", false)
@@ -95,11 +96,16 @@ includes("xmake/requires.lua")
 includes("xmake/targets/stem.lua")
 includes("xmake/targets/libmogan.lua")
 includes("xmake/targets/stem_packager.lua")
+includes("xmake/targets/web_shell.lua")
 if has_config("qt_frontend") then
     includes("xmake/targets/qwkcore.lua")
     includes("xmake/targets/qwkwidgets.lua")
 else
     includes("xmake/targets/imgui.lua")
+end
+
+if has_config("loro") then
+    includes("xmake/targets/loro.lua")
 end
 
 if is_plat("windows") then

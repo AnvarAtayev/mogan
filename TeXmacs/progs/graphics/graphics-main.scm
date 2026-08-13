@@ -248,10 +248,26 @@
   (graphics-set-property "gr-crop-padding" val)
 ) ;tm-define
 
+(define (graphics-grid-aspect-autoupdate)
+  (let* ((magn (graphics-get-zoom))
+         (subdiv (cond ((<= magn 0.5) 1) ((<= magn 1.25) 2) ((<= magn 2.5) 5) (else 10)))
+        ) ;
+    (graphics-set-grid-aspect 'detailed subdiv #f)
+    (graphics-set-grid-aspect 'detailed subdiv #t)
+  ) ;let*
+) ;define
+
+(define (graphics-zoom-unit u magn)
+  (let ((base-u (string-append "1" (length-extract-unit u))))
+    (if (== magn "default") base-u (length-mult (magnify->number magn) base-u))
+  ) ;let
+) ;define
+
 (tm-define (graphics-zoom e)
   (let* ((fr (graphics-cartesian-frame))
          (u (caddr fr))
-         (newu (length-mult e u))
+         (magn (multiply-magnify (graphics-get-property "magnify") e))
+         (newu (graphics-zoom-unit u magn))
          (newud (length-decode newu))
          (x1 (cadr (cadddr fr)))
          (y1 (caddr (cadddr fr)))
@@ -270,13 +286,14 @@
     ;; (display* "old u = " u "\n")
     ;; (display* "new u = " newu "\n")
     (if (and (> newud 100) (< newud 10000000))
-      (with magn
-        (multiply-magnify (graphics-get-property "magnify") e)
+      (begin
         (graphics-decorations-reset)
         (graphics-set-property "gr-frame" newfr)
         (graphics-set-property "magnify" magn)
+        ;; 根据缩放自动调整子格线数量
+        (graphics-grid-aspect-autoupdate)
         (graphics-decorations-update)
-      ) ;with
+      ) ;begin
     ) ;if
   ) ;let*
 ) ;tm-define
@@ -1125,7 +1142,7 @@
       (graphics-enter-mode (graphics-mode) val)
     ) ;begin
   ) ;if
-  (delayed (:idle 1) (update-menus))
+  (delayed (:idle 1) (update-menus 'icons-mode 'icons-focus))
 ) ;tm-define
 
 
@@ -1448,6 +1465,7 @@
     "curve-grid intersection"
     "curve point"
     "curve-curve intersection"
+    "ghost line"
     "text border point"
     "text border"
   ) ;list

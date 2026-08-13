@@ -132,28 +132,13 @@
       (list-ref x 9)
     ) ;define
 
-    (define (take l k)
-      (let loop
-        ((l l) (k k))
-        (if (zero? k) '() (cons (car l) (loop (cdr l) (- k 1))))
-      ) ;let
-    ) ;define
+    (define take g_take)
 
     (define drop list-tail)
 
-    (define (take-right l k)
-      (let loop
-        ((lag l) (lead (drop l k)))
-        (if (pair? lead) (loop (cdr lag) (cdr lead)) lag)
-      ) ;let
-    ) ;define
+    (define take-right g_take_right)
 
-    (define (drop-right l k)
-      (let loop
-        ((lag l) (lead (drop l k)))
-        (if (pair? lead) (cons (car lag) (loop (cdr lag) (cdr lead))) '())
-      ) ;let
-    ) ;define
+    (define drop-right g_drop_right)
 
     (define (split-at lst i)
       (when (< i 0)
@@ -198,10 +183,7 @@
       ) ;unless
       (cond ((null? lists) initial)
             ((and (pair? lists) (null? (cdr lists)) (list? (car lists)))
-             (let loop
-               ((acc initial) (lst (car lists)))
-               (if (null? lst) acc (loop (f (car lst) acc) (cdr lst)))
-             ) ;let
+             (g_fold f initial (car lists))
             ) ;
             (else (let loop
                     ((acc initial) (lsts lists))
@@ -222,10 +204,7 @@
       ) ;unless
       (cond ((null? lists) initial)
             ((and (pair? lists) (null? (cdr lists)) (list? (car lists)))
-             (let loop
-               ((lst (car lists)))
-               (if (null? lst) initial (f (car lst) (loop (cdr lst))))
-             ) ;let
+             (g_fold_right f initial (car lists))
             ) ;
             (else (let loop
                     ((lsts lists))
@@ -268,22 +247,7 @@
       (apply append (apply map proc lists))
     ) ;define
 
-    (define (filter pred l)
-      (let recur
-        ((l l))
-        (if (null-list? l)
-          l
-          (let ((head (car l)) (tail (cdr l)))
-            (if (pred head)
-              (let ((new-tail (recur tail)))
-                (if (eq? tail new-tail) l (cons head new-tail))
-              ) ;let
-              (recur tail)
-            ) ;if
-          ) ;let
-        ) ;if
-      ) ;let
-    ) ;define
+    (define filter g_filter)
 
     (define (partition pred l)
       (let loop
@@ -299,12 +263,7 @@
       (filter (lambda (x) (not (pred x))) l)
     ) ;define
 
-    (define (find pred l)
-      (cond ((null? l) #f)
-            ((pred (car l)) (car l))
-            (else (find pred (cdr l)))
-      ) ;cond
-    ) ;define
+    (define find g_find)
 
     (define (take-while pred lst)
       (if (null? lst)
@@ -324,19 +283,9 @@
       ) ;let
     ) ;define
 
-    (define (any pred? l)
-      (cond ((null? l) #f)
-            ((pred? (car l)) #t)
-            (else (any pred? (cdr l)))
-      ) ;cond
-    ) ;define
+    (define any g_any)
 
-    (define (every pred? l)
-      (cond ((null? l) #t)
-            ((not (pred? (car l))) #f)
-            (else (every pred? (cdr l)))
-      ) ;cond
-    ) ;define
+    (define every g_every)
 
     (define (%extract-maybe-equal maybe-equal)
       (let ((my-equal (if (null-list? maybe-equal) equal? (car maybe-equal))))

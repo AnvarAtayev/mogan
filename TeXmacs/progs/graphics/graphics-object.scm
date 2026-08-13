@@ -12,7 +12,9 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(texmacs-module (graphics graphics-object) (:use (graphics graphics-utils)))
+(texmacs-module (graphics graphics-object)
+  (:use (graphics graphics-utils) (graphics graphics-ghost))
+) ;texmacs-module
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Subroutines for calculating with the graphical object
@@ -215,6 +217,13 @@
           (else '())
     ) ;cond
   ) ;define
+  ;; 对象未显式设置 magnify 时须继承绘图区放大率来量取包围盒
+  (with gm
+    (graphics-eval-magnify)
+    (when (and (in? mag '("default" "1")) gm (nin? gm '("default" "1")))
+      (set! mag gm)
+    ) ;when
+  ) ;with
   (let* ((o1 (with res
                (if (or (graphical-text-at-context? o) (== (car o) 'gr-group))
                  `(with ,"text-at-halign"
@@ -427,6 +436,13 @@
       (concat ,@op)))
 ) ;define
 
+(define (list-remove l index)
+  (cond ((null? l) '())
+        ((== index 0) (cdr l))
+        (else (cons (car l) (list-remove (cdr l) (- index 1))))
+  ) ;cond
+) ;define
+
 (define (create-graphical-contours l ptr pts)
   ;; Group mode
   ;; This routine draws the contours of each one
@@ -525,15 +541,24 @@
                  ) ;with
                ) ;set!
               ) ;
-              (else (set! t
-                      (if (== pts 'object-and-points)
-                        (cons o (asc curscol default-color-selected-points (compress* (cdr o))))
-                        (if (== pts 'object)
-                          `(,o)
-                          (asc curscol default-color-selected-points (compress* (cdr o)))
-                        ) ;if
+              (else (with contour
+                      (if (and selected-point-no path0 (sketch-in? (path->tree path0)))
+                        (append (asc curscol #f (compress* (list-remove (cdr o) selected-point-no)))
+                          `((with ,"fill-color"
+                              ,default-color-selected-points
+                              ,"point-style"
+                              ,"square"
+                              (concat ,(list-ref (cdr o) selected-point-no))))
+                        ) ;append
+                        (asc curscol default-color-selected-points (compress* (cdr o)))
                       ) ;if
-                    ) ;set!
+                      (set! t
+                        (if (== pts 'object-and-points)
+                          (cons o contour)
+                          (if (== pts 'object) `(,o) contour)
+                        ) ;if
+                      ) ;set!
+                    ) ;with
               ) ;else
         ) ;cond
         (set! res (append res (if props `(,(append props `(,(cons* 'concat t)))) t)))
@@ -596,11 +621,12 @@
                                           current-path
                                           pts)))
                            (append props
-                             `((concat unquote
-                                 (cond ((== pts 'points) op)
-                                       ((== pts 'object) `(,mag-o))
-                                       ((== pts 'object-and-points)
-                                        (cons mag-o op)))))
+                             `((concat
+                                 . ,(append (cond ((== pts 'points) op)
+                                                  ((== pts 'object) `(,mag-o))
+                                                  ((== pts 'object-and-points)
+                                                   (cons mag-o op)))
+                                      (graphics-extra-decorations))))
                            ) ;append
                          ) ;if
       ) ;graphical-object!
@@ -661,7 +687,10 @@
   (invalidate-graphical-object)
 ) ;tm-define
 
-(tm-define (graphics-decorations-reset) (create-graphical-object #f #f #f #f))
+(tm-define (graphics-decorations-reset)
+  (graphics-clear-ghost-lines)
+  (create-graphical-object #f #f #f #f)
+) ;tm-define
 
 ;; Operating on the graphical object
 (tm-define (transform-graphical-object opn)
@@ -735,7 +764,7 @@
     (for (o sketch0)
       (with layer
         layer-of-last-removed-object
-        (sketch-toggle (path->tree (graphics-group-insert-bis o group-mode?)))
+        (sketch-toggle (path->tree (graphics-group-insert-bis o #f)))
         (if (not (list? layer)) (set! layer-of-last-removed-object layer))
       ) ;with
     ) ;for
@@ -763,3 +792,5 @@
 ) ;tm-define
 
 (tm-define (sketch-cancel) #t)
+
+(tm-define (graphics-extra-decorations) (graphics-get-decorations-ghost-line))

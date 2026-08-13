@@ -243,8 +243,17 @@ propose_title (string old_title, url u, tree doc) {
   }
   if ((name == "") || (name == ".")) name= as_string (tail (u * url_parent ()));
   if ((name == "") || (name == ".")) name= as_string (u);
-  if (is_rooted_tmfs (u))
-    name= as_string (call ("tmfs-title", as_string (u), object (doc)));
+  if (is_rooted_tmfs (u)) {
+    // tmfs buffer 的标题由业务层显式设定后（如协作 become_ready 设 doc_name）应
+    // 保留，避免 tmfs-title 默认返回完整 URL（tmfs://collab/<doc_id>）覆盖。
+    // 仅当 old_title 为空 / 默认 (No name) / 已是 tmfs URL 时才重算
+    // tmfs-title。
+    bool keep_old= (N (old_title) > 0) && !starts (old_title, "tmfs://") &&
+                   !starts (old_title, "No name");
+    name= keep_old
+              ? old_title
+              : as_string (call ("tmfs-title", as_string (u), object (doc)));
+  }
 
   int i, j;
   for (j= 1; true; j++) {
@@ -545,7 +554,13 @@ load_style_tree (string package) {
   name= resolve (name);
   string doc_s;
   if (!load_string (name, doc_s, false)) {
-    tree doc= texmacs_document_to_tree (doc_s);
+    tree doc;
+    if (ends (as_string (name), ".stem")) {
+      doc= generic_to_tree (doc_s, "stem-document");
+    }
+    else {
+      doc= texmacs_document_to_tree (doc_s);
+    }
     if (is_compound (doc)) doc= extract (doc, "body");
     style_tree_cache (package)= doc;
     return doc;
@@ -637,6 +652,26 @@ buffer_export (url name, url dest, string fm) {
   if (N (links) != 0) doc << compound ("links", links);
 
   return export_tree (doc, dest, fm);
+}
+
+bool
+buffer_render_to_images (url name, url dest, double zoomf) {
+  // 用 passive（无窗口）view 将 buffer 各页渲染为 PNG，headless 可用。
+  tm_view vw= concrete_view (get_passive_view (name));
+  ASSERT (vw != NULL, "view expected");
+  vw->ed->render_to_images (dest, zoomf);
+  return true;
+}
+
+bool
+buffer_render_to_pdf (url name, url dest) {
+  // 用 passive（无窗口）view 将 buffer 导出为 PDF，headless 可用。
+  // 直接走 print_doc 而非 print_to_file，避免无窗 editor 下 set_message
+  // 经 get_current_editor 取空指针而崩溃。
+  tm_view vw= concrete_view (get_passive_view (name));
+  ASSERT (vw != NULL, "view expected");
+  vw->ed->print_doc (dest, false, 1, 1000000);
+  return true;
 }
 
 tree

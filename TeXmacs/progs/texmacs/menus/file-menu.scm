@@ -16,6 +16,7 @@
     (network url)
     (texmacs texmacs tm-server)
     (texmacs texmacs tm-files)
+    (texmacs texmacs tm-collab)
     (texmacs menus print-widgets)
   ) ;:use
 ) ;texmacs-module
@@ -96,7 +97,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define (short-menu-name u)
-  (cond ((url-rooted-tmfs? u) (tmfs-title u '(document "")))
+  (cond ((collab-buffer? u)
+         ;; 云文档标题存于 recent-files 的 name 字段（url-tail 是 UUID 非标题）；未命中回退 doc_id。
+         (or (recent-files-get-name (url->system u)) (collab-url->doc-id u))
+        ) ;
+        ((url-rooted-tmfs? u) (tmfs-title u '(document "")))
         ((url-rooted-web? u)
          (string-append (url->system (url-tail u)) " @ " (url-host u))
         ) ;
@@ -115,8 +120,17 @@
           ) ;
       ((balloon (eval short-name) (eval long-name))
        (begin
-         (if win? (load-document name) (load-buffer name))
-         (when (not (url-exists? (url->system name)))
+         ;; 云文档按 doc_id 重新 join（非 load 文件）；带上存储里的 title，否则
+         ;; collab-join-document 名字缺省 → buffer 标题退化为 UUID。本地按 win? 走 load-document/load-buffer。
+         ;; collab 分派叠 (loro-enabled?)：loro=no 下云 glue 未注册，残留云条目改走 load-* 优雅失败。
+         (if (and (collab-buffer? name) (loro-enabled?))
+           (collab-join-document (collab-url->doc-id name)
+             (or (recent-files-get-name (url->system name)) "")
+           ) ;collab-join-document
+           (if win? (load-document name) (load-buffer name))
+         ) ;if
+         ;; 缺失清理仅对本地文件：云 URL 非磁盘路径，url-exists? 必假，不可据此误删。
+         (when (and (not (collab-buffer? name)) (not (url-exists? (url->system name))))
            (recent-files-remove-by-path (url->system name))
          ) ;when
        ) ;begin
@@ -276,7 +290,9 @@
 
 (menu-bind save-menu
  ("Save" (save-buffer))
- ("Save as" (choose-file save-buffer-as "Save TeXmacs file" "action_save_as"))
+ ((eval (if (collab-buffer? (current-buffer)) "Download" "Save as"))
+  (choose-file save-buffer-as "Save TeXmacs file" "action_save_as")
+ ) ;
  ---
  (link export-top-menu)
  ---
@@ -388,52 +404,80 @@
 (menu-bind file-menu
  ("New" (new-document))
  ("Load" (open-document))
- ("Revert" (revert-buffer))
- (-> "Recent"
-   (link recent-file-menu)
-   (if (nnull? (recent-file-list 1)) ---)
-   (when (nnull? (recent-file-list 1))
-     ("Clear menu" (forget-interactive "recent-buffer"))
-   ) ;when
- ) ;->
- ---
+ (if (qt-gui?)
+   ;; ImGui 前端精简：仅保留 New / Load / Save，以下 Revert/Recent 等仅在 Qt 显示
+   ("Revert" (revert-buffer))
+   (-> "Recent"
+     (link recent-file-menu)
+     (if (nnull? (recent-file-list 1)) ---)
+     (when (nnull? (recent-file-list 1))
+       ("Clear menu" (forget-interactive "recent-buffer"))
+     ) ;when
+   ) ;->
+   ---
+ ) ;if
  ("Save" (save-buffer))
- ("Save as" (choose-file save-buffer-as "Save TeXmacs file" "action_save_as"))
- ---
- (link print-menu)
- ---
- (-> "Import"
-   (link import-import-menu)
+ ((eval (if (collab-buffer? (current-buffer)) "Download" "Save as"))
+  (choose-file save-buffer-as "Save TeXmacs file" "action_save_as")
+ ) ;
+ (if (loro-enabled?)
+   (-> "Collaborative"
+     ;; 未配置服务端：仅显示设置项，引导先填地址/端口。
+     (if (not (collab-server-configured?))
+      ("Set server address..." (collab-configure-server))
+     ) ;if
+     ;; 已配置：完整协作菜单 + 修改服务端入口。
+     (if (collab-server-configured?)
+      ("New shared document" (collab-new-document))
+      ("New shared document from file" (collab-new-document-from-file))
+      (-> "Join shared document" (link collab-docs-menu))
+      (if (loro-collab-active?)
+        ---
+        ("Leave session" (collab-leave))
+        ("Show document UUID" (set-message (loro-collab-doc-id) "Collaborative"))
+      ) ;if
+      ---
+      ("Change server address..." (collab-configure-server))
+     ) ;if
+   ) ;->
+ ) ;if
+ (if (qt-gui?)
    ---
-   ("Pdf with embedded document"
-     (choose-file wrapped-import-pdf-embeded-with-tmu "Import pdf file" "tmu.pdf")
-   ) ;
- ) ;->
- (-> "Export"
-   (link export-export-menu)
+   (link print-menu)
    ---
-   (when (defined? 'texmacs->latex-document)
-     ("LaTeX" (choose-file export-latex-file "Save LaTeX file" "latex"))
-   ) ;when
-   ("TM document" (choose-file save-buffer-as "Save TeXmacs file" "texmacs"))
-   ("Pdf" (choose-file wrapped-print-to-file "Save pdf file" "pdf"))
-   ("Pdf with embedded document"
-     (choose-file wrapped-print-to-pdf-embeded-with-tmu
-       "Save tmu.pdf file"
-       "tmu.pdf"
-     ) ;choose-file
-   ) ;
-   ("Postscript"
-     (choose-file wrapped-print-to-file "Save postscript file" "postscript")
-   ) ;
-   (when (selection-active-any?)
-     (=> "Export selection as image" (link export-as-image-menu))
-   ) ;when
- ) ;->
- ---
- (if (window-per-buffer?) ("Close window" (close-document)))
- (if (not (window-per-buffer?)) ("Close document" (close-document)))
- ("Close TeXmacs" (safely-quit-TeXmacs))
+   (-> "Import"
+     (link import-import-menu)
+     ---
+     ("Pdf with embedded document"
+       (choose-file wrapped-import-pdf-embeded-with-tmu "Import pdf file" "tmu.pdf")
+     ) ;
+   ) ;->
+   (-> "Export"
+     (link export-export-menu)
+     ---
+     (when (defined? 'texmacs->latex-document)
+       ("LaTeX" (choose-file export-latex-file "Save LaTeX file" "latex"))
+     ) ;when
+     ("TM document" (choose-file save-buffer-as "Save TeXmacs file" "texmacs"))
+     ("Pdf" (choose-file wrapped-print-to-file "Save pdf file" "pdf"))
+     ("Pdf with embedded document"
+       (choose-file wrapped-print-to-pdf-embeded-with-tmu
+         "Save tmu.pdf file"
+         "tmu.pdf"
+       ) ;choose-file
+     ) ;
+     ("Postscript"
+       (choose-file wrapped-print-to-file "Save postscript file" "postscript")
+     ) ;
+     (when (selection-active-any?)
+       (=> "Export selection as image" (link export-as-image-menu))
+     ) ;when
+   ) ;->
+   ---
+   (if (window-per-buffer?) ("Close window" (close-document)))
+   (if (not (window-per-buffer?)) ("Close document" (close-document)))
+   ("Close TeXmacs" (safely-quit-TeXmacs))
+ ) ;if
 ) ;menu-bind
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

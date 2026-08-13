@@ -15,12 +15,12 @@
   (import (scheme base) (liii list))
   (export init-gnuplot)
   (begin
-    (use-modules (binary gnuplot) (binary goldfish) (binary gs))
+    (use-modules (gnuplot gnuplot-binary) (binary goldfish) (binary gs))
 
-    (lazy-format (data gnuplot) gnuplot)
+    (lazy-format (gnuplot gnuplot-format) gnuplot)
 
     (define (gnuplot-serialize lan t)
-      (let* ((u (pre-serialize lan t)) (s (texmacs->code (stree->tree u) "utf-8")))
+      (let* ((u (pre-serialize lan t)) (s (texmacs->utf8raw (stree->tree u))))
         (string-append s "\n<EOF>\n")
       ) ;let*
     ) ;define
@@ -62,7 +62,7 @@
     (define (init-gnuplot)
       (plugin-configure gnuplot
         (:require (and (has-binary-goldfish?) (has-binary-gnuplot?)))
-        ,(#_apply-values (all-gnuplot-launchers))
+        ,@(all-gnuplot-launchers)
         (:serializer ,gnuplot-serialize)
         (:session "Gnuplot")
       ) ;plugin-configure

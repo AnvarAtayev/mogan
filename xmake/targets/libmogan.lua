@@ -21,21 +21,42 @@ target("libmogan") do
         set_runtimes("MT")
         add_defines("_USE_MATH_DEFINES")
     end
+    if is_plat("windows") and is_arch("x64") then
+        -- Velopack C++ runtime：头文件路径供后续 tm_velopack 使用；链接项对静态库仅
+        -- 在最终 exe 链接时生效，stem 已自带，此处双保险。
+        add_velopack_runtime ()
+    end
     set_languages("c++17")
     set_policy("check.auto_ignore_flags", false)
     set_encodings("utf-8")
 
     add_deps("libmoebius")
     add_deps("liblolly")
+    add_deps("goldfish")
+    if has_config("loro") then
+        add_defines("LORO_ENABLED")
+    end
+    -- Loro 同步的 WS 传输层（src/Plugins/WebSocket）：native 用 libcurl 实现，
+    -- WASM 用 emscripten WebSocket API 实现（emcc 内置库，无需包依赖）。
+    if has_config("loro") then
+        if not is_plat("wasm") then
+            add_packages("libcurl", {public = true})
+        end
+    end
     if has_config("qt_frontend") then
         add_deps("QWKCore", "QWKWidgets")
         add_rules("qt.static")
         --add_packages("qt6base", "qt6core", "qt6gui", "qt6widgets")
         add_frameworks("QtGui", "QtWidgets", "QtCore", "QtPrintSupport", "QtSvg", "QtNetwork", "QtNetworkAuth")
         add_frameworks("QtQml", "QtQuick", "QtQuickWidgets", "QtBodymovin")
+    elseif has_config("cli_frontend") then
+        set_kind("static")
     else
         add_deps("imgui")
         set_kind("static")
+    end
+    if has_config("goldfish") and not is_plat("wasm") then
+        add_defines("GOLDFISH_ENABLE_HTTP")
     end
 
     set_policy("check.auto_ignore_flags", false)
@@ -77,6 +98,9 @@ target("libmogan") do
         add_defines("QTPIPES")
         set_configvar("USE_QT_PRINTER", 1)
         add_defines("USE_QT_PRINTER")
+    elseif has_config("cli_frontend") then
+        set_configvar("MOGAN_CLI", 1)
+        add_defines("MOGAN_CLI")
     elseif not is_plat("wasm") then -- WASM GLFW is in EMCC
         add_packages("glfw")
     end
@@ -85,12 +109,11 @@ target("libmogan") do
         add_packages("liii-pdfhummus")
     end
     add_packages("freetype")
-    add_packages("goldfish")
     add_packages("liii-tbox")
     if not is_plat("wasm") then
         add_packages("cpr")
     end
-    add_packages("argh")
+    add_packages("argh", {public = true})
     if not is_plat("macosx") then
         add_packages("libiconv")
     end
@@ -136,12 +159,12 @@ target("libmogan") do
                 USE_PLUGIN_TEX = true,
                 USE_PLUGIN_ISPELL = true,
                 USE_PLUGIN_PDF = has_config("pdfhummus"),
-                USE_PLUGIN_SPARKLE = false,
+                USE_PLUGIN_VELOPACK = is_plat("windows") and is_arch("x64"),
                 USE_PLUGIN_HTML = true,
                 USE_MUPDF_RENDERER = has_config("mupdf"),
                 USE_STARTUP_TAB = has_config("startup_tab"),
                 USE_TEXT_TOOLBAR = has_config("text_toolbar"),
-                USE_TUTORIAL = enable_tutorial,
+                USE_TUTORIAL = not has_config("is_community"),
                 IS_COMMUNITY = has_config("is_community"),
                 DEBUG_WITH_TIMESTAMP = has_config("debug_with_timestamp"),
                 }})
@@ -244,13 +267,11 @@ target("libmogan") do
             "$(projectdir)/src/Typeset/Concat",
             "$(projectdir)/src/Typeset/Page",
             "$(projectdir)/src/Mogan/Cache",
+            "$(projectdir)/src/Mogan/HashUtils",
             "$(projectdir)/src/Mogan/TemplateCenter",
             "$(projectdir)/src/Mogan/Telemetry",
             "$(projectdir)/TeXmacs/include",
-            "$(builddir)/glue",
-            "$(projectdir)/TeXmacs/plugins/goldfish/src/",
-            "$(projectdir)/3rdparty/nlohmann_json/include",
-            "$(projectdir)/3rdparty/json-schema-validator/src"
+            "$(builddir)/glue"
         }, {public = true})
 
     add_files({
@@ -279,8 +300,7 @@ target("libmogan") do
             "$(projectdir)/src/Plugins/Xml/**.cpp",
             "$(projectdir)/src/Plugins/Html/**.cpp",
             "$(projectdir)/src/Plugins/Updater/**.cpp",
-            "$(projectdir)/TeXmacs/plugins/goldfish/src/**.cpp",
-            "$(projectdir)/3rdparty/json-schema-validator/src/**.cpp"})
+            "$(projectdir)/src/Mogan/HashUtils/**.cpp"})
 
     if has_config("pdfhummus") then
         add_includedirs("$(projectdir)/src/Plugins/Pdf/**.hpp", {public=true})
@@ -296,9 +316,33 @@ target("libmogan") do
         add_rules("qt.qrc")
         add_files("$(projectdir)/TeXmacs/misc/images/images.qrc")
         add_files("$(projectdir)/src/Plugins/Qt/moganqml.qrc")
+    elseif has_config("cli_frontend") then
+        add_files("$(projectdir)/src/Plugins/CLI/**.cpp")
     else
         add_files("$(projectdir)/src/Plugins/ImGui/**.cpp")
-        remove_files("$(projectdir)/TeXmacs/plugins/goldfish/src/liii_http.cpp")
+        if is_plat("macosx") then
+            add_files("$(projectdir)/src/Plugins/ImGui/**.mm")
+        end
+    end
+
+    if has_config("loro") then
+        add_includedirs("$(projectdir)/src/Plugins/WebSocket", {public=true})
+        if is_plat("wasm") then
+            add_includedirs("$(projectdir)/src/Plugins/WebSocket/emscripten", {public=true})
+            add_files("$(projectdir)/src/Plugins/WebSocket/emscripten/*.cpp")
+        else
+            add_includedirs("$(projectdir)/src/Plugins/WebSocket/libcurl", {public=true})
+            add_files("$(projectdir)/src/Plugins/WebSocket/libcurl/*.cpp")
+        end
+        add_includedirs("$(projectdir)/src/Plugins/Collab", {public=true})
+        add_files("$(projectdir)/src/Plugins/Collab/loro_collab.cpp")
+        add_files("$(projectdir)/src/Plugins/Collab/loro_collab_ws.cpp")
+        if is_plat("wasm") then
+            add_files("$(projectdir)/src/Plugins/Collab/loro_collab_docs_wasm.cpp")
+        else
+            add_files("$(projectdir)/src/Plugins/Collab/loro_collab_docs_native.cpp")
+        end
+        add_files("$(projectdir)/src/Scheme/Plugins/glue_collab.lua", {rule = "mogan.glue"})
     end
 
     if is_plat("macosx") then
@@ -333,6 +377,11 @@ target("libmogan") do
     end
 
     add_mxflags("-fno-objc-arc")
+    if is_plat("wasm") then
+        add_cxxflags("--use-port=contrib.glfw3")
+        add_ldflags("--use-port=contrib.glfw3")
+        add_ldflags("-lwebsocket.js")
+    end
     on_load(function (target)
         target:add("forceincludes", path.absolute("$(builddir)/config.h"))
         target:add("forceincludes", path.absolute("$(builddir)/tm_configure.hpp"))

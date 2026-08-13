@@ -132,23 +132,37 @@ im_simple_widget_rep::is_invalid () {
 }
 
 void
-im_simple_widget_rep::recenter_x () {
-  // Center the page horizontally when it is narrower than the canvas
-  SI page_w= ext_x2 - ext_x1;
-  if (page_w > 0 && page_w < canvas_w) scroll_x= -((canvas_w - page_w) / 2);
-  else scroll_x= 0;
+im_simple_widget_rep::clear_invalid () {
+  is_dirty       = false;
+  invalid_regions= rectangles ();
 }
 
 void
-im_simple_widget_rep::clamp_scroll_y () {
-  // doc_h is the raw extents height (same scale as canvas_h / scroll_y).
+im_simple_widget_rep::recenter () {
+  // 水平：文档窄于画布则水平居中（负偏移把文档右移），否则贴左（ImGui
+  // 无水平滚动）。
+  SI page_w= ext_x2 - ext_x1;
+  if (page_w > 0 && page_w < canvas_w) scroll_x= -((canvas_w - page_w) / 2);
+  else scroll_x= 0;
+  // 垂直：始终上对齐——短文档也贴顶（不居中，否则文档会被推到下方、与编辑时的
+  // 位置不一致）；仅当文档高于画布时，把滚动钳位到可滚动范围
+  // [-(doc_h-canvas_h), 0]（0=顶部，负=向下滚动）。
   SI doc_h= ext_y2 - ext_y1;
-  if (doc_h > canvas_h) {
+  if (doc_h >= canvas_h) {
     SI min_sy= -(doc_h - canvas_h);
     if (scroll_y < min_sy) scroll_y= min_sy;
     if (scroll_y > 0) scroll_y= 0;
   }
-  else scroll_y= 0; // whole document fits → no vertical scroll
+  else scroll_y= 0;
+}
+
+void
+im_simple_widget_rep::scroll_by (SI dx, SI dy) {
+  // 增量滚动：直接累加到视口上沿，交 recenter 钳位。不经过 SLOT_SCROLL_POSITION
+  // 的居中换算（那是 editor 绝对定位专用）。
+  scroll_x+= dx;
+  scroll_y+= dy;
+  recenter ();
 }
 
 /******************************************************************************
@@ -171,24 +185,25 @@ im_simple_widget_rep::send (slot s, blackbox val) {
     ext_y1  = p.x2;
     ext_x2  = p.x3;
     ext_y2  = p.x4;
-    recenter_x ();
-    clamp_scroll_y ();
+    recenter ();
   } break;
   case SLOT_SIZE: {
     coord2 p= open_box<coord2> (val);
     canvas_w= p.x1;
     canvas_h= p.x2;
-    recenter_x ();
-    clamp_scroll_y ();
+    recenter ();
   } break;
   case SLOT_SCROLL_POSITION: {
+    // editor 的 make-cursor-visible / scroll_to 下达的 (x, y) 是「希望居于视口
+    // 中央」的点，与 Qt 一致——Qt 在 setOrigin 前减去半个 surface 尺寸
+    // （"adjust because child is centered"），使光标落到视口正中而非贴到上沿。
+    // 这里把中心点换算成视口上沿 scroll_y（= y + canvas_h/2）存储；查询
+    // SLOT_SCROLL_POSITION 仍返回上沿，与 Qt 返回 origin 同构，弹出框定位等
+    // 依赖「上沿」语义的调用方不受影响。增量滚动（滚轮/拖选）走 scroll_by，
+    // 不经此分支，避免每帧叠加半个画布的偏移。水平始终由 recenter 居中。
     coord2 p= open_box<coord2> (val);
-    // Horizontal is forced centered (recenter_x); p.x1 ignored. Keep vertical
-    // (wheel scroll writes scroll_y here; only accept it while at/above top),
-    // then clamp to the document so a stale zoom position can't persist.
-    recenter_x ();
-    if (scroll_y <= 0) scroll_y= p.x2;
-    clamp_scroll_y ();
+    scroll_y= p.x2 + (canvas_h >> 1);
+    recenter ();
   } break;
   case SLOT_ZOOM_FACTOR: {
     double new_zoom= open_box<double> (val);

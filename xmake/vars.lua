@@ -9,7 +9,7 @@
 -- It comes WITHOUT ANY WARRANTY WHATSOEVER. For details, see the file LICENSE
 -- in the root directory or <http://www.gnu.org/licenses/gpl-3.0.html>.
 
-XMACS_VERSION="2026.3.0-rc1"
+XMACS_VERSION="2026.3.0-rc11"
 TEXMACS_VERSION = "2.1.2"
 GOLDFISH_VERSION = "17.11.2"
 DEVEL_VERSION = TEXMACS_VERSION
@@ -30,7 +30,7 @@ TREESITTER_SCHEME_VERSION = "0.6.2"
 QT6_VERSION = "6.5.3"
 QTIFW_VERSION = "4.6.0"
 CPR_VERSION = "1.10.5"
-CURL_VERSION = "8.4.0"
+CURL_VERSION = "8.21.0"
 PDFHUMMUS_VERSION = "4.9.0"
 FREETYPE_VERSION = "2.13.3"
 LIBPNG_VERSION = "1.6.37"
@@ -84,6 +84,7 @@ libstem_headers = {
     "$(projectdir)/src/Kernel/Types",
     "$(projectdir)/src/Mogan",
     "$(projectdir)/src/Plugins",
+    "$(projectdir)/src/Plugins/WebSocket",
     "$(projectdir)/src/Scheme",
     "$(projectdir)/src/Scheme/S7",
     "$(projectdir)/src/Scheme/L2",
@@ -117,6 +118,8 @@ libstem_headers = {
     "$(builddir)/glue",
     "$(projectdir)/TeXmacs/include",
     "$(projectdir)/TeXmacs/plugins/goldfish/src",
+    "$(projectdir)/3rdparty/nlohmann_json/include",
+    "$(projectdir)/3rdparty/json-schema-validator/src"
 }
 
 libstem_srcs = {

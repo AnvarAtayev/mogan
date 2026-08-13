@@ -44,6 +44,7 @@ class QToolBar;
 class QTMInteractivePrompt;
 class PDFReaderWidget;
 class PdfToolBar;
+class OutlineWidget;
 
 /*! Models one main window with toolbars, an associated view, etc.
 
@@ -81,13 +82,14 @@ class qt_tm_widget_rep : public qt_window_widget_rep {
   QDockWidget*            leftTools;
   QDockWidget*            bottomTools;
   QDockWidget*            extraTools;
-  QDockWidget*            chatSideDock; ///< AI 聊天侧边栏 Dock
+  QDockWidget*            chatSideDock;   ///< AI 聊天侧边栏 Dock
+  OutlineWidget*          pdfOutlineDock; ///< PDF 目录（大纲）侧边栏 Dock
   QTMTabPageContainer*    tabPageContainer;
   QTMAuxiliaryWidget*     auxiliaryWidget;
   QWK::WidgetWindowAgent* windowAgent;
   QWK::NotificationBar*   scmNotificationBar; // SCM 提示条
   QWK::LoginButton*       loginButton;
-  QPushButton*      inviteButton; ///< 标题栏「邀请好友」按钮，已登录时显示
+  QPushButton*      inviteButton; ///< 标题栏「领取会员」按钮，已登录时显示
   QWK::LoginDialog* m_loginDialog;
   QLabel*           avatarLabel;
   QLabel*           nameLabel;
@@ -127,18 +129,19 @@ class qt_tm_widget_rep : public qt_window_widget_rep {
   QString m_currentScmNotificationItem;
 
 private:
-  void onAddTabRequested ();
-  void setupLoginDialog (QWK::LoginDialog* loginDialog);
-  void checkLocalTokenAndLogin ();
-  void fetchUserInfo (const QString& token, bool showDialog= true);
-  void refreshLoginDialogPlacement ();
-  bool shouldShowLoginDialogUpdateSection ();
-  void setLoginDialogUpdateSectionVisible (bool visible);
-  void refreshMembershipInfoInBackground ();
-  void refreshScmNotificationBar ();
-  void syncScmUpdateNotification (bool           updateAvailable,
-                                  const QString& remoteVersion= QString ());
-  void syncScmGuestNotification (bool visible);
+  void              onAddTabRequested ();
+  void              setupLoginDialog (QWK::LoginDialog* loginDialog);
+  QWK::LoginDialog* ensureLoginDialog ();
+  void              checkLocalTokenAndLogin ();
+  void              fetchUserInfo (const QString& token, bool showDialog= true);
+  void              refreshLoginDialogPlacement ();
+  bool              shouldShowLoginDialogUpdateSection ();
+  void              setLoginDialogUpdateSectionVisible (bool visible);
+  void              refreshMembershipInfoInBackground ();
+  void              refreshScmNotificationBar ();
+  void              syncScmUpdateNotification (bool           updateAvailable,
+                                               const QString& remoteVersion= QString ());
+  void              syncScmGuestNotification (bool visible);
   void
        syncScmMembershipNotification (bool           hasData,
                                       const QString& memberType = QString (),
@@ -207,6 +210,7 @@ private:
   QWidget*
        chatContentWidget; ///\< 聊天标签页模式下显示的控件（QTChatTabWidget）。
   bool startupTabMode;    ///\< 启动标签页视图是否激活。
+  bool startupChromePending_; ///\< 启动页期间是否有被推迟的 chrome 待补装。
   PDFReaderWidget* pdfViewerWidget;   ///\< PDF 标签页模式下的阅读器控件。
   bool             pdfTabMode;        ///\< PDF 阅读器标签页是否激活。
   QString          currentPdfPath;    ///\< 当前显示的 PDF 路径。
@@ -247,13 +251,15 @@ public:
   void        set_full_screen (bool flag);
   void        update_visibility ();
   void        install_main_menu ();
+  void        apply_notification_bar_content ();
+  void        flush_startup_deferred_chrome ();
   static void tweak_iconbar_size (QSize& sz);
   void        openRenewalPage ();
 
   /**
    * @brief 打开邀请好友页面。
    *
-   * 邀请页 base URL 通过 `account-oauth2-config` 的 `invitation-url`
+   * 邀请页 base URL 通过 `account-oauth2-config` 的 `growth-url`
    * 配置项获取， 按 staging/prod profile 自动切换；URL 后缀由 buildAuthUrl 拼接
    * （key/user 参数用于后台识别邀请人）。
    */

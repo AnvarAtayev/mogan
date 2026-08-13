@@ -21,6 +21,7 @@
 #include "qt_utilities.hpp"
 #include "qt_widget.hpp"
 #include "s7_tm.hpp"
+#include "tm_debug.hpp"
 #include "tm_window.hpp"
 
 #include <moebius/tree_label.hpp>
@@ -50,6 +51,13 @@
 using namespace moebius;
 
 bool QTChatTabWidget::globalSidebarCollapsed_= false;
+bool QTChatTabWidget::initBenchPending_      = false;
+
+void
+QTChatTabWidget::beginInitBench () {
+  initBenchPending_= true;
+  bench_start ("chat_init");
+}
 
 namespace {
 
@@ -191,16 +199,8 @@ ChatConversationPanel::setup_ui () {
   topLayout->addWidget (sessionTitle_, 0, Qt::AlignHCenter);
   topLayout->addSpacing (DpiUtils::scaled (kTitleToMessageSpacing));
 
-  // Message area
-  qreal chatZoom= DpiUtils::scaled (100) / 100.0;
-  messageWidget_= texmacs_input_widget (
-      tree (WITH, "font", "sys-chinese", "zoom-factor", as_string (chatZoom),
-            tree (DOCUMENT, "")),
-      compound (kChatEmbeddedStyle, tuple ("generic")), msgBufferUrl_);
-  set_zoom_factor (messageWidget_, chatZoom);
-
-  QWidget* messageQWidget= concrete (messageWidget_)->as_qwidget ();
-  messageFrame_          = new QWidget (topPanel);
+  // Message area（容器先行、嵌入编辑器懒创建，见 ensureMessageWidget）
+  messageFrame_= new QWidget (topPanel);
   messageFrame_->setObjectName ("chat-tab-message-frame");
   messageFrame_->setStyleSheet (
       QString ("border: none; border-radius: %1px;")
@@ -208,30 +208,11 @@ ChatConversationPanel::setup_ui () {
   QVBoxLayout* messageFrameLayout= new QVBoxLayout (messageFrame_);
   messageFrameLayout->setContentsMargins (0, 0, 0, 0);
   messageFrameLayout->setSpacing (0);
-  messageQWidget->setParent (messageFrame_);
-  messageQWidget->setMinimumHeight (DpiUtils::scaled (kMessageMinHeight));
-  // Ignored: 忽略 TeXmacs widget 返回的屏幕尺寸 sizeHint，
-  // 避免在 dock 模式下窗口被向下拉伸。
-  messageQWidget->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Ignored);
-  {
-    QAbstractScrollArea* msgArea=
-        messageQWidget->findChild<QAbstractScrollArea*> ();
-    if (msgArea) {
-      msgArea->setHorizontalScrollBarPolicy (Qt::ScrollBarAlwaysOff);
-      msgArea->setVerticalScrollBarPolicy (Qt::ScrollBarAlwaysOff);
-      msgArea->viewport ()->setBackgroundRole (QPalette::Base);
-    }
-    QTMWidget* msgEditor= messageQWidget->findChild<QTMWidget*> ();
-    if (msgEditor) {
-      msgEditor->setProperty ("chat_message_readonly", true);
-      msgEditor->installEventFilter (this);
-    }
-  }
-  messageFrameLayout->addWidget (messageQWidget);
   messageFrame_->hide ();
   topLayout->addWidget (messageFrame_, 1);
 
   // Input area
+  qreal    chatZoom = DpiUtils::scaled (100) / 100.0;
   QWidget* inputArea= new QWidget (topPanel);
   inputArea->setObjectName ("chat-tab-input-area-wrap");
   inputArea->setSizePolicy (QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -338,9 +319,47 @@ ChatConversationPanel::setup_ui () {
 }
 
 void
+ChatConversationPanel::ensureMessageWidget () {
+  if (!is_nil (messageWidget_) || !messageFrame_) return;
+  // message buffer 可能已被 scheme 侧写入内容（恢复的消息 / 首个问答轮）；
+  // texmacs_input_widget 对已存在 buffer 会 set_buffer_tree 整体覆盖，
+  // 故必须以现有 body 初始化
+  tree body= tree (DOCUMENT, "");
+  if (contains (msgBufferUrl_, get_all_buffers ()))
+    body= get_buffer_body (msgBufferUrl_);
+  qreal chatZoom= DpiUtils::scaled (100) / 100.0;
+  messageWidget_= texmacs_input_widget (
+      tree (WITH, "font", "sys-chinese", "zoom-factor", as_string (chatZoom),
+            body),
+      compound (kChatEmbeddedStyle, tuple ("generic")), msgBufferUrl_);
+  set_zoom_factor (messageWidget_, chatZoom);
+
+  QWidget* messageQWidget= concrete (messageWidget_)->as_qwidget ();
+  messageQWidget->setParent (messageFrame_);
+  messageQWidget->setMinimumHeight (DpiUtils::scaled (kMessageMinHeight));
+  // Ignored: 忽略 TeXmacs widget 返回的屏幕尺寸 sizeHint，
+  // 避免在 dock 模式下窗口被向下拉伸。
+  messageQWidget->setSizePolicy (QSizePolicy::Preferred, QSizePolicy::Ignored);
+  QAbstractScrollArea* msgArea=
+      messageQWidget->findChild<QAbstractScrollArea*> ();
+  if (msgArea) {
+    msgArea->setHorizontalScrollBarPolicy (Qt::ScrollBarAlwaysOff);
+    msgArea->setVerticalScrollBarPolicy (Qt::ScrollBarAlwaysOff);
+    msgArea->viewport ()->setBackgroundRole (QPalette::Base);
+  }
+  QTMWidget* msgEditor= messageQWidget->findChild<QTMWidget*> ();
+  if (msgEditor) {
+    msgEditor->setProperty ("chat_message_readonly", true);
+    msgEditor->installEventFilter (this);
+  }
+  messageFrame_->layout ()->addWidget (messageQWidget);
+}
+
+void
 ChatConversationPanel::enterConversationMode () {
   if (conversationMode_) return;
 
+  ensureMessageWidget ();
   conversationMode_  = true;
   const int endOffset= DpiUtils::scaled (kConversationTopOffsetY);
 
@@ -422,6 +441,8 @@ ChatConversationPanel::readInputMessage () const {
 
 bool
 ChatConversationPanel::is_empty_document_body (tree body) {
+  // get_buffer_body 对不存在的 buffer 返回原子空串，同样视为空文档
+  if (is_atomic (body)) return body->label == "";
   if (!is_func (body, DOCUMENT)) return false;
   if (N (body) == 0) return true;
   return N (body) == 1 && is_atomic (body[0]) && body[0]->label == "";
@@ -527,11 +548,13 @@ ChatConversationPanel::should_block_readonly_event (QObject* watched,
 bool
 ChatConversationPanel::should_send_on_keypress (int                   key,
                                                 Qt::KeyboardModifiers mods,
-                                                bool hasActiveCompletionPopup) {
+                                                bool hasActiveCompletionPopup,
+                                                bool isInHybrid) {
   bool isEnterKey= (key == Qt::Key_Return || key == Qt::Key_Enter);
   if (!isEnterKey) return false;
   if (mods & Qt::ShiftModifier) return false;
   if (hasActiveCompletionPopup) return false;
+  if (isInHybrid) return false;
   return true;
 }
 
@@ -548,9 +571,11 @@ ChatConversationPanel::eventFilter (QObject* watched, QEvent* event) {
       emit closeSidebarInDockModeRequested ();
       return true;
     }
-    bool hasActiveCompletionPopup= has_active_math_completion_popup (watched);
+    bool   hasActiveCompletionPopup= has_active_math_completion_popup (watched);
+    editor ed                      = get_current_editor ();
+    bool   isInHybrid              = (!is_nil (ed)) && ed->inside (HYBRID);
     if (should_send_on_keypress (keyEvent->key (), keyEvent->modifiers (),
-                                 hasActiveCompletionPopup)) {
+                                 hasActiveCompletionPopup, isInHybrid)) {
       void* ptr= watched->property ("chat_panel").value<void*> ();
       if (ptr == this) {
         emit sendRequested (sessionId_);
@@ -1667,6 +1692,19 @@ QTChatTabWidget::setGlobalSidebarCollapsed (bool collapsed) {
 /******************************************************************************
  * QTChatTabWidget 事件处理
  ******************************************************************************/
+
+void
+QTChatTabWidget::paintEvent (QPaintEvent* event) {
+  // 点击 Chat 标签页后的首次绘制视为渲染完成，结束 chat_init 计时
+  bool benching= initBenchPending_;
+  if (benching) bench_start ("chat_init: first paint");
+  QWidget::paintEvent (event);
+  if (benching) {
+    initBenchPending_= false;
+    bench_end ("chat_init: first paint", 10);
+    bench_end ("chat_init");
+  }
+}
 
 void
 QTChatTabWidget::keyPressEvent (QKeyEvent* event) {

@@ -29,6 +29,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QObject>
+#include <QPointer>
 #include <QPushButton>
 #include <QResource>
 #include <QStatusBar>
@@ -41,14 +42,17 @@
 #include "config.h"
 #include "scheme.hpp"
 
+#include "dictionary.hpp"
 #include "qt_chat_controller.hpp"
 #include "qt_gui.hpp"
+#include "qt_pdf_outline_widget.hpp" // OutlineWidget 定义在此
 #include "qt_pdf_reader_widget.hpp"
 #include "qt_pdf_toolbar.hpp"
 #include "qt_picture.hpp"
 #include "qt_renderer.hpp"
 #include "qt_tm_widget.hpp"
 #include "qt_utilities.hpp"
+#include "tm_debug.hpp"
 
 bool in_presentation_mode ();
 
@@ -78,6 +82,20 @@ bool in_presentation_mode ();
 #include <moebius/data/scheme.hpp>
 
 using moebius::data::scm_quote;
+
+namespace {
+/** @brief 仅用于消 warning 的占位 widget，本身无任何视觉/行为作用。
+ *
+ *  QDockWidget::setTitleBarWidget(new QWidget) 可禁用标题栏，但空 QWidget
+ *  的 minimumSizeHint() 默认返回 (-1,-1)，会被 QMainWindowLayout 当成 dock
+ *  最小尺寸约束，从而触发 setMinimumSize 负尺寸警告。这里仅 override 两个
+ *  hint 返回 (0,0) 提供有效约束，渲染效果与空 QWidget 完全一致。 */
+class EmptyTitleBar : public QWidget {
+public:
+  QSize sizeHint () const override { return QSize (0, 0); }
+  QSize minimumSizeHint () const override { return QSize (0, 0); }
+};
+} // namespace
 
 int menu_count= 0; // zero if no menu is currently being displayed
 list<qt_tm_widget_rep*> waiting_widgets;
@@ -213,9 +231,10 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
       membershipPeriodLabel (nullptr), membershipTitleLabel (nullptr),
       loginActionButton (nullptr), logoutButton (nullptr), m_userId (""),
       m_currentScmNotificationItem (""), startupContentWidget (nullptr),
-      startupTabMode (false), pdfViewerWidget (nullptr), pdfTabMode (false),
-      currentPdfPath (""), lastLoadedPdfPath (""), chatContentWidget (nullptr),
-      chatTabMode (false), chatSideDock (nullptr),
+      startupTabMode (false), startupChromePending_ (false),
+      pdfViewerWidget (nullptr), pdfTabMode (false), currentPdfPath (""),
+      lastLoadedPdfPath (""), chatContentWidget (nullptr), chatTabMode (false),
+      chatSideDock (nullptr), pdfOutlineDock (nullptr),
       chatSidebarToggleBtn (nullptr), chatSidebarMode (false),
       chatSidebarModeMemory_ (false), centralWidgetUpdatesFrozen_ (false) {
   type= texmacs_widget;
@@ -429,9 +448,8 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
     });
   }
   else {
-    // 商业版：完整登录功能
-    m_loginDialog= new QWK::LoginDialog (mainwindow ());
-    setupLoginDialog (m_loginDialog);
+    // 商业版：完整登录功能。LoginDialog 创建耗时 ~100ms，首屏不需要，
+    // 惰性到首次使用（ensureLoginDialog）时再创建
     QObject::connect (loginButton, &QWK::LoginButton::clicked,
                       [this] () { checkLocalTokenAndLogin (); });
   }
@@ -439,18 +457,19 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   // 邀请好友按钮 - 放在登录按钮左侧（商业版已登录时显示）
   inviteButton= new QPushButton (windowBar);
   inviteButton->setObjectName ("invite-button");
-  inviteButton->setText (qt_translate ("Invite Friends"));
+  inviteButton->setText (qt_translate ("Claim Membership"));
   inviteButton->setProperty ("system-button", true);
   inviteButton->setFocusPolicy (Qt::NoFocus);
   inviteButton->setSizePolicy (QSizePolicy::Fixed, QSizePolicy::Fixed);
   inviteButton->setFixedSize (vipbuttonWidth, vipbuttonHeight);
   inviteButton->setCursor (Qt::PointingHandCursor);
+  bool isChinese= (get_output_language () == "chinese");
   inviteButton->setStyleSheet (
       QString (
           "QPushButton#invite-button { border-radius: %1px; font-size: %2px; "
           "margin-right: %3px; }")
           .arg (DpiUtils::scaled (12))
-          .arg (DpiUtils::scaled (12))
+          .arg (DpiUtils::scaled (isChinese ? 12 : 9))
           .arg (DpiUtils::scaled (4)));
 
   windowBar->setVipButton (inviteButton);
@@ -528,10 +547,22 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
                         call ("notification-bar-snooze-membership-expired");
                       }
                     });
-  if (!is_community_stem ()) checkNetworkAvailable ();
+  // guard 守卫：deleteLater() 异步销毁 QWidget，存在「this 已析构、回调仍
+  // 触发」的窗口；捕获按值的 QPointer 跟踪 QWidget 生命周期（不依赖 this），
+  // 失效即跳过。本文件定时器/网络/信号回调统一此模式，下文不再赘述。
+  QPointer<QWidget> guard (qwid);
+  // 网络检查挪到事件循环，避免构造期创建 QNetworkAccessManager 的同步开销
+  if (!is_community_stem ())
+    QTimer::singleShot (0, [guard, this] () {
+      if (!guard) return;
+      checkNetworkAvailable ();
+    });
 
   // 延迟检查版本更新（启动后10秒）
-  QTimer::singleShot (10000, [this] () { checkVersionUpdate (); });
+  QTimer::singleShot (10000, [guard, this] () {
+    if (!guard) return;
+    checkVersionUpdate ();
+  });
 
   // there is a bug in the early implementation of toolbars in Qt 4.6
   // which has been fixed in 4.6.2 (at least)
@@ -595,7 +626,7 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
   double status_scale=
       (((double) retina_icons) > retina_scale ? 1.5 : retina_scale);
   if (status_scale > 1.0) {
-    int std_h= (os_mingw () ? 28 : 20);
+    int std_h= 20;
     int min_h= (int) floor (std_h * status_scale);
     bar->setMinimumHeight (min_h);
   }
@@ -844,10 +875,19 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
     chatSideDock->setAllowedAreas (Qt::RightDockWidgetArea);
     chatSideDock->setFeatures (QDockWidget::DockWidgetClosable);
     chatSideDock->setFloating (false);
-    chatSideDock->setTitleBarWidget (new QWidget ()); // 禁用标题栏
+    chatSideDock->setTitleBarWidget (new EmptyTitleBar ()); // 禁用标题栏
     chatSideDock->setMinimumSize (DpiUtils::scaled (320), 0);
     chatSideDock->setVisible (false);
     mw->addDockWidget (Qt::RightDockWidgetArea, chatSideDock);
+  }
+
+  // PDF 目录（大纲）侧边栏 Dock（PDF 模式显示书签，编辑器模式显示章节结构）
+  {
+    pdfOutlineDock= new OutlineWidget ("目录", mw);
+    pdfOutlineDock->setObjectName ("pdfOutlineDock");
+    pdfOutlineDock->setFloating (false);
+    pdfOutlineDock->setVisible (false);
+    mw->addDockWidget (Qt::LeftDockWidgetArea, pdfOutlineDock);
 
     // 文档区域右上角浮动新建对话按钮
     chatSidebarToggleBtn= new QPushButton (cw);
@@ -930,8 +970,11 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
       QTMOAuth* account= server->getAccount ();
       // 商业版：连接登录状态变化信号
       if (!is_community_stem ()) {
+        // account 由 server 单例管理，信号不随 widget 析构断开，故仍需 guard
+        QPointer<QWidget> guard (qwid);
         QObject::connect (account, &QTMOAuth::loginStateChanged,
-                          [this] (bool loggedIn) {
+                          [guard, this] (bool loggedIn) {
+                            if (!guard) return;
                             if (loggedIn) {
                               syncScmGuestNotification (false);
                               refreshMembershipInfoInBackground ();
@@ -942,7 +985,11 @@ qt_tm_widget_rep::qt_tm_widget_rep (int mask, command _quit)
                             }
                           });
         if (account->isLoggedIn ()) {
-          refreshMembershipInfoInBackground ();
+          // 首次创建 QNetworkAccessManager 的同步开销挪出构造关键路径
+          QTimer::singleShot (0, [guard, this] () {
+            if (!guard) return;
+            refreshMembershipInfoInBackground ();
+          });
         }
       }
     }
@@ -1100,6 +1147,20 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
 
     if (!pdfViewerWidget) {
       pdfViewerWidget= new PDFReaderWidget (centralwidget ());
+      // 连接大纲提取 → dock 填充，dock 点击 → 阅读器跳页（仅连一次）
+      if (pdfOutlineDock) {
+        QObject::connect (
+            pdfViewerWidget, &PDFReaderWidget::outlineLoaded, pdfOutlineDock,
+            static_cast<void (OutlineWidget::*) (
+                const QVector<PdfOutlineItem>&)> (&OutlineWidget::setOutline));
+        PDFReaderWidget* viewer= pdfViewerWidget;
+        QObject::connect (pdfOutlineDock, &OutlineWidget::outlineActivated,
+                          viewer, [viewer] (const QString& target) {
+                            bool ok;
+                            int  page= target.toInt (&ok);
+                            if (ok && page >= 0) viewer->goToPage (page);
+                          });
+      }
     }
     show_widget_in_layout (pdfViewerWidget, layout);
     pdfViewerWidget->setFocus (Qt::OtherFocusReason);
@@ -1120,11 +1181,19 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
 
     // Disconnect toolbar when leaving PDF mode
     pdfToolBar->disconnectFrom ();
+    // 离开 PDF/编辑器模式时隐藏目录 dock
+    if (pdfOutlineDock) pdfOutlineDock->setVisible (false);
 
     if (!chatTabMode) {
       show_widget_in_layout (editorWidget, layout);
 
+      // 编辑器模式：加载文档大纲到 outline dock
+      if (pdfOutlineDock) {
+        pdfOutlineDock->loadDocumentOutline ();
+      }
+
       update_visibility ();
+      flush_startup_deferred_chrome ();
 
       if (scrollarea ())
         scrollarea ()->surface ()->setSizePolicy (QSizePolicy::Fixed,
@@ -1158,6 +1227,8 @@ qt_tm_widget_rep::sync_chat_tab_mode () {
 
   if (chatTabMode) {
     // Show Chat tab view
+    bool benching= QTChatTabWidget::isInitBenchPending ();
+    if (benching) bench_start ("chat_init: sync_chat_tab_mode");
     // 如果之前处于侧边栏模式，先关闭（记住用户选择，切回时恢复）
     if (chatSidebarMode) {
       chatSidebarModeMemory_= true;
@@ -1188,11 +1259,14 @@ qt_tm_widget_rep::sync_chat_tab_mode () {
     update_visibility ();
 
     if (!chatContentWidget) {
+      if (benching) bench_start ("chat_init: createView");
       chatContentWidget=
           get_chat_controller ()->createView (centralwidget (), this);
+      if (benching) bench_end ("chat_init: createView");
     }
     show_widget_in_layout (chatContentWidget, layout);
     chatContentWidget->setFocus (Qt::OtherFocusReason);
+    if (benching) bench_end ("chat_init: sync_chat_tab_mode");
   }
   else {
     // Show normal editor view only when no special tab mode is active
@@ -1380,6 +1454,8 @@ qt_tm_widget_rep::update_visibility () {
   bool old_statusVisibility    = mainwindow ()->statusBar ()->isVisible ();
   bool old_titleVisibility     = windowAgent->titleBar ()->isVisible ();
   bool old_pdfToolBarVisibility= pdfToolBar->isVisible ();
+  bool old_pdfOutlineVisibility=
+      pdfOutlineDock ? pdfOutlineDock->isVisible () : false;
 
   bool new_mainVisibility      = visibility[1] && visibility[0];
   bool new_menuVisibility      = visibility[0] && !use_native_menubar;
@@ -1395,6 +1471,13 @@ qt_tm_widget_rep::update_visibility () {
   bool new_auxVisibility       = visibility[11];
   bool new_titleVisibility     = visibility[0];
   bool new_pdfToolBarVisibility= false;
+  bool new_pdfOutlineVisibility= false;
+  bool outlineEnabled= get_preference ("outline sidebar", "off") == "on";
+  // 编辑器模式：根据文档大纲内容决定是否显示 dock
+  if (!startupTabMode && !pdfTabMode && !chatTabMode && pdfOutlineDock &&
+      outlineEnabled) {
+    new_pdfOutlineVisibility= pdfOutlineDock->hasContent ();
+  }
 
   if (startupTabMode) {
     new_mainVisibility  = false;
@@ -1443,6 +1526,8 @@ qt_tm_widget_rep::update_visibility () {
     new_tabVisibility       = true;
     new_titleVisibility     = true;
     new_pdfToolBarVisibility= true;
+    new_pdfOutlineVisibility=
+        outlineEnabled && pdfOutlineDock && pdfOutlineDock->hasContent ();
   }
   if (XOR (old_mainVisibility, new_mainVisibility)) {
     mainToolBar->setVisible (new_mainVisibility);
@@ -1479,10 +1564,15 @@ qt_tm_widget_rep::update_visibility () {
   if (XOR (old_pdfToolBarVisibility, new_pdfToolBarVisibility)) {
     pdfToolBar->setVisible (new_pdfToolBarVisibility);
   }
+  if (pdfOutlineDock &&
+      XOR (old_pdfOutlineVisibility, new_pdfOutlineVisibility)) {
+    pdfOutlineDock->setVisible (new_pdfOutlineVisibility);
+  }
 
-  // AI 聊天侧边栏浮动按钮可见性
+  // AI 聊天侧边栏浮动按钮可见性（community 版无 AI Chat，始终隐藏）
   if (chatSidebarToggleBtn) {
-    bool shouldShow= !chatTabMode && !chatSidebarMode && !startupTabMode;
+    bool shouldShow= !is_community_stem () && !chatTabMode &&
+                     !chatSidebarMode && !startupTabMode;
     chatSidebarToggleBtn->setVisible (shouldShow);
     if (shouldShow) {
       chatSidebarToggleBtn->raise ();
@@ -1950,6 +2040,42 @@ qt_tm_widget_rep::install_main_menu () {
 }
 
 void
+qt_tm_widget_rep::apply_notification_bar_content () {
+  if (is_nil (notification_bar_widget)) return;
+  QList<QAction*>* action_list= notification_bar_widget->get_qactionlist ();
+  if (!action_list || action_list->isEmpty ()) {
+    m_currentScmNotificationItem.clear ();
+    if (scmNotificationBar) scmNotificationBar->clearContent ();
+  }
+  else {
+    QWidget* new_qwidget= notification_bar_widget->as_qwidget ();
+    if (new_qwidget && scmNotificationBar) {
+      scmNotificationBar->setContentWidget (new_qwidget);
+    }
+    eval ("(use-modules (texmacs menus notificationbar))");
+    m_currentScmNotificationItem=
+        to_qstring (as_string (call ("notification-bar-rendered-item")));
+    if (scmNotificationBar) {
+      scmNotificationBar->setSnoozeText (to_qstring (
+          as_string (call ("notification-bar-snooze-action-label"))));
+    }
+  }
+}
+
+void
+qt_tm_widget_rep::flush_startup_deferred_chrome () {
+  if (!startupChromePending_) return;
+  startupChromePending_= false;
+  install_main_menu ();
+  if (!is_nil (main_icons_widget)) {
+    QList<QAction*>* list= main_icons_widget->get_qactionlist ();
+    if (list) replaceButtons (mainToolBar, list);
+  }
+  apply_notification_bar_content ();
+  update_visibility ();
+}
+
+void
 qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
   if (DEBUG_QT_WIDGETS)
     debug_widgets << "qt_tm_widget_rep::write " << slot_name (s) << LF;
@@ -1991,9 +2117,14 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_MAIN_MENU:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
+    if (chatTabMode) break;
     {
       waiting_main_menu_widget= concrete (w);
+      // 启动页期间先存后装，退出启动页时由 flush_startup_deferred_chrome 补装
+      if (startupTabMode) {
+        startupChromePending_= true;
+        break;
+      }
       if (menu_count <= 0) install_main_menu ();
       else if (!contains (waiting_widgets, this))
         // menu interaction ongoing, postpone new menu installation until done
@@ -2003,9 +2134,14 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_MAIN_ICONS:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
+    if (chatTabMode) break;
     {
-      main_icons_widget    = concrete (w);
+      main_icons_widget= concrete (w);
+      // 启动页期间先存后装，退出启动页时由 flush_startup_deferred_chrome 补装
+      if (startupTabMode) {
+        startupChromePending_= true;
+        break;
+      }
       QList<QAction*>* list= main_icons_widget->get_qactionlist ();
       if (list) {
         replaceButtons (mainToolBar, list);
@@ -2036,27 +2172,15 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_NOTIFICATION_BAR:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
+    if (chatTabMode) break;
     {
-      notification_bar_widget     = concrete (w);
-      QList<QAction*>* action_list= notification_bar_widget->get_qactionlist ();
-      if (!action_list || action_list->isEmpty ()) {
-        m_currentScmNotificationItem.clear ();
-        if (scmNotificationBar) scmNotificationBar->clearContent ();
+      notification_bar_widget= concrete (w);
+      // 启动页期间先存后装，退出启动页时由 flush_startup_deferred_chrome 补装
+      if (startupTabMode) {
+        startupChromePending_= true;
+        break;
       }
-      else {
-        QWidget* new_qwidget= notification_bar_widget->as_qwidget ();
-        if (new_qwidget && scmNotificationBar) {
-          scmNotificationBar->setContentWidget (new_qwidget);
-        }
-        eval ("(use-modules (texmacs menus notificationbar))");
-        m_currentScmNotificationItem=
-            to_qstring (as_string (call ("notification-bar-rendered-item")));
-        if (scmNotificationBar) {
-          scmNotificationBar->setSnoozeText (to_qstring (
-              as_string (call ("notification-bar-snooze-action-label"))));
-        }
-      }
+      apply_notification_bar_content ();
     }
     break;
 
@@ -2098,7 +2222,6 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_FOCUS_ICONS:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
     {
       bool can_update= true;
 #if (QT_VERSION >= 0x050000)
@@ -2128,7 +2251,6 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_USER_ICONS:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
     {
       user_icons_widget    = concrete (w);
       QList<QAction*>* list= user_icons_widget->get_qactionlist ();
@@ -2141,7 +2263,6 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_SIDE_TOOLS:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
     {
       side_tools_widget   = concrete (w);
       QWidget* new_qwidget= side_tools_widget->as_qwidget ();
@@ -2162,7 +2283,6 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_LEFT_TOOLS:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
     {
       left_tools_widget   = concrete (w);
       QWidget* new_qwidget= left_tools_widget->as_qwidget ();
@@ -2183,7 +2303,6 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_BOTTOM_TOOLS:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
     {
       bottom_tools_widget = concrete (w);
       QWidget* new_qwidget= bottom_tools_widget->as_qwidget ();
@@ -2204,7 +2323,6 @@ qt_tm_widget_rep::write (slot s, blackbox index, widget w) {
 
   case SLOT_EXTRA_TOOLS:
     check_type_void (index, s);
-    if (startupTabMode || chatTabMode) break;
     {
       extra_tools_widget  = concrete (w);
       QWidget* new_qwidget= extra_tools_widget->as_qwidget ();
@@ -2577,6 +2695,15 @@ qt_tm_widget_rep::onAddTabRequested () {
 }
 
 // 登录相关代码
+QWK::LoginDialog*
+qt_tm_widget_rep::ensureLoginDialog () {
+  if (!m_loginDialog) {
+    m_loginDialog= new QWK::LoginDialog (mainwindow ());
+    setupLoginDialog (m_loginDialog);
+  }
+  return m_loginDialog;
+}
+
 void
 qt_tm_widget_rep::setupLoginDialog (QWK::LoginDialog* loginDialog) {
   // 创建登录对话框内容
@@ -2828,7 +2955,7 @@ qt_tm_widget_rep::setLoginDialogUpdateSectionVisible (bool visible) {
 void
 qt_tm_widget_rep::refreshScmNotificationBar () {
   if (!has_current_window ()) return;
-  call ("update-menus");
+  get_current_editor ()->update_menus (NOTIFICATION);
 }
 
 bool
@@ -2898,7 +3025,7 @@ qt_tm_widget_rep::refreshMembershipInfoInBackground () {
     return;
   }
 
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   QString token= to_qstring (as_string (call ("account-load-token")));
   if (token.isEmpty ()) {
     syncScmMembershipNotification (false);
@@ -2932,7 +3059,7 @@ qt_tm_widget_rep::checkLocalTokenAndLogin () {
   setLoginDialogUpdateSectionVisible (shouldShowLoginDialogUpdateSection ());
 
   // 使用scheme代码获取本地token缓存
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   string  token  = as_string (call ("account-load-token"));
   QString q_token= to_qstring (token);
   qDebug ("Cached token: %s", q_token.isEmpty () ? "empty" : "found");
@@ -2943,14 +3070,14 @@ qt_tm_widget_rep::checkLocalTokenAndLogin () {
   }
   else {
     // 没有token，显示登录对话框（用户需要手动点击登录按钮）
-    show_login_dialog_at_button (m_loginDialog, loginButton);
+    show_login_dialog_at_button (ensureLoginDialog (), loginButton);
   }
 }
 
 void
 qt_tm_widget_rep::fetchUserInfo (const QString& token, bool showDialog) {
-  // 创建网络访问管理器
-  QNetworkAccessManager* manager= new QNetworkAccessManager ();
+  // 挂到 mainwindow 下，widget 析构时连带回收，避免网络资源泄漏
+  QNetworkAccessManager* manager= new QNetworkAccessManager (mainwindow ());
 
   // 去掉token末尾的'˙'字符
   QString clean_token= token;
@@ -2965,7 +3092,7 @@ qt_tm_widget_rep::fetchUserInfo (const QString& token, bool showDialog) {
   // 创建请求
   QNetworkRequest request;
   // 从Scheme配置获取用户信息API URL
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   string userInfoUrl=
       as_string (call ("account-oauth2-config", "user-info-url"));
   request.setUrl (QUrl (to_qstring (userInfoUrl)));
@@ -2975,17 +3102,29 @@ qt_tm_widget_rep::fetchUserInfo (const QString& token, bool showDialog) {
                         to_qstring (stem_user_agent ()).toUtf8 ());
   request.setRawHeader ("X-Device-Id",
                         to_qstring (stem_device_id ()).toUtf8 ());
+  string previewCookie=
+      as_string (call ("account-oauth2-config", "preview-cookie-header"));
+  if (!is_empty (previewCookie))
+    request.setRawHeader ("Cookie", to_qstring (previewCookie).toUtf8 ());
 
   // 发送请求
   QNetworkReply* reply= manager->get (request);
 
-  // 连接信号处理响应
+  // finished 回调守卫（见构造期）。失效分支用 deleteLater 回收网络资源，
+  // 绝不触碰 this；reply 尚存活才能进回调，deleteLater 对重复清理是安全的
+  QPointer<QWidget> guard (qwid);
   QObject::connect (
-      reply, &QNetworkReply::finished, [this, reply, manager, showDialog] () {
+      reply, &QNetworkReply::finished,
+      [guard, this, reply, manager, showDialog] () {
+        if (!guard) {
+          reply->deleteLater ();
+          manager->deleteLater ();
+          return;
+        }
         // 定义统一的错误处理逻辑
         auto handleError= [this] (const QString& errorMessage) {
           showNotLoggedInDialog (qt_translate (from_qstring (errorMessage)));
-          show_login_dialog_at_button (m_loginDialog, loginButton);
+          show_login_dialog_at_button (ensureLoginDialog (), loginButton);
         };
 
         if (reply->error () == QNetworkReply::NoError) {
@@ -3021,7 +3160,7 @@ qt_tm_widget_rep::fetchUserInfo (const QString& token, bool showDialog) {
                                            periodLabelColor, productType);
 
             if (showDialog) {
-              show_login_dialog_at_button (m_loginDialog, loginButton);
+              show_login_dialog_at_button (ensureLoginDialog (), loginButton);
             }
           }
           else {
@@ -3048,11 +3187,11 @@ qt_tm_widget_rep::fetchUserInfo (const QString& token, bool showDialog) {
 void
 qt_tm_widget_rep::triggerOAuth2 () {
   // 隐藏对话框，因为需要用户进行OAuth2认证
-  if (m_loginDialog->isVisible ()) {
+  if (m_loginDialog && m_loginDialog->isVisible ()) {
     m_loginDialog->hide ();
   }
   // 直接调用scheme代码触发OAuth2登录流程
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   call ("login");
 }
 
@@ -3206,7 +3345,7 @@ qt_tm_widget_rep::logout () {
  */
 QString
 qt_tm_widget_rep::buildAuthUrl (const QString& baseUrl) {
-  eval ("(use-modules (liii account))");
+  eval ("(use-modules (account liii))");
   string  token  = as_string (call ("account-load-token"));
   QString q_token= to_qstring (token);
 
@@ -3231,7 +3370,7 @@ qt_tm_widget_rep::openRenewalPage () {
 /**
  * @brief 打开邀请好友页面。
  *
- * 邀请页 base URL 通过 `account-oauth2-config` 的 `invitation-url` 配置项获取，
+ * 邀请页 base URL 通过 `account-oauth2-config` 的 `growth-url` 配置项获取，
  * 按 staging/prod profile 自动切换；URL 后缀由 buildAuthUrl 拼接
  * （key/user 参数用于后台识别邀请人）。
  */
@@ -3239,7 +3378,7 @@ void
 qt_tm_widget_rep::openInvitationPage () {
   // 获取邀请页面 URL
   string invitationUrl=
-      as_string (call ("account-oauth2-config", "invitation-url"));
+      as_string (call ("account-oauth2-config", "growth-url"));
   QString fullUrl= buildAuthUrl (to_qstring (invitationUrl));
 
   QDesktopServices::openUrl (QUrl (fullUrl));
@@ -3252,12 +3391,22 @@ qt_tm_widget_rep::checkNetworkAvailable () {
   QNetworkRequest        request (testUrl);
   QNetworkReply*         reply= manager->head (request);
 
-  QObject::connect (reply, &QNetworkReply::finished, [this, reply] () {
-    bool success= (reply->error () == QNetworkReply::NoError);
-    reply->deleteLater ();
-    bool isLoggedIn= as_bool (call ("logged-in?"));
-    syncScmGuestNotification (!is_community_stem () && !isLoggedIn && success);
-  });
+  // finished 回调守卫（同 fetchUserInfo / checkVersionUpdate 模式）
+  QPointer<QWidget> guard (qwid);
+  QObject::connect (reply, &QNetworkReply::finished,
+                    [guard, this, reply, manager] () {
+                      if (!guard) {
+                        reply->deleteLater ();
+                        manager->deleteLater ();
+                        return;
+                      }
+                      bool success= (reply->error () == QNetworkReply::NoError);
+                      bool isLoggedIn= as_bool (call ("logged-in?"));
+                      syncScmGuestNotification (!is_community_stem () &&
+                                                !isLoggedIn && success);
+                      reply->deleteLater ();
+                      manager->deleteLater ();
+                    });
 }
 
 // 检查版本更新，根据条件显示提示条
@@ -3308,35 +3457,48 @@ qt_tm_widget_rep::checkVersionUpdate () {
                         to_qstring (stem_user_agent ()).toUtf8 ());
 
   QNetworkReply* reply= manager->get (request);
-  QObject::connect (reply, &QNetworkReply::finished, [this, reply, manager] () {
-    if (reply->error () == QNetworkReply::NoError) {
-      QByteArray data         = reply->readAll ();
-      QString    remoteVersion= parseVersionFromTM (data);
-      QString    localVersion = XMACS_VERSION;
+  // finished 回调守卫（见构造期说明）
+  QPointer<QWidget> guard (qwid);
+  QObject::connect (
+      reply, &QNetworkReply::finished, [guard, this, reply, manager] () {
+        if (!guard) {
+          reply->deleteLater ();
+          manager->deleteLater ();
+          return;
+        }
+        if (reply->error () == QNetworkReply::NoError) {
+          QByteArray data         = reply->readAll ();
+          QString    remoteVersion= parseVersionFromTM (data);
+          QString    localVersion = XMACS_VERSION;
 
-      if (!remoteVersion.isEmpty ()) {
-        qDebug () << "[VersionUpdate] Parsed remote version:" << remoteVersion;
-      }
+          if (!remoteVersion.isEmpty ()) {
+            if (DEBUG_IO)
+              debug_io << "[VersionUpdate] Parsed remote version: "
+                       << qPrintable (remoteVersion) << "\n";
+          }
 
-      if (remoteVersion.isEmpty ()) {
-        qDebug () << "[VersionUpdate] Failed to parse version from response";
-        syncScmUpdateNotification (false);
-      }
-      else if (isVersionNewer (remoteVersion, localVersion)) {
-        syncScmUpdateNotification (true, remoteVersion);
-      }
-      else {
-        syncScmUpdateNotification (false);
-      }
-    }
-    else {
-      qDebug () << "[VersionUpdate] Failed to fetch remote version:"
-                << reply->errorString ();
-      syncScmUpdateNotification (false);
-    }
-    reply->deleteLater ();
-    manager->deleteLater ();
-  });
+          if (remoteVersion.isEmpty ()) {
+            if (DEBUG_IO)
+              debug_io
+                  << "[VersionUpdate] Failed to parse version from response\n";
+            syncScmUpdateNotification (false);
+          }
+          else if (isVersionNewer (remoteVersion, localVersion)) {
+            syncScmUpdateNotification (true, remoteVersion);
+          }
+          else {
+            syncScmUpdateNotification (false);
+          }
+        }
+        else {
+          if (DEBUG_IO)
+            debug_io << "[VersionUpdate] Failed to fetch remote version: "
+                     << qPrintable (reply->errorString ()) << "\n";
+          syncScmUpdateNotification (false);
+        }
+        reply->deleteLater ();
+        manager->deleteLater ();
+      });
 }
 
 QString

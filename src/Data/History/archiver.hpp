@@ -43,6 +43,7 @@ class archiver_rep : public concrete_struct {
   path     rp;            //!< 文档在 the_et 中的根路径
   observer undo_obs;      //!< 捕获文档修改的观察者
   bool     versioning;    //!< 处于 undo/redo 回放期间（禁用增量记录）
+  bool     collab;        //!< 文档处于协作会话：历史树重排不安全，simplify 跳过
 
 protected:
   /**
@@ -71,6 +72,17 @@ public:
   ~archiver_rep ();       //!< 析构：注销作者、摘除观察者
   void clear ();          //!< 清空全部历史与当前修改（重置为空文档）
   void show_all ();       //!< 调试：打印完整历史树
+  ///@}
+
+  /**
+   * @name 增量记录开关
+   */
+  ///@{
+  // 远端协作更新等「非用户修改」应用期间需暂停 undo 增量记录：否则远端修改
+  // 会混入本地按键所在的 current 单元，下一次按键 coalesce（reopen + 重算）
+  // 会把对端刚插入的内容一并撤销删除。参见 edit_modify_rep::apply_remote。
+  void set_versioning (bool on); //!< 临时禁用/恢复 archive_announce 的增量记录
+  void set_collab (bool on);     //!< 标记进入协作会话（置位后 simplify 跳过）
   ///@}
 
   /**

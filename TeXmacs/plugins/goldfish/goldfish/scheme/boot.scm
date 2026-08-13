@@ -32,13 +32,7 @@
                  (cons '*export* ())
                  (cons 'export
                    (define-macro (,(gensym) . names)
-                     (#_list-values
-                      'set!
-                      '*export*
-                      (#_list-values
-                       'append
-                       (#_list-values #_quote names)
-                       '*export*)))))
+                     `(set! *export* (append (quote ,names) *export*)))))
        ,@body
        (apply inlet
          (map (lambda (entry)
@@ -52,26 +46,22 @@
 (unless (defined? 'r7rs-import-library-filename)
   (define (r7rs-import-library-filename libs)
     (when (pair? libs)
-      (let ((lib-filename (let loop
-                            ((lib (if (memq (caar libs) '(only except
-                                                           prefix
-                                                           rename)) (cadar libs) (car libs))
-                             ) ;lib
-                             (name "")
-                            ) ;
-                            (set! name (string-append name (symbol->string (car lib))))
-                            (if (null? (cdr lib))
-                              (string-append name ".scm")
-                              (begin
-                                (set! name (string-append name "/"))
-                                (loop (cdr lib) name)
-                              ) ;begin
-                            ) ;if
-                          ) ;let
-            ) ;lib-filename
+      (let ((lib (if (memq (caar libs) '(only except prefix rename)) (cadar libs) (car libs))
+            ) ;lib
            ) ;
-        (when (not (defined? (symbol (object->string (car libs)))))
-          (load lib-filename)
+        (when (not (defined? (symbol (object->string lib))))
+          (load (let loop
+                  ((parts lib) (name ""))
+                  (set! name (string-append name (symbol->string (car parts))))
+                  (if (null? (cdr parts))
+                    (string-append name ".scm")
+                    (begin
+                      (set! name (string-append name "/"))
+                      (loop (cdr parts) name)
+                    ) ;begin
+                  ) ;if
+                ) ;let
+          ) ;load
         ) ;when
         (r7rs-import-library-filename (cdr libs))
       ) ;let

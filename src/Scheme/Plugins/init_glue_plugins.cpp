@@ -40,13 +40,10 @@ void
 initialize_glue_plugins () {
   initialize_glue_plugin ();
   initialize_glue_xml ();
+  initialize_glue_updater ();
 
 #ifdef USE_PLUGIN_HTML
   initialize_glue_html ();
-#endif
-
-#ifdef USE_PLUGIN_SPARKLE
-  initialize_glue_updater ();
 #endif
 
 #ifdef USE_PLUGIN_BIBTEX
@@ -55,6 +52,10 @@ initialize_glue_plugins () {
 
 #ifdef USE_PLUGIN_TEX
   initialize_glue_tex ();
+#endif
+
+#ifdef LORO_ENABLED
+  initialize_glue_collab ();
 #endif
 
 #ifdef USE_PLUGIN_GS

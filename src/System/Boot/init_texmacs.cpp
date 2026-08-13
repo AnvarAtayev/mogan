@@ -23,8 +23,10 @@
 #include "preferences.hpp"
 #include "server.hpp"
 #include "sys_utils.hpp"
+#include "telemetry.hpp"
 #include "tm_file.hpp"
 #include "tm_link.hpp"
+#include "tm_timer.hpp"
 
 #include <functional>
 #include <signal.h>
@@ -283,20 +285,6 @@ plugin_path (string which) {
   url base  = url_unix ("$TEXMACS_HOME_PATH:$TEXMACS_PATH");
   url search= base * "plugins" * url_wildcard ("*") * which;
   return expand (complete (search, "r"));
-}
-
-scheme_tree
-plugin_list () {
-  bool          flag;
-  array<string> a= read_directory ("$TEXMACS_PATH/plugins", flag);
-  a << read_directory ("$TEXMACS_HOME_PATH/plugins", flag);
-  merge_sort (a);
-  int  i, n= N (a);
-  tree t (TUPLE);
-  for (i= 0; i < n; i++)
-    if ((a[i] != ".") && (a[i] != "..") && ((i == 0) || (a[i] != a[i - 1])))
-      t << a[i];
-  return t;
 }
 
 /******************************************************************************
@@ -803,21 +791,6 @@ TeXmacs_main (int argc, char** argv) {
                (s == "-delete-file-cache") || (s == "-delete-doc-cache") ||
                (s == "-delete-plugin-cache") || (s == "-headless"))
         ;
-      else if (s == "-build-manual") {
-        if ((++i) < argc)
-          extra_init_cmd << "(build-manual " << scm_quote (argv[i])
-                         << " delayed-quit)";
-      }
-      else if (s == "-reference-suite") {
-        if ((++i) < argc)
-          extra_init_cmd << "(build-ref-suite " << scm_quote (argv[i])
-                         << " delayed-quit)";
-      }
-      else if (s == "-test-suite") {
-        if ((++i) < argc)
-          extra_init_cmd << "(run-test-suite " << scm_quote (argv[i])
-                         << "delayed-quit)";
-      }
       else if (starts (s, "-psn"))
         ;
       else {
@@ -888,14 +861,14 @@ TeXmacs_main (int argc, char** argv) {
   if (!use_native_menubar) use_unified_toolbar= false;
   // End user preferences
 
-  if (DEBUG_STD) debug_boot << "Installing internal plug-ins...\n";
+  if (DEBUG_STD) debug_std << "Installing internal plug-ins...\n";
   bench_start ("initialize plugins");
   bench_cumul ("initialize plugins");
-  if (DEBUG_STD) debug_boot << "Opening display...\n";
+  if (DEBUG_STD) debug_std << "Opening display...\n";
 
   gui_open (argc, argv);
   set_default_font (the_default_font);
-  if (DEBUG_STD) debug_boot << "Starting server...\n";
+  if (DEBUG_STD) debug_std << "Starting server...\n";
   { // opening scope for server sv
 #ifdef QTTEXMACS
     server sv (app_type::RESEARCH);
@@ -915,7 +888,7 @@ TeXmacs_main (int argc, char** argv) {
       string s= argv[i];
       if ((N (s) >= 2) && (s (0, 2) == "--")) s= s (1, N (s));
       if ((s[0] != '-') && (s[0] != '+')) {
-        if (DEBUG_STD) debug_boot << "Loading " << s << "...\n";
+        if (DEBUG_STD) debug_std << "Loading " << s << "...\n";
         url u= url_system (s);
         if (!is_rooted (u)) u= resolve (url_pwd (), "") * u;
         string b= scm_quote (as_string (u));
@@ -936,9 +909,7 @@ TeXmacs_main (int argc, char** argv) {
       else if ((s == "-b") || (s == "-initialize-buffer") || (s == "-fn") ||
                (s == "-font") || (s == "-i") || (s == "-initialize") ||
                (s == "-g") || (s == "-geometry") || (s == "-x") ||
-               (s == "-execute") || (s == "-log-file") ||
-               (s == "-build-manual") || (s == "-reference-suite") ||
-               (s == "-test-suite")) {
+               (s == "-execute") || (s == "-log-file")) {
         i++;
       }
     }
@@ -948,8 +919,12 @@ TeXmacs_main (int argc, char** argv) {
     bench_reset ("initialize plugins");
     bench_reset ("initialize scheme");
 
-    if (DEBUG_STD) debug_boot << "Starting event loop...\n";
+    if (DEBUG_STD)
+      debug_std << "Starting event loop... (" << texmacs_time () << " ms)\n";
     texmacs_started= true;
+    // 事件循环起跑后再上报 OPEN，避免 track 同步写 jsonl 及
+    // plugin-feed 拉起 telemetry 插件阻塞首帧（原先在启动页 showEvent 触发）
+    telemetry_track ("OPEN");
     if (!disable_error_recovery) {
       // 注册信号处理器，确保子进程被正确清理
       // 包括崩溃类信号和用户中断信号
@@ -987,9 +962,8 @@ TeXmacs_main (int argc, char** argv) {
     // 因此这里暂时在启动之后手动加载插件
     eval ("(plugin-initialize 'latex)");
     eval ("(plugin-initialize 'data)");
-    eval ("(plugin-initialize 'goldfish)");
+    // eval ("(plugin-initialize 'goldfish)");
     eval ("(plugin-initialize 'image)");
-    eval ("(plugin-initialize 'image_xmgrace)");
     // eval ("(plugin-initialize 'json)");
     // eval ("(plugin-initialize 'julia)");
     // eval ("(plugin-initialize 'llm)");
@@ -1000,13 +974,13 @@ TeXmacs_main (int argc, char** argv) {
 #endif
     gui_start_loop ();
 
-    if (DEBUG_STD) debug_boot << "Stopping server...\n";
+    if (DEBUG_STD) debug_std << "Stopping server...\n";
   } // ending scope for server sv
 
-  if (DEBUG_STD) debug_boot << "Closing display...\n";
+  if (DEBUG_STD) debug_std << "Closing display...\n";
   gui_close ();
 
-  if (DEBUG_STD) debug_boot << "Good bye...\n";
+  if (DEBUG_STD) debug_std << "Good bye...\n";
 }
 
 #ifdef QTTEXMACS
@@ -1023,7 +997,9 @@ perform_startup_login_request () {
   tm_server_rep* server=
       dynamic_cast<tm_server_rep*> (get_server ().operator->());
   if (server && server->getAccount ()) {
-    QTimer::singleShot (0, [server] () { server->getAccount ()->login (); });
+    // account 作 receiver：QObject 析构时 Qt 自动断开定时器，避免悬挂
+    QTMOAuth* account= server->getAccount ();
+    QTimer::singleShot (0, account, [account] () { account->login (); });
     g_startup_login_requested= false;
     return;
   }

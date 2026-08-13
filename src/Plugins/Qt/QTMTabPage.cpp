@@ -12,6 +12,7 @@
 
 #include "QTMTabPage.hpp"
 #include "new_view.hpp"
+#include "qt_chat_tab_widget.hpp"
 #include "qt_utilities.hpp"
 #include "string.hpp"
 #include "tm_window.hpp"
@@ -358,6 +359,7 @@ QTMTabPage::mousePressEvent (QMouseEvent* e) {
     if (!is_none (currentView) && currentView == m_viewUrl) {
       return;
     }
+    if (is_chat_tab_view (m_viewUrl)) QTChatTabWidget::beginInitBench ();
     return QToolButton::mousePressEvent (e);
   }
   if (e->button () == Qt::LeftButton) {
@@ -368,6 +370,17 @@ QTMTabPage::mousePressEvent (QMouseEvent* e) {
     m_dragStartPos          = e->pos ();
   }
   QToolButton::mousePressEvent (e);
+}
+
+void
+QTMTabPage::mouseReleaseEvent (QMouseEvent* e) {
+  // chat tab 的 release 派发内含 QAction 触发与同步切 view 全链路；
+  // beginInitBench 到此处起点之间即按下→抬起的间隔，不计入任何子段
+  bool benching=
+      is_chat_tab_view (m_viewUrl) && QTChatTabWidget::isInitBenchPending ();
+  if (benching) bench_start ("chat_init: release dispatch");
+  QToolButton::mouseReleaseEvent (e);
+  if (benching) bench_end ("chat_init: release dispatch", 10);
 }
 
 void

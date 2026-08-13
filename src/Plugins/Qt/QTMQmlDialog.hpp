@@ -25,7 +25,8 @@
  * - @b 逐字段可选实时回写（live 标志）：
  *   - live=true：用户改动走 QML → bridge → glue → scm setter，实时预览。
  *     @b 红线：setter 禁止任何模态操作（不弹对话框、不嵌套 exec()），否则破坏
- *     scheme continuation 栈；且 live=true 接受「Cancel 无法回滚」。
+ *     scheme continuation 栈。Cancel 回滚由调用方实现（font-selector
+ * 走快照写回撤销， 普通 form 不做回滚）。
  *   - live=false（默认）：值暂存 QML，点 OK 随整表单返回 scm 统一提交，Cancel
  * 放弃。
  * - @b 控件类型：enum / input / checkbox / color /
@@ -119,6 +120,21 @@ int qt_show_qml_dialog (string qml_url, string message, array<string> buttons);
 string cpp_confirm_close (string message, bool scratch);
 
 /**
+ * @brief 需重启字段的三按钮确认弹窗的 glue 入口。
+ * @param title 已翻译的标题（如「切换界面主题」）。
+ * @param message 已翻译的正文（如「此更改需要重新启动 Mogan STEM
+ * 才能完全生效。」）。
+ * @return "restart" / "later" / "cancel" 之一。
+ * @details 用于首选项里改 look and feel / gui theme / keyboard shortcut style
+ * 等需重启字段后的确认，替换旧
+ * user-confirm（两按钮）。 按钮顺序为 重启（primary）、稍后、取消，对应
+ * run_qml_dialog 返回的按钮下标 1/2/3（0 / -1 = Esc / X / 加载失败 =
+ * cancel）。测试钩子 MOGAN_TEST_CONFIRM_RESTART=restart|later|cancel
+ * 命中时直接返回不弹窗。
+ */
+string cpp_confirm_restart (string title, string message);
+
+/**
  * @brief 通用 form 弹窗引擎的 glue 入口。
  * @param fields scm 构造的字段表，@b 须经 stree->tree 转换（glue 不自动转
  * pair）。 结构见顶部 @par 数据协议：(form (enum <label> <key> (<opt>...)
@@ -130,5 +146,72 @@ string cpp_confirm_close (string message, bool scratch);
  * 命中时不弹窗（供自动化测试）。
  */
 tree cpp_form_dialog (tree fields);
+
+/**
+ * @brief 字体选择器 QML 对话框的 glue 入口。
+ * @param specs_key scheme specs-registry 的 int 句柄
+ *（font-selector-register-specs 返回值）。
+ * @return 非阻塞 show 路径立即返回空 tree（对话框刚打开、尚无结论，scheme
+ *调用方 不读返回值）；仅 ok 测试钩子（MOGAN_TEST_FONT_SELECTOR=ok）返回 `(tuple
+ *"ok")` 作标记，供自动化区分 OK 走了 commit。Cancel / 关闭 / QML 加载失败返回空
+ *tree。
+ * @b 注意：与 cpp-form-dialog 不同，本入口 @b 不 携带字段写回值——实际字体写回在
+ * 用户点 OK 时由 bridge 调 font-selector-commit 完成（live 路径，commit 已写
+ *buffer），返回值仅测试用。
+ * @note 测试钩子 MOGAN_TEST_FONT_SELECTOR=ok|cancel 命中时不弹窗。详见
+ * record/qml/font-selector.md Phase 2。
+ */
+tree cpp_font_selector_dialog (int specs_key);
+
+/**
+ * @brief 段落格式 QML 对话框的 glue 入口（live 写回 + 快照撤销）。
+ * @param specs_key scheme paragraph-specs-registry 的 int 句柄
+ *（paragraph-format-register-specs 返回值）。
+ * @return 非阻塞 show 路径立即返回空 tree；ok 测试钩子
+ *（MOGAN_TEST_PARAGRAPH_FORMAT=ok）返回 `(tuple "ok")` 供自动化区分。
+ * @details 每次 setPara 经 make-multi-line-with 实时写回文档，主窗口 live 重排
+ * 段落；OK 落定，Cancel/重置走打开时快照写回撤销。详见
+ * devel/2029.md 与 ai-docs/qml/README.md。
+ */
+tree cpp_paragraph_format_dialog (int specs_key);
+
+/**
+ * @brief 文档统计信息 QML 对话框的 glue 入口（纯展示，一次性提交）。
+ * @param title 已翻译的对话框标题（如 "Document statistics"）。
+ * @param items 统计项列表树，形如 (stats ("Page count" "1") ("Word count" "42")
+ * ...)， 每项为 (label value) 二元组，label/value 均 string。
+ * @details 走 run_qml_dialog（exec 阻塞模态），无 live 写回。用户点 Close 或
+ * Esc / X 关闭窗口即结束。统计项由 scm 侧计算好打包传入，cpp / QML
+ * 纯展示不碰业务。
+ */
+void cpp_statistics_dialog (string title, tree items);
+
+/**
+ * @brief 显示版本 QML 对话框。
+ *
+ * @param title 已翻译的对话框标题。
+ * @param message 已翻译的版本提示，换行会拆为独立 QML 文本行。
+ * @return 确认返回 true；取消、关闭或加载失败返回 false。
+ * @note MOGAN_TEST_VERSION_DIALOG 用于测试。
+ */
+bool cpp_version_dialog (string title, string message);
+
+/**
+ * @brief 首选项 QML 对话框的 glue 入口（本地暂存 + OK 一次性提交）。
+ * @return 非阻塞 show 路径立即返回空 tree；测试钩子命中时返回 `(tuple "ok")` 供
+ * 自动化区分。本地暂存模型：打开时拉一次 meta 建 QML 本地 values 快照、改动只改
+ * 本地、OK 时算 diff 调 prefBridge.submit 一次性应用、Cancel 丢弃。
+ * @details 走 run_qml_dialog（exec 阻塞模态，同
+ * FormDialog——首选项是一次性提交， 无需 live
+ * 重绘文档）。prefBridge（PreferencesBridge）注入为 context property 承载
+ * QML↔scheme 交互；scheme facade 的 preferences-qml-meta / -submit / -set-field
+ * 持有全局 preference 状态，bridge 只透传。需重启字段（look and feel / gui
+ * theme / language / keyboard shortcut style / magic-paste-shortcut）改动时
+ * submit 内部先弹 cpp-confirm-restart 再按用户选择 apply / silent 写值 / 不
+ * apply。
+ * @note 测试钩子 MOGAN_TEST_PREFERENCES=ok|cancel 命中时不弹窗。详见
+ * devel/2044.md 与 ai-docs/qml/README.md。
+ */
+tree cpp_preferences_dialog ();
 
 #endif // defined QTM_QML_DIALOG_H

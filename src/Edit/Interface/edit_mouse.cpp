@@ -173,7 +173,7 @@ edit_interface_rep::mouse_adjust_selection (SI x, SI y, int mods) {
 
 void
 edit_interface_rep::mouse_drag (SI x, SI y) {
-  if (inside_graphics ()) return;
+  if (inside_graphics () && is_in_graphics_mode) return;
   if (mouse_message ("drag", x, y)) return;
   go_to (x, y);
   end_x= x;
@@ -939,15 +939,35 @@ edit_interface_rep::mouse_any (string type, SI x, SI y, int mods, time_t t,
       }
     }
   }
-  if (over_handles) {
+
+  // 绘图区光标由绘图模式管理，单独走分支仅复位残留悬停样式；其余走正常光标链
+  bool over_gr= over_graphics (x, y);
+  if (over_gr) {
+    if (hover_style_cursor) {
+      set_cursor_style ("normal");
+      hover_style_cursor= false;
+    }
+#ifdef QTTEXMACS
+    hide_image_popup ();
+#endif
+    update_text_popup ();
+  }
+  else if (over_handles) {
     if (handle_cursor != "") set_cursor_style (handle_cursor);
     else set_cursor_style ("size_all");
+    hover_style_cursor= true;
   }
-  else if (hovering_table)
+  else if (hovering_table) {
     set_cursor_style (hovering_table == 1 ? "size_ver" : "size_hor");
-  else if (hovering_hlink) set_cursor_style ("pointing_hand");
+    hover_style_cursor= true;
+  }
+  else if (hovering_hlink) {
+    set_cursor_style ("pointing_hand");
+    hover_style_cursor= true;
+  }
   else if (hovering_image) {
     set_cursor_style ("pointing_hand");
+    hover_style_cursor       = true;
     path path_of_image_parent= path_up (current_path);
     tree tree_of_image_parent= subtree (et, path_of_image_parent);
     if (should_show_image_popup (tree_of_image_parent)) {
@@ -959,7 +979,8 @@ edit_interface_rep::mouse_any (string type, SI x, SI y, int mods, time_t t,
     hide_text_popup ();
   }
   else {
-    if (!over_graphics (x, y)) set_cursor_style ("normal");
+    set_cursor_style ("normal");
+    hover_style_cursor= false;
 #ifdef QTTEXMACS
     hide_image_popup ();
 #endif
@@ -994,8 +1015,14 @@ edit_interface_rep::mouse_any (string type, SI x, SI y, int mods, time_t t,
 
   // if (inside_graphics (false)) {
   // if (inside_graphics ()) {
-  if (inside_graphics (type != "release-left")) {
+  bool is_graphics_drag= (type == "dragging-left" || type == "end-drag-left");
+  if (inside_graphics (type != "release-left") &&
+      !(is_graphics_drag && !is_in_graphics_mode)) {
     if (mouse_graphics (type, x, y, mods, t, data)) {
+      // 绘图手势结束时，选中对象会变，轻量刷新 mode/focus 栏
+      if (type == "release-left" || type == "end-drag-left" ||
+          type == "release-right" || type == "end-drag-right")
+        update_menus (ICONS_MODE | ICONS_FOCUS);
       if (is_in_graphics_mode) return;
       else {
         if (type == "press-left") {
@@ -1308,6 +1335,42 @@ edit_interface_rep::hide_text_popup () {
   // 通过qt_simple_widget隐藏文本工具栏
   if (qt_simple_widget_rep* qsw= dynamic_cast<qt_simple_widget_rep*> (this)) {
     qsw->hide_text_popup ();
+  }
+#endif
+}
+
+void
+edit_interface_rep::show_ghost_popup () {
+#ifdef QTTEXMACS
+  if (qt_simple_widget_rep* qsw= dynamic_cast<qt_simple_widget_rep*> (this)) {
+    qsw->show_ghost_popup ();
+  }
+#endif
+}
+
+void
+edit_interface_rep::hide_ghost_popup () {
+#ifdef QTTEXMACS
+  if (qt_simple_widget_rep* qsw= dynamic_cast<qt_simple_widget_rep*> (this)) {
+    qsw->hide_ghost_popup ();
+  }
+#endif
+}
+
+void
+edit_interface_rep::show_diff_popup () {
+#ifdef QTTEXMACS
+  if (qt_simple_widget_rep* qsw= dynamic_cast<qt_simple_widget_rep*> (this)) {
+    qsw->show_diff_popup ();
+  }
+#endif
+}
+
+void
+edit_interface_rep::hide_diff_popup () {
+#ifdef QTTEXMACS
+  if (qt_simple_widget_rep* qsw= dynamic_cast<qt_simple_widget_rep*> (this)) {
+    qsw->hide_diff_popup ();
   }
 #endif
 }
