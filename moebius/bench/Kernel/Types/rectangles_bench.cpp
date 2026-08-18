@@ -43,6 +43,22 @@ old_correct (rectangles l) {
   return rectangles (l->item, old_correct (l->next));
 }
 
+// 生产代码中的单矩形差分辅助(外部链接,rectangles.cpp 未导出到 hpp)
+void complement (rectangle r1, rectangle r2, rectangles& l);
+
+// 优化前的按值实现,用于同二进制 A/B 对比
+static rectangles
+old_subtract (rectangles l1, rectangles l2) {
+  rectangles a= l1;
+  for (; !is_nil (l2); l2= l2->next) {
+    rectangles b;
+    for (rectangles p= a; !is_nil (p); p= p->next)
+      complement (p->item, l2->item, b);
+    a= b;
+  }
+  return a;
+}
+
 int
 main () {
   ankerl::nanobench::Bench bench;
@@ -50,6 +66,16 @@ main () {
 
   rectangle  r (0, 0, 10, 10);
   rectangles large= mk_rects (1024);
+
+  // l2 取 large 的稀疏子集,每个被减矩形切到约 11 个相邻元素
+  rectangles sparse;
+  for (int i= 1024 - 64; i >= 0; i-= 64)
+    sparse= rectangles (rectangle (i, i, i + 10, i + 10), sparse);
+  // 与 large 完全不相交的减数列表(全走直挂快路径)
+  rectangles faraway;
+  for (int i= 0; i < 16; i++)
+    faraway= rectangles (rectangle (100000 + i, 100000, 100010 + i, 100010),
+                         faraway);
 
   bench.run ("translate rectangle", [&] {
     ankerl::nanobench::doNotOptimizeAway (translate (r, 5, 7));
@@ -82,5 +108,15 @@ main () {
   });
   bench.run ("correct x1024",
              [&] { ankerl::nanobench::doNotOptimizeAway (correct (large)); });
+  bench.run ("old subtract x1024 sparse16", [&] {
+    ankerl::nanobench::doNotOptimizeAway (old_subtract (large, sparse));
+  });
+  bench.run ("subtract x1024 sparse16",
+             [&] { ankerl::nanobench::doNotOptimizeAway (large - sparse); });
+  bench.run ("old subtract x1024 disjoint16", [&] {
+    ankerl::nanobench::doNotOptimizeAway (old_subtract (large, faraway));
+  });
+  bench.run ("subtract x1024 disjoint16",
+             [&] { ankerl::nanobench::doNotOptimizeAway (large - faraway); });
   return 0;
 }

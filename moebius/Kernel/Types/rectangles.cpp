@@ -106,12 +106,6 @@ complement (rectangle r1, rectangle r2, rectangles& l) {
 }
 
 void
-complement (rectangles l1, rectangle r2, rectangles& l) {
-  for (; !is_nil (l1); l1= l1->next)
-    complement (l1->item, r2, l);
-}
-
-void
 intersection (rectangle r1, rectangle r2, rectangles& l) {
   if (!intersect (r1, r2)) return;
   rectangle (max (r1->x1, r2->x1), max (r1->y1, r2->y1), min (r1->x2, r2->x2),
@@ -157,15 +151,39 @@ thicken (rectangle r, SI width, SI height) {
  * Exported routines for rectangles
  ******************************************************************************/
 
+// 单个矩形对 l2 求差,结果尾挂到 tail:
+// 与 l2 全不交时原矩形一次直挂,零差分开销
+static void
+append_difference (rectangle r, rectangles l2, rectangles*& tail) {
+  rectangles cur;
+  bool       cut= false;
+  for (rectangles q= l2; !is_nil (q); q= q->next) {
+    if (!intersect (r, q->item)) continue;
+    if (!cut) {
+      complement (r, q->item, cur);
+      cut= true;
+      continue;
+    }
+    rectangles next;
+    for (rectangles p= cur; !is_nil (p); p= p->next)
+      complement (p->item, q->item, next);
+    cur= next;
+  }
+  if (!cut) rectangles::append (tail, r);
+  else
+    for (rectangles p= cur; !is_nil (p); p= p->next)
+      rectangles::append (tail, p->item);
+}
+
 rectangles
 operator- (rectangles l1, rectangles l2) {
-  rectangles a= l1;
-  for (; !is_nil (l2); l2= l2->next) {
-    rectangles b;
-    complement (a, l2->item, b);
-    a= b;
-  }
-  return a;
+  // 逐矩形独立求差:未与任何被减矩形相交的元素一次直挂,
+  // 避免旧实现对 l2 每个元素整表重建的 O(n1*n2) 次全表克隆
+  rectangles  out;
+  rectangles* tail= &out;
+  for (; !is_nil (l1); l1= l1->next)
+    append_difference (l1->item, l2, tail);
+  return out;
 }
 
 rectangles
@@ -244,9 +262,8 @@ translate (const rectangles& l, SI x, SI y) {
   rectangles* tail= &out;
   for (rectangles p= l; !is_nil (p); p= p->next) {
     rectangle& r= p->item;
-    rectangles::adopt_tail (
-        tail, rectangles::fresh_cell (
-                  rectangle (r->x1 + x, r->y1 + y, r->x2 + x, r->y2 + y)));
+    rectangles::append (tail,
+                        rectangle (r->x1 + x, r->y1 + y, r->x2 + x, r->y2 + y));
   }
   return out;
 }
@@ -258,9 +275,8 @@ thicken (const rectangles& l, SI width, SI height) {
   rectangles* tail= &out;
   for (rectangles p= l; !is_nil (p); p= p->next) {
     rectangle& r= p->item;
-    rectangles::adopt_tail (tail, rectangles::fresh_cell (rectangle (
-                                      r->x1 - width, r->y1 - height,
-                                      r->x2 + width, r->y2 + height)));
+    rectangles::append (tail, rectangle (r->x1 - width, r->y1 - height,
+                                         r->x2 + width, r->y2 + height));
   }
   return out;
 }
@@ -290,8 +306,7 @@ correct (const rectangles& l) {
   rectangles* tail= &out;
   for (rectangles p= l; !is_nil (p); p= p->next) {
     rectangle& r= p->item;
-    if ((r->x1 < r->x2) && (r->y1 < r->y2))
-      rectangles::adopt_tail (tail, rectangles::fresh_cell (r));
+    if ((r->x1 < r->x2) && (r->y1 < r->y2)) rectangles::append (tail, r);
   }
   return out;
 }
