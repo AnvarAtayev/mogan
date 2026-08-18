@@ -54,6 +54,19 @@ typedef struct {
   point p0, p1;
 } axis;
 
+/**
+ * @brief 求点 p 到轴 a（过 p0、p1 的直线）的正交投影
+ *
+ * 轴不要求是单位向量，投影点为 p0 + t*(p1 - p0)，其中
+ * t = (a·p - a·p0) / (a·a)，a = p1 - p0。t 不受 [0,1] 限制，
+ * 即投影可以落在 p0、p1 之外（延长线上）；若 p0 与 p1 几乎重合
+ * （|a| < 1e-6），退化为直接返回 p0。结果维度取 min(N(p0), N(p1))，
+ * 与 p 的维度无关。
+ *
+ * @param a 轴（过 a.p0 与 a.p1 的直线）
+ * @param p 待投影的点
+ * @return  p 在轴上的正交投影点
+ */
 point  proj (const axis& a, const point& p);
 double dist (const axis& a, const point& p);
 double seg_dist (const axis& a, const point& p);
