@@ -188,6 +188,9 @@ private:
   /// 新编辑器首帧就绪前保持中央区冻结，就绪后解冻（轮询，带超时兜底）。
   void schedule_central_unfreeze ();
   void poll_central_unfreeze (int generation, qint64 start_ms);
+  /// 延迟恢复 PDF 上次阅读页码（等布局与滚动范围就绪）。
+  /// page 为预先查得的页码（须在 loadFromFile 前查询，见实现处说明）。
+  void schedule_restore_pdf_last_page (int page);
 
   // Version update notification
   void    checkVersionUpdate ();

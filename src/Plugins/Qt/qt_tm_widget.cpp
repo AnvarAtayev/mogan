@@ -1147,6 +1147,20 @@ qt_tm_widget_rep::poll_central_unfreeze (int generation, qint64 start_ms) {
   });
 }
 
+/******************************************************************************
+ * PDF 阅读位置记忆（存取由 scheme 侧 pdf-last-page-get/set 负责；
+ * (texmacs texmacs tm-files) 模块在 init-research.scm 启动期已加载）
+ ******************************************************************************/
+
+void
+qt_tm_widget_rep::schedule_restore_pdf_last_page (int page) {
+  if (!pdfViewerWidget || page <= 0) return;
+  // 延迟到事件循环下一轮再跳页：布局与滚动范围需在 show 后才就绪
+  PDFReaderWidget* viewer= pdfViewerWidget;
+  QTimer::singleShot (0, viewer,
+                      [viewer, page] () { viewer->goToPage (page); });
+}
+
 void
 qt_tm_widget_rep::sync_startup_tab_mode () {
   QWidget* editorWidget= main_widget->qwid;
@@ -1194,6 +1208,16 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
 
     if (!pdfViewerWidget) {
       pdfViewerWidget= new PDFReaderWidget (centralwidget ());
+      // 翻页即存：窗口关闭/程序退出时 ~qt_tm_widget_rep 并不执行，
+      // 退出前没有可靠的保存时机，改为页码变化时立刻写入 preference
+      // （内存 hashmap，落盘由退出时的 save-preferences 统一完成）
+      PDFReaderWidget* viewer= pdfViewerWidget;
+      QObject::connect (pdfViewerWidget, &PDFReaderWidget::pageChanged, viewer,
+                        [this] (int page, int) {
+                          if (pdfTabMode && page > 0)
+                            call ("pdf-last-page-set",
+                                  from_qstring_utf8 (currentPdfPath), page);
+                        });
       // 连接大纲提取 → dock 填充，dock 点击 → 阅读器跳页（仅连一次）
       if (pdfOutlineDock) {
         QObject::connect (
@@ -1215,11 +1239,17 @@ qt_tm_widget_rep::sync_startup_tab_mode () {
     // Connect toolbar to the PDF reader
     pdfToolBar->connectTo (pdfViewerWidget);
 
+    // 恢复页码须在 loadFromFile 之前查询：load 完成时的
+    // updatePageNavigation 会发 pageChanged(1)，把旧记录覆盖成第 1 页
+    object restorePage=
+        call ("pdf-last-page-to-restore", from_qstring_utf8 (currentPdfPath));
+    int pageToRestore= is_int (restorePage) ? as_int (restorePage) : 0;
     // Load PDF if path changed
     if (!currentPdfPath.isEmpty () && currentPdfPath != lastLoadedPdfPath) {
       pdfViewerWidget->loadFromFile (currentPdfPath);
       lastLoadedPdfPath= currentPdfPath;
     }
+    schedule_restore_pdf_last_page (pageToRestore);
   }
   else {
     // Show normal editor view (unless chat tab mode is active)
