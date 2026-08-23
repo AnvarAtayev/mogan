@@ -67,7 +67,7 @@ intersect (rectangle r1, rectangle r2) {
 }
 
 rectangle
-translate (rectangle r, SI x, SI y) {
+translate (const rectangle& r, SI x, SI y) {
   return rectangle (r->x1 + x, r->y1 + y, r->x2 + x, r->y2 + y);
 }
 
@@ -103,12 +103,6 @@ complement (rectangle r1, rectangle r2, rectangles& l) {
     rectangle (max (r1->x1, r2->x1), r1->y1, min (r1->x2, r2->x2), r2->y1) >> l;
   if (r1->y2 > r2->y2)
     rectangle (max (r1->x1, r2->x1), r2->y2, min (r1->x2, r2->x2), r1->y2) >> l;
-}
-
-void
-complement (rectangles l1, rectangle r2, rectangles& l) {
-  for (; !is_nil (l1); l1= l1->next)
-    complement (l1->item, r2, l);
 }
 
 void
@@ -157,15 +151,55 @@ thicken (rectangle r, SI width, SI height) {
  * Exported routines for rectangles
  ******************************************************************************/
 
+// 单个矩形对 l2 求差,结果尾挂到 tail:
+// 与 l2 全不交时原矩形一次直挂,零差分开销;
+// 被切过后碎片表由本函数独占(全为新鲜节点),后续切割原地摘链改写,
+// 只重分配真正与减数相交的碎片,不再整表重建
+static void
+append_difference (rectangle r, rectangles l2, rectangles*& tail) {
+  rectangles cur;
+  bool       cut= false;
+  for (rectangles q= l2; !is_nil (q); q= q->next) {
+    if (!cut) {
+      if (!intersect (r, q->item)) continue;
+      complement (r, q->item, cur);
+      cut= true;
+      continue;
+    }
+    rectangles* link= &cur;
+    while (!is_nil (*link)) {
+      rectangle frag= (*link)->item;
+      if (!intersect (frag, q->item)) {
+        link= &(*link)->next;
+        continue;
+      }
+      *link= (*link)->next; // 独占节点,槽位赋值即摘链并释放原节点
+      rectangles frags;
+      complement (frag, q->item, frags); // 头插产出,独占新节点
+      while (!is_nil (frags)) {
+        rectangles cell= frags;
+        frags          = frags->next; // 摘头,普通赋值保证引用计数平衡
+        cell->next     = *link;
+        *link          = cell;
+      }
+    }
+    if (is_nil (cur)) break; // 碎片已被挖空,后续减数无事可做
+  }
+  if (!cut) rectangles::append (tail, r);
+  else
+    for (rectangles p= cur; !is_nil (p); p= p->next)
+      rectangles::append (tail, p->item);
+}
+
 rectangles
 operator- (rectangles l1, rectangles l2) {
-  rectangles a= l1;
-  for (; !is_nil (l2); l2= l2->next) {
-    rectangles b;
-    complement (a, l2->item, b);
-    a= b;
-  }
-  return a;
+  // 逐矩形独立求差:未与任何被减矩形相交的元素一次直挂,
+  // 避免旧实现对 l2 每个元素整表重建的 O(n1*n2) 次全表克隆
+  rectangles  out;
+  rectangles* tail= &out;
+  for (; !is_nil (l1); l1= l1->next)
+    append_difference (l1->item, l2, tail);
+  return out;
 }
 
 rectangles
@@ -229,29 +263,50 @@ disjoint_union (rectangles l, rectangle r) {
 
 rectangles
 operator| (rectangles l1, rectangles l2) {
-  rectangles l (l1 - l2);
-  while (!is_nil (l2)) {
-    l = disjoint_union (l, l2->item);
-    l2= l2->next;
+  // operator- 的结果全是新鲜节点,可原地改链:
+  // 每个 l2 元素只做摘链/改写,不再克隆整个前缀
+  rectangles l= l1 - l2;
+  for (; !is_nil (l2); l2= l2->next) {
+    rectangle   r   = l2->item;
+    rectangles* link= &l;
+    while (!is_nil (*link)) {
+      if (!adjacent ((*link)->item, r)) {
+        link= &(*link)->next;
+        continue;
+      }
+      // 相邻则并入 r 并把被吸收的节点摘链,继续向后扫
+      r    = least_upper_bound ((*link)->item, r);
+      *link= (*link)->next;
+    }
+    rectangles::append (link, r);
   }
   return l;
 }
 
 rectangles
-translate (rectangles l, SI x, SI y) {
-  if (is_nil (l)) return l;
-  rectangle& r= l->item;
-  return rectangles (rectangle (r->x1 + x, r->y1 + y, r->x2 + x, r->y2 + y),
-                     translate (l->next, x, y));
+translate (const rectangles& l, SI x, SI y) {
+  // 迭代 + 尾槽位直挂：避免深度等于列表长度的递归，也避免 reverse 的二次分配
+  rectangles  out;
+  rectangles* tail= &out;
+  for (rectangles p= l; !is_nil (p); p= p->next) {
+    rectangle& r= p->item;
+    rectangles::append (tail,
+                        rectangle (r->x1 + x, r->y1 + y, r->x2 + x, r->y2 + y));
+  }
+  return out;
 }
 
 rectangles
-thicken (rectangles l, SI width, SI height) {
-  if (is_nil (l)) return l;
-  rectangle& r= l->item;
-  return rectangles (
-      rectangle (r->x1 - width, r->y1 - height, r->x2 + width, r->y2 + height),
-      thicken (l->next, width, height));
+thicken (const rectangles& l, SI width, SI height) {
+  // 迭代 + 尾槽位直挂：避免深度等于列表长度的递归，也避免 reverse 的二次分配
+  rectangles  out;
+  rectangles* tail= &out;
+  for (rectangles p= l; !is_nil (p); p= p->next) {
+    rectangle& r= p->item;
+    rectangles::append (tail, rectangle (r->x1 - width, r->y1 - height,
+                                         r->x2 + width, r->y2 + height));
+  }
+  return out;
 }
 
 rectangles
@@ -273,11 +328,15 @@ operator/ (rectangles l, int d) {
 }
 
 rectangles
-correct (rectangles l) {
-  if (is_nil (l)) return l;
-  if ((l->item->x1 >= l->item->x2) || (l->item->y1 >= l->item->y2))
-    return correct (l->next);
-  return rectangles (l->item, correct (l->next));
+correct (const rectangles& l) {
+  // 迭代 + 尾槽位直挂：避免深度等于列表长度的递归，也避免 reverse 的二次分配
+  rectangles  out;
+  rectangles* tail= &out;
+  for (rectangles p= l; !is_nil (p); p= p->next) {
+    rectangle& r= p->item;
+    if ((r->x1 < r->x2) && (r->y1 < r->y2)) rectangles::append (tail, r);
+  }
+  return out;
 }
 
 rectangles

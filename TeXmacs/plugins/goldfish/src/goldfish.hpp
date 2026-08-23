@@ -15,6 +15,8 @@
 //
 
 #include "s7.h"
+#include "s7_liii_record.h"
+#include "s7_r7rs_library.h"
 #include <algorithm>
 #include <argh.h>
 #include <cctype>
@@ -68,7 +70,7 @@
 #include <isocline.h>
 #endif
 
-#define GOLDFISH_VERSION "18.11.22"
+#define GOLDFISH_VERSION "18.11.29"
 
 #define GOLDFISH_PATH_MAXN TB_PATH_MAXN
 
@@ -111,11 +113,13 @@ void glue_http (s7_scheme* sc);
 void glue_http_async (s7_scheme* sc);
 #endif
 void glue_liii_base64 (s7_scheme* sc);
+void glue_liii_json (s7_scheme* sc);
 void glue_scheme_base (s7_scheme* sc);
 void glue_scheme_char (s7_scheme* sc);
 void glue_liii_hashlib (s7_scheme* sc);
 void glue_liii_os (s7_scheme* sc);
 void glue_liii_path (s7_scheme* sc);
+void glue_liii_sort (s7_scheme* sc);
 void glue_liii_string (s7_scheme* sc);
 void glue_subprocess_run_values (s7_scheme* sc);
 
@@ -700,6 +704,7 @@ glue_for_community_edition (s7_scheme* sc) {
   glue_liii_os (sc);
   glue_subprocess_run_values (sc);
   glue_liii_path (sc);
+  glue_liii_sort (sc);
   glue_liii_list (sc);
   glue_liii_string (sc);
   glue_liii_time (sc);
@@ -707,8 +712,11 @@ glue_for_community_edition (s7_scheme* sc) {
   glue_liii_uuid (sc);
   glue_liii_hashlib (sc);
   glue_liii_base64 (sc);
+  glue_liii_json (sc);
   glue_scheme_base (sc);
   glue_scheme_char (sc);
+  glue_r7rs_library (sc);
+  glue_liii_record (sc);
   glue_njson (sc);
 #ifdef GOLDFISH_ENABLE_HTTP
   glue_http (sc);

@@ -57,6 +57,17 @@
 例如分支 `da/1113/backward` 对应 `devel/1113.md`。开始工作前先按分支定位
 任务文档,完成后把本次改动(What/Why/How/涉及文件)追加到文档里。
 
+## 首选项（preferences）存储
+
+首选项相关改动遵循以下约定：
+
+1. 首选项统一存放于 `$TEXMACS_HOME_PATH/system/preferences.json`（不按版本分目录），
+   `get_tm_preference_path ()` 返回固定路径，不拼接版本号；
+2. 不得假设统一位置一定存在配置文件（首次运行/全新安装可能没有），缺失时应按默认值处理；
+3. Mogan 不保留跨版本配置迁移：历史遗留的旧版本目录（`system/<版本>/`）中的首选项文件
+   不会被读取，也不做合并迁移。改首选项格式或读写逻辑时，只需保证新格式自身可读写，
+   不必兼容旧版本目录中的文件。
+
 ## 提交规范
 
 1. 一个 PR 至少分为两个 commit（如果分支上已有 commit，此规则不适用）：
@@ -261,6 +272,19 @@ xmake b stem && MOGAN_TEST_GUI=1 xmake r 2044
 - C++ bridge 纯逻辑轮子优先放 Scheme 纯逻辑测试（`*-test.scm`），headless 秒级反馈
 - C++ 测试仅覆盖 Qt 钩子/返回值形状/bridge 入口（如 `MOGAN_TEST_*=ok|cancel`）
 - GUI 专属路径（tab 切换、菜单重建）用 GUI 集成测试
+
+### lolly 单元测试（`lolly/tests/**_test.cpp`）
+
+lolly 是独立的 xmake 子工程,须在 `lolly/` 目录下构建,测试目标名为
+`lolly_tests/<测试文件名>`（不含 `_test` 后缀）:
+
+```bash
+cd lolly
+xmake b lolly_tests
+xmake test lolly_tests/hashmap_test   # 单个测试
+# 或直接跑二进制(支持 doctest 参数过滤用例):
+./build/linux/x86_64/releasedbg/lolly_tests_hashmap_test --test-case="*resize*"
+```
 
 ## 构建命令
 

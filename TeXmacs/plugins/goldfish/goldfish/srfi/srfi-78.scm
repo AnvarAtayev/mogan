@@ -39,13 +39,8 @@
 
 (define-library (srfi srfi-78)
   (import (scheme base))
-  (export check
-    check-set-mode!
-    check-report
-    check-reset!
-    check-passed?
-    check-failed?
-    check:proc
+  (export check check-set-mode! check-report check-reset! check-passed?
+    check-failed? check:proc
   ) ;export
   (begin
 
@@ -79,12 +74,8 @@
       (set! check:correct (+ check:correct 1))
     ) ;define
 
-    (define (check:add-failed! expression
-              actual-result
-              expected-result
-              file
-              line
-              call-stack
+    (define (check:add-failed! expression actual-result expected-result file
+              line call-stack
             ) ;check:add-failed!
       (set! check:failed
         (cons (list expression actual-result expected-result file line call-stack)
@@ -113,11 +104,13 @@
       (newline)
       (check:write expression)
       (display " => ")
+      (flush-output-port)
     ) ;define
 
     (define (check:report-actual-result actual-result)
       (check:write actual-result)
       (display " ; ")
+      (flush-output-port)
     ) ;define
 
     (define (check:report-correct cases)

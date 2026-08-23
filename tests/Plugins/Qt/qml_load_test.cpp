@@ -15,6 +15,8 @@
 
 #include "base.hpp"
 
+#include "Qt/QTMQmlDialogBridge.hpp" // QmlDialogEscFilter
+
 #include <QDialog>
 #include <QObject>
 #include <QQmlContext>
@@ -47,13 +49,15 @@ class VersionStubBridge : public QObject {
 public:
   explicit VersionStubBridge (QObject* p= nullptr) : QObject (p) {}
   QString     title () const { return QString ("Version"); }
-  QStringList lines () const {
-    return {"You are using v2026.2.6.",
-            "The latest stable version is v2026.2.6."};
-  }
+  QStringList lines () const { return m_lines; }
   QStringList buttonLabels () const { return {"OK"}; }
+  void        setLines (const QStringList& lines) { m_lines= lines; }
 
   Q_INVOKABLE void confirm () {}
+
+private:
+  QStringList m_lines{"You are using v2026.2.6.",
+                      "The latest stable version is v2026.2.6."};
 };
 
 // live 弹窗（FontSelector / ParagraphFormat）bridge 占位：加载阶段 QML 顶层会调
@@ -198,6 +202,7 @@ private slots:
   void cleanup () { cleanup_qt_top_level_widgets (); }
 
   void test_confirm_close_loads ();
+  void test_confirm_question_loads ();
   void test_confirm_restart_loads ();
   void test_form_dialog_loads ();
   void test_font_selector_loads ();
@@ -205,6 +210,8 @@ private slots:
   void test_preferences_loads ();
   void test_version_loads ();
   void test_version_escape_cancels ();
+  void test_version_escape_fallback_without_focus ();
+  void test_version_long_line_wraps ();
   void test_statistics_loads ();
 };
 
@@ -226,6 +233,29 @@ load_qml (const QString& qrcUrl) {
 void
 TestQmlLoad::test_confirm_close_loads () {
   QCOMPARE (load_qml ("qrc:/qml/ConfirmClose.qml"), QQuickWidget::Ready);
+}
+
+void
+TestQmlLoad::test_confirm_question_loads () {
+  // ConfirmQuestion 复用 ConfirmClose 的 dialogMessage/dialogButtons，多一个
+  // dialogPrimary（默认按钮下标）。按钮按显示顺序注入（左「否」右「是」）。
+  QDialog       host;
+  QQuickWidget* qw= new QQuickWidget (&host);
+  qw->setResizeMode (QQuickWidget::SizeRootObjectToView);
+  StubBridge* bridge= new StubBridge (qw);
+  qw->rootContext ()->setContextProperty ("closeBridge", bridge);
+  qw->rootContext ()->setContextProperty ("dpScale", 1.0);
+  qw->rootContext ()->setContextProperty ("isDark", false);
+  qw->rootContext ()->setContextProperty (
+      "dialogMessage", QString ("PDF导出完成，是否要打开文件？"));
+  QStringList buttons;
+  buttons << "否" << "是";
+  qw->rootContext ()->setContextProperty ("dialogButtons", buttons);
+  qw->rootContext ()->setContextProperty ("dialogPrimary", 1);
+  qw->setSource (QUrl ("qrc:/qml/ConfirmQuestion.qml"));
+  QCOMPARE (qw->status (), QQuickWidget::Ready);
+  // dialogPrimary 透传：QML 侧 primaryIndex 应与注入一致。
+  QCOMPARE (qw->rootObject ()->property ("primaryIndex").toInt (), 1);
 }
 
 void
@@ -396,6 +426,66 @@ TestQmlLoad::test_version_escape_cancels () {
   QTRY_VERIFY (qw->rootObject ()->hasActiveFocus ());
   QTest::keyClick (qw, Qt::Key_Escape);
   QCOMPARE (close->cancelCount, 1);
+}
+
+void
+TestQmlLoad::test_version_escape_fallback_without_focus () {
+  // 0925：QML 场景无 activeFocusItem 时 ESC 会被 QQuickWidget 静默吞掉
+  // （不投递、不传播给 QDialog::reject），引擎侧的 QmlDialogEscFilter 须兜底
+  // reject 宿主弹窗，且不走 QML cancel
+  QDialog            host;
+  QQuickWidget*      qw    = new QQuickWidget (&host);
+  StubBridge*        close = new StubBridge (qw);
+  VersionStubBridge* bridge= new VersionStubBridge (qw);
+  qw->setResizeMode (QQuickWidget::SizeRootObjectToView);
+  qw->rootContext ()->setContextProperty ("closeBridge", close);
+  qw->rootContext ()->setContextProperty ("versionBridge", bridge);
+  qw->rootContext ()->setContextProperty ("dpScale", 1.0);
+  qw->rootContext ()->setContextProperty ("isDark", false);
+  qw->setSource (QUrl ("qrc:/qml/Version.qml"));
+  QCOMPARE (qw->status (), QQuickWidget::Ready);
+  qw->installEventFilter (new QmlDialogEscFilter (&host, qw, &host));
+  host.show ();
+  // 强制 QML 场景无焦点项，模拟 ESC 被吞的真实缺陷态
+  qw->rootObject ()->setFocus (false);
+  QTRY_VERIFY (!qw->rootObject ()->hasActiveFocus ());
+  QSignalSpy rejectedSpy (&host, &QDialog::rejected);
+  QTest::keyClick (qw, Qt::Key_Escape);
+  QTRY_COMPARE (rejectedSpy.count (), 1);
+  QVERIFY (!host.isVisible ());
+  QCOMPARE (close->cancelCount, 0);
+}
+
+void
+TestQmlLoad::test_version_long_line_wraps () {
+  // 单行远超弹窗宽度：应自动换行（行高成倍）、弹窗 implicitHeight 超出最小高度
+  QDialog            host;
+  QQuickWidget*      qw    = new QQuickWidget (&host);
+  StubBridge*        close = new StubBridge (qw);
+  VersionStubBridge* bridge= new VersionStubBridge (qw);
+  bridge->setLines ({QString (400, 'x')});
+  qw->setResizeMode (QQuickWidget::SizeRootObjectToView);
+  qw->rootContext ()->setContextProperty ("closeBridge", close);
+  qw->rootContext ()->setContextProperty ("versionBridge", bridge);
+  qw->rootContext ()->setContextProperty ("dpScale", 1.0);
+  qw->rootContext ()->setContextProperty ("isDark", false);
+  qw->setSource (QUrl ("qrc:/qml/Version.qml"));
+  QCOMPARE (qw->status (), QQuickWidget::Ready);
+  // 隐藏状态下 QQuickWidget 不向 root 同步尺寸，show 后视图定宽、root 跟随
+  host.show ();
+  qw->resize (560, 480);
+  QTRY_VERIFY (qw->rootObject ()->implicitHeight () > 220.0);
+  QQuickItem* messageLines=
+      qw->rootObject ()->findChild<QQuickItem*> ("versionMessageLines");
+  QVERIFY (messageLines);
+  QQuickItem* line= nullptr;
+  for (QQuickItem* item : messageLines->childItems ())
+    if (item->objectName () == "versionMessageLine") {
+      line= item;
+      break;
+    }
+  QVERIFY (line);
+  QTRY_VERIFY (line->height () > 40.0); // 单行 14*1.35≈19，换行后显著更高
 }
 
 QTEST_MAIN (TestQmlLoad)

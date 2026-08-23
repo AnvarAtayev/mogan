@@ -9,7 +9,7 @@
 -- It comes WITHOUT ANY WARRANTY WHATSOEVER. For details, see the file LICENSE
 -- in the root directory or <http://www.gnu.org/licenses/gpl-3.0.html>.
 
-XMACS_VERSION="2026.3.0-rc11"
+XMACS_VERSION="2026.3.1"
 TEXMACS_VERSION = "2.1.2"
 GOLDFISH_VERSION = "17.11.2"
 DEVEL_VERSION = TEXMACS_VERSION
@@ -74,14 +74,10 @@ libstem_headers = {
     "$(projectdir)/src/Graphics/Colors",
     "$(projectdir)/src/Graphics/Fonts",
     "$(projectdir)/src/Graphics/Gui",
-    "$(projectdir)/src/Graphics/Handwriting",
-    "$(projectdir)/src/Graphics/Mathematics",
     "$(projectdir)/src/Graphics/Pictures",
     "$(projectdir)/src/Graphics/Renderer",
     "$(projectdir)/src/Graphics/Spacial",
     "$(projectdir)/src/Graphics/Types",
-    "$(projectdir)/src/Kernel/Abstractions",
-    "$(projectdir)/src/Kernel/Types",
     "$(projectdir)/src/Mogan",
     "$(projectdir)/src/Plugins",
     "$(projectdir)/src/Plugins/WebSocket",
@@ -126,7 +122,6 @@ libstem_srcs = {
     "$(projectdir)/src/Data/**.cpp",
     "$(projectdir)/src/Edit/**.cpp",
     "$(projectdir)/src/Graphics/**.cpp",
-    "$(projectdir)/src/Kernel/**.cpp",
     "$(projectdir)/src/Mogan/**.cpp",
     "$(projectdir)/src/Scheme/Scheme/**.cpp",
     "$(projectdir)/src/Scheme/S7/**.cpp",

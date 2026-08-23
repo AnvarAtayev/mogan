@@ -380,13 +380,9 @@
 (define preferences-qml-keyboard-fields
   (list (list (pref-keyboard-text-spacebar)
           "Space bar in text mode"
-          '("default"
-            "allow multiple spaces"
-            "glue multiple spaces"
+          '("default" "allow multiple spaces" "glue multiple spaces"
             "no multiple spaces")
-          '("Default"
-            "Allow multiple spaces"
-            "Glue multiple spaces"
+          '("Default" "Allow multiple spaces" "Glue multiple spaces"
             "No multiple spaces")
           #f
           'group
@@ -394,26 +390,16 @@
         ) ;list
     (list (pref-keyboard-math-spacebar)
       "Space bar in math mode"
-      '("default"
-        "allow spurious spaces"
-        "avoid spurious spaces"
+      '("default" "allow spurious spaces" "avoid spurious spaces"
         "no spurious spaces")
-      '("Default"
-        "Allow spurious spaces"
-        "Avoid spurious spaces"
+      '("Default" "Allow spurious spaces" "Avoid spurious spaces"
         "No spurious spaces")
       #f
     ) ;list
     (list (pref-keyboard-automatic-quotes)
       "Automatic quotes"
       '("default" "none" "dutch" "english" "french" "german" "spanish" "swiss")
-      '("Default"
-        "Disabled"
-        "Dutch"
-        "English"
-        "French"
-        "German"
-        "Spanish"
+      '("Default" "Disabled" "Dutch" "English" "French" "German" "Spanish"
         "Swiss")
       #f
     ) ;list
@@ -662,13 +648,11 @@
     ) ;list
     (list (pref-convert-html-css-stylesheet)
       "CSS stylesheet"
-      '("---"
-        "https://www.texmacs.org/css/web-article.css"
+      '("---" "https://www.texmacs.org/css/web-article.css"
         "https://www.texmacs.org/css/web-article-dark.css"
         "https://www.texmacs.org/css/web-article-colored.css"
         "https://www.texmacs.org/css/web-article-dark-colored.css")
-      '("---"
-        "https://www.texmacs.org/css/web-article.css"
+      '("---" "https://www.texmacs.org/css/web-article.css"
         "https://www.texmacs.org/css/web-article-dark.css"
         "https://www.texmacs.org/css/web-article-colored.css"
         "https://www.texmacs.org/css/web-article-dark-colored.css")
@@ -893,20 +877,6 @@
     ;; 剪贴板图片格式：options 动态按 file-converter-exists? 过滤（副作用——见 pretty-format-list）。
     ;; field->descriptor 在调用时拉取（options / options-pretty 同源，保证等长同序）。
     (list (pref-convert-image-format) "Clipboard image format" '() '() #f)
-  ) ;list
-) ;define
-
-;; ---- Convert / Mogan Scheme fields ----
-
-(define preferences-qml-convert-mogan-scheme-fields
-  (list (list (pref-convert-mogan-scheme-formatted)
-          "Use the Formatted Mogan Scheme"
-          '()
-          '()
-          #f
-          'group
-          "TeXmacs → Mogan Scheme"
-        ) ;list
   ) ;list
 ) ;define
 
@@ -1144,10 +1114,6 @@
                                  (list "image"
                                    (translate "Image")
                                    (preferences-qml-build-tab preferences-qml-convert-image-fields)
-                                 ) ;list
-                                 (list "mogan-scheme"
-                                   (translate "Mogan Scheme")
-                                   (preferences-qml-build-tab preferences-qml-convert-mogan-scheme-fields)
                                  ) ;list
                                ) ;list
                     identity

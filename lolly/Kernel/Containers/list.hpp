@@ -12,6 +12,8 @@
 
 template <class T> class list_rep;
 template <class T> class list;
+template <class T, class U> class hashmap_rep;
+template <class T> class hashset_rep;
 
 /**
  * @brief Check if a list is nil (i.e., an empty list).
@@ -47,6 +49,59 @@ template <class T> bool strong_equal (list<T> l1, list<T> l2);
  */
 template <class T> class list {
   CONCRETE_NULL_TEMPLATE (list, T);
+
+  // resize 时重挂桶内节点,需直接访问 rep 做所有权转移
+  template <class T2, class U2> friend class hashmap_rep;
+  template <class T2> friend class hashset_rep;
+
+  /**
+   * @brief 把 node 重挂到 dst 链头(所有权转移,node 仍被原持有者引用)。
+   * @note 句柄赋值会释放 node 对原后继的引用;ref_count++ 补偿 dst.rep
+   * 裸赋值新增的引用。hashmap/hashset resize 搬桶时使用。
+   */
+  static void rehang (list<T>& dst, list_rep<T>* node) {
+    node->next= dst;
+    node->ref_count++;
+    dst.rep= node;
+  }
+
+  /**
+   * @brief 把新建节点(ref_count==1)挂到 dst 链头,所有权让渡给 dst。
+   * @note dst 对旧头部的引用原样转由 node 持有,不经引用计数。
+   * hashmap/hashset 插入新节点时使用。
+   */
+  static void adopt (list<T>& dst, list_rep<T>* node) {
+    node->next.rep= dst.rep;
+    dst.rep       = node;
+  }
+
+  /**
+   * @brief 新建一个仅含 item 的节点(ref_count==1, next 为 nil)。
+   * @note 配合 adopt_tail 做迭代式尾插构建，供跳过深层递归的
+   * 列表整体映射(如 rectangles 的 translate/thicken)使用。
+   */
+  static list_rep<T>* fresh_cell (T item);
+
+  /**
+   * @brief 把 fresh_cell 新建的节点挂到 tail 槽位,并把 tail 推进到新链尾。
+   * @param tail 当前链尾的 next 槽位(构建期间始终为 nil)
+   * @param cell fresh_cell 新建的节点
+   * @note 槽位为 NULL 且节点 ref_count==1,裸赋值即所有权让渡,
+   * 不经引用计数;正确使用时无需 INC/DEC。
+   */
+  static void adopt_tail (list<T>*& tail, list_rep<T>* cell) {
+    tail->rep= cell;
+    tail     = &cell->next;
+  }
+
+  /**
+   * @brief 新建仅含 item 的节点并尾挂到 tail(等价 fresh_cell + adopt_tail)。
+   * @param tail 当前链尾的 next 槽位(构建期间始终为 nil)
+   * @note 融合封装,使「adopt_tail 只接受 fresh_cell 节点」的约定无法被绕过。
+   */
+  static void append (list<T>*& tail, T item) {
+    adopt_tail (tail, fresh_cell (item));
+  }
 
   /**
    * @brief Construct a new list object with a single item.
@@ -130,6 +185,8 @@ public:
    */
   inline ~list_rep<T> () { TM_DEBUG (list_count--); }
   friend class list<T>;
+  template <class T2, class U2> friend class hashmap_rep;
+  template <class T2> friend class hashset_rep;
 };
 
 CONCRETE_NULL_TEMPLATE_CODE (list, class, T);
@@ -142,6 +199,10 @@ TMPL inline list<T>::list (T item1, T item2, list<T> next)
     : rep (tm_new<list_rep<T>> (item1, list<T> (item2, next))) {}
 TMPL inline list<T>::list (T item1, T item2, T item3, list<T> next)
     : rep (tm_new<list_rep<T>> (item1, list<T> (item2, item3, next))) {}
+TMPL inline list_rep<T>*
+list<T>::fresh_cell (T item) {
+  return tm_new<list_rep<T>> (item, list<T> ());
+}
 TMPL inline bool
 is_atom (list<T> l) {
   return (!is_nil (l)) && is_nil (l->next);
@@ -267,6 +328,15 @@ TMPL list<T> remove (list<T> l, T what);
 TMPL bool contains (list<T> l, T what);
 
 TMPL tm_ostream& operator<< (tm_ostream& out, list<T> l);
+/**
+ * @brief Append an item to the end of a list in place.
+ *
+ * @note Each append walks from the head to the tail, i.e. O(n) per call;
+ * appending n items one by one costs O(n^2). To build a long list, prepend
+ * with `list<T> (item, l)` and finish with `reverse (l)`, or keep a local
+ * handle to the last node as `copy (list<T>)` does.
+ * @note The append mutates the (possibly shared) list in place.
+ */
 TMPL list<T>& operator<< (list<T>& l, T item);
 TMPL list<T>& operator<< (list<T>& l1, list<T> l2);
 TMPL list<T>& operator>> (T item, list<T>& l);

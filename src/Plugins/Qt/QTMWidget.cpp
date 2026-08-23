@@ -207,6 +207,22 @@ void
 QTMWidget::paintEvent (QPaintEvent* event) {
   QImage   bs= tm_widget ()->get_backing_store ();
   QPainter p (surface ());
+  // backing store 尺寸落后于 surface 时分两种情况：差异很大（视图切换、
+  // surface 居中之隙，约 2 倍）时旧内容被拉伸会把页面白底铺到灰边位置，
+  // 改刷灰边底色，等 repaint_invalid_regions 重建后再正常上屏；差异很小
+  // （如滚动条宽度引起的 extents 微调）时拉伸量不可感知，直接绘制，
+  // 避免整页灰帧闪烁
+  QSize expect= retina_factor * surface ()->size ();
+  if (bs.isNull ()) {
+    p.fillRect (surface ()->rect (), to_qcolor (tm_background));
+    return;
+  }
+  double rw= (double) bs.width () / qMax (1, expect.width ());
+  double rh= (double) bs.height () / qMax (1, expect.height ());
+  if (rw < 2.0 / 3.0 || rw > 1.5 || rh < 2.0 / 3.0 || rh > 1.5) {
+    p.fillRect (surface ()->rect (), to_qcolor (tm_background));
+    return;
+  }
   // this code override the invalid region computations
   p.drawImage (QRect (QPoint (), size ()), bs,
                QRect (QPoint (), size () * retina_factor));
@@ -367,8 +383,8 @@ QTMWidget::inputMethodEvent (QInputMethodEvent* event) {
   else if (im_preedit_str == "on") {
     im_preedit_switch= true;
   }
-  // Disable preedit in math mode to prevent crash in QQPinyin
-  if (as_bool (call ("in-math?"))) im_preedit_switch= false;
+  // Disable preedit in math/hybrid mode to prevent crash in QQPinyin
+  if (as_bool (call ("in-math-or-hybrid?"))) im_preedit_switch= false;
 
   string r= "pre-edit:";
   if (im_preedit_switch && !preedit_string.isEmpty ()) {
@@ -418,8 +434,8 @@ QVariant
 QTMWidget::inputMethodQuery (Qt::InputMethodQuery query) const {
   switch (query) {
   case Qt::ImEnabled:
-    // 数学模式下禁用输入法，按键直接进入公式编辑
-    return QVariant (!as_bool (call ("in-math?")));
+    // 数学/hybrid 命令模式下禁用输入法，按键直接进入公式或命令输入
+    return QVariant (!as_bool (call ("in-math-or-hybrid?")));
 #if QT_VERSION < 0x060000
   case Qt::ImMicroFocus: {
     const QPoint& topleft= cursor_pos - tm_widget ()->backing_pos +

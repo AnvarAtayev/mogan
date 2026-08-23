@@ -24,20 +24,23 @@ hashset_rep<T>::resize (int n2) {
   for (i= 0; i < oldn; i++) {
     list<T> l (olda[i]);
     while (!is_nil (l)) {
-      list<T>& newl= a[hash (l->item) & (n - 1)];
-      newl         = list<T> (l->item, newl);
-      l            = l->next;
+      list_rep<T>* node= l.rep;
+      list<T>      next (node->next);
+      list<T>::rehang (a[hash_bucket (hash (node->item), n)], node);
+      l= next;
     }
+    olda[i]= list<T> ();
   }
   tm_delete_array (olda);
 }
 
 template <class T>
-static T*
-search (list<T> l, T x) {
-  while (!is_nil (l)) {
-    if (l->item == x) return &(l->item);
-    l= l->next;
+list_rep<T>*
+hashset_rep<T>::find_node (list<T>& bucket, T x) {
+  list_rep<T>* p= bucket.rep;
+  while (p != NULL) {
+    if (p->item == x) return p;
+    p= p->next.rep;
   }
   return NULL;
 }
@@ -45,23 +48,30 @@ search (list<T> l, T x) {
 template <class T>
 bool
 hashset_rep<T>::contains (T x) {
-  return (search (a[hash (x) & (n - 1)], x) == NULL ? false : true);
+  return find_node (a[hash_bucket (hash (x), n)], x) != NULL;
 }
 
 template <class T>
 void
-hashset_rep<T>::insert (T x) {
-  if (size == n * max) resize (n << 1);
-  list<T>& l= a[hash (x) & (n - 1)];
-  if (search (l, x) != NULL) return;
-  l= list<T> (x, l);
+hashset_rep<T>::insert_node (int hv, T x) {
+  if (size >= n * max) resize (n << 1);
+  list_rep<T>* node= tm_new<list_rep<T>> (x, list<T> ());
+  list<T>::adopt (a[hash_bucket (hv, n)], node);
   size++;
 }
 
 template <class T>
 void
+hashset_rep<T>::insert (T x) {
+  int hv= hash (x);
+  if (find_node (a[hash_bucket (hv, n)], x) != NULL) return;
+  insert_node (hv, x);
+}
+
+template <class T>
+void
 hashset_rep<T>::remove (T x) {
-  list<T>* lptr= &a[hash (x) & (n - 1)];
+  list<T>* lptr= &a[hash_bucket (hash (x), n)];
   while (!is_nil (*lptr)) {
     if ((*lptr)->item == x) {
       *lptr= (*lptr)->next;
@@ -90,8 +100,11 @@ operator<= (hashset<T> h1, hashset<T> h2) {
   if (N (h1) > N (h2)) return false;
   for (; i < n; i++) {
     list<T> l= h1->a[i];
-    for (; !is_nil (l); l= l->next, j++)
-      if (!h2->contains (l->item)) return false;
+    for (; !is_nil (l); l= l->next, j++) {
+      if (hashset_rep<T>::find_node (
+              h2->a[hash_bucket (hash (l->item), h2->n)], l->item) == NULL)
+        return false;
+    }
   }
   return true;
 }

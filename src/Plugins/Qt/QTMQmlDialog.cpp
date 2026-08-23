@@ -29,6 +29,7 @@ using moebius::data::tree_to_scheme_tree;
 #include <QDialog>
 #include <QQmlContext>
 #include <QQmlError>
+#include <QQuickItem>
 #include <QQuickWidget>
 #include <QString>
 #include <QStringList>
@@ -138,6 +139,26 @@ lock_fixed_size (QQuickWidget* qw, QVBoxLayout* vl, QDialog& d, int logic_w,
 }
 
 /**
+ * @brief 宽度锁定后按 QML 内容自适应锁定弹窗高度。
+ *
+ * 用于正文行数不固定的弹窗（如版本弹窗：长行自动换行后行数变化）。先按
+ * logic_w 锁定视图宽度，让 QML 按最终宽度完成换行布局，再读根对象的
+ * implicitHeight（QML 像素，已含 scaleFactor，故不再过 DpiUtils::scaled）。
+ * QML 未提供有效 implicitHeight 时回退 logic_h。
+ */
+static void
+lock_autofit_height (QQuickWidget* qw, QVBoxLayout* vl, QDialog& d, int logic_w,
+                     int logic_h) {
+  const int w= DpiUtils::scaled (logic_w);
+  qw->setFixedWidth (w);
+  int h= (int) qw->rootObject ()->implicitHeight ();
+  if (h <= 0) h= DpiUtils::scaled (logic_h);
+  qw->setFixedSize (w, h);
+  vl->setSizeConstraint (QLayout::SetFixedSize);
+  d.setFixedSize (w, h);
+}
+
+/**
  * @brief 通用 QML 模态弹窗引擎。
  *
  * 把两类弹窗（确认型 / form 型）共用的 QDialog 拼装 + setSource + 加载检查 +
@@ -152,6 +173,8 @@ lock_fixed_size (QQuickWidget* qw, QVBoxLayout* vl, QDialog& d, int logic_w,
  *        dpScale / isDark（并按需捕获返回的 bridge），再注入弹窗特有项。
  * @param logic_w / logic_h 96 DPI 下的逻辑尺寸（引擎内部统一 DpiUtils::scaled
  *        × DPI 后锁定 QQuickWidget 与 QDialog，调用方不必自己乘 DPI）。
+ * @param autofit_height true 时按 QML 根对象 implicitHeight 自适应高度
+ *        （logic_h 仅作回退），见 lock_autofit_height。
  * @return QDialog::exec 的退出码（即 QML 侧 closeBridge 传给 done() 的值）；
  *         QML 加载失败返回 -1。调用方据此映射结果（确认型 → 按钮下标；form 型
  *         → Accepted/Rejected，表单值另行从 bridge->results() 取）。
@@ -159,7 +182,7 @@ lock_fixed_size (QQuickWidget* qw, QVBoxLayout* vl, QDialog& d, int logic_w,
 static int
 run_qml_dialog (const string& qml_url, const char* debug_tag,
                 std::function<void (QQuickWidget*, QDialog&)> inject_context,
-                int logic_w, int logic_h) {
+                int logic_w, int logic_h, bool autofit_height= false) {
   static const bool resourceInitialized= [] () {
     Q_INIT_RESOURCE (moganqml);
     return true;
@@ -179,7 +202,15 @@ run_qml_dialog (const string& qml_url, const char* debug_tag,
   }
 
   vl->addWidget (qw);
-  lock_fixed_size (qw, vl, d, logic_w, logic_h);
+  if (autofit_height) lock_autofit_height (qw, vl, d, logic_w, logic_h);
+  else lock_fixed_size (qw, vl, d, logic_w, logic_h);
+
+  // 焦点落在 QML 视图：弹窗激活时离屏 QML 场景随之激活，DialogShell 的
+  // focus:true 生效，ESC/Enter 走 QML 正常链路
+  qw->setFocus ();
+  // QML 场景无 activeFocusItem 时 ESC 会被 QQuickWidget 静默吞掉（不投递、
+  // 不传播给 QDialog::reject），装兜底过滤器保证 ESC 总能关闭弹窗（0925）
+  qw->installEventFilter (new QmlDialogEscFilter (&d, qw, &d));
 
   return d.exec ();
 }
@@ -301,8 +332,43 @@ cpp_confirm_restart (string title, string message) {
   }
 }
 
-// ---- form 引擎 --------------------------------------------------------------
+/**
+ * @brief 「问题」确认弹窗的 glue 入口（声明/语义见 QTMQmlDialog.hpp）。
+ *
+ * @details buttons 为语义顺序（buttons[0] 默认）；注入 QML 的 dialogButtons 按
+ * 相反显示顺序（默认按钮居右），dialogPrimary 指向显示序的最后一个。QML 返回
+ * 的 choose 值为显示下标 +1，映射回语义下标为 N - choice。按钮文案已在 scm
+ * 侧翻译，此处纯透传、不再过 translate_buttons。测试钩子
+ * MOGAN_TEST_CONFIRM_QUESTION=<下标|cancel> 命中时不弹窗。
+ */
+int
+cpp_confirm_question (string message, array<string> buttons) {
+  string preset= get_env ("MOGAN_TEST_CONFIRM_QUESTION");
+  if (preset == "cancel") return -1;
+  if (is_int (preset)) return as_int (preset);
+  const int n= N (buttons);
+  if (n <= 0) return -1;
+  QStringList qmlButtons;
+  for (int i= 0; i < n; i++)
+    qmlButtons << to_qstring (buttons[n - 1 - i]);
+  QmlDialogBridge* bridge= nullptr;
+  int              choice= run_qml_dialog (
+      "qrc:/qml/ConfirmQuestion.qml", "question dialog",
+      [&] (QQuickWidget* qw, QDialog& host) {
+        bridge= inject_common_context (qw, host);
+        qw->rootContext ()->setContextProperty ("dialogMessage",
+                                                             to_qstring (message));
+        qw->rootContext ()->setContextProperty ("dialogButtons", qmlButtons);
+        qw->rootContext ()->setContextProperty ("dialogPrimary", n - 1);
+      },
+      400, 150);
+  delete bridge;
+  // choose(0) = Esc / X；加载失败为 -1；二者均按取消处理。
+  if (choice <= 0 || choice > n) return -1;
+  return n - choice;
+}
 
+// ---- form 引擎 --------------------------------------------------------------
 // 字段节点下标协议（见 QTMQmlDialog.hpp @par 数据协议）：
 // (<type> <label> <key> (<options>...) <value> <live?>)
 // label/key/value 的位置在 form 引擎多处使用，集中在此避免魔法下标散落。
@@ -574,7 +640,7 @@ cpp_version_dialog (string title, string message) {
                                                                translate_buttons (buttons));
         qw->rootContext ()->setContextProperty ("versionBridge", bridge);
       },
-      560, 220);
+      560, 220, true);
   delete closeBridge;
   delete bridge;
   return choice == 1;

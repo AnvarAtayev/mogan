@@ -1,59 +1,11 @@
 (define-library (liii list)
-  (export circular-list
-    iota
-    xcons
-    cons*
-    null-list?
-    circular-list?
-    proper-list?
-    dotted-list?
-    first
-    second
-    third
-    fourth
-    fifth
-    sixth
-    seventh
-    eighth
-    ninth
-    tenth
-    take
-    drop
-    take-right
-    drop-right
-    split-at
-    last-pair
-    last
-    zip
-    count
-    fold
-    fold-right
-    reduce
-    reduce-right
-    filter
-    partition
-    remove
-    append-map
-    find
-    any
-    every
-    list-index
-    take-while
-    drop-while
-    delete
-    alist-cons
-    flat-map
-    list-null?
-    list-not-null?
-    not-null-list?
-    length=?
-    length>?
-    length>=?
-    flatten
-    list-take
-    list-drop
-    list-take-right
-    list-drop-right
+  (export circular-list iota xcons cons* null-list? circular-list? proper-list?
+    dotted-list? first second third fourth fifth sixth seventh eighth ninth
+    tenth take drop take-right drop-right split-at last-pair last zip count fold
+    fold-right reduce reduce-right filter partition remove append-map find any
+    every list-index take-while drop-while delete alist-cons flat-map list-null?
+    list-not-null? not-null-list? length=? length>? length>=? flatten list-take
+    list-drop list-take-right list-drop-right
   ) ;export
   (import (scheme base) (srfi srfi-1) (srfi srfi-13) (liii error))
   (begin
@@ -140,9 +92,20 @@
       (unless (integer? n)
         (type-error "list-take-right: second argument must be an integer" n)
       ) ;unless
-      (cond ((< n 0) '())
-            ((>= n (length lst)) lst)
-            (else (take-right lst n))
+      (cond ((<= n 0) '())
+            (else (let advance
+                    ((lead lst) (count 0))
+                    (cond ((null? lead) lst)
+                          ((>= count n)
+                           (let scan
+                             ((lead lead) (lag lst))
+                             (if (null? lead) lag (scan (cdr lead) (cdr lag)))
+                           ) ;let
+                          ) ;
+                          (else (advance (cdr lead) (+ count 1)))
+                    ) ;cond
+                  ) ;let
+            ) ;else
       ) ;cond
     ) ;define
 
@@ -153,7 +116,7 @@
       (unless (integer? n)
         (type-error "list-drop-right: second argument must be an integer" n)
       ) ;unless
-      (cond ((< n 0) lst)
+      (cond ((<= n 0) lst)
             ((>= n (length lst)) '())
             (else (drop-right lst n))
       ) ;cond
