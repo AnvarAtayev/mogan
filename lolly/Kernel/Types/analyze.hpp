@@ -405,21 +405,28 @@ int search_forwards (string what, string in);
 /**
  * Searches for a substring in a string starting from a specified position.
  *
+ * 用 memchr 定位模式首字符、memcmp 做整段比较，均直接作用于原始缓冲区；
+ * 匹配窗口右界为最后一个可容纳整个模式的起点 N(in) - N(what)。
+ *
  * @param what The substring to search for.
  * @param pos The starting position in the string to search from.
  * @param in The string to search in.
  * @return Position where the substring was found, or -1 if not found.
+ * @note what 为空串时直接返回 pos；what 比 in 长时返回 -1。
  */
 int search_forwards (string what, int pos, string in);
 
 /**
- * Searches for a substring in a string starting from a specified position, in
- * reverse.
+ * Searches for any of a list of substrings in a string, starting from a
+ * specified position.
  *
- * @param what_list The substring to search for.
+ * 每个候选模式先做首字符与长度预筛，再用 memcmp 整段比较；返回最早命中的
+ * 位置（多个模式在同一位置命中时任取其一）。
+ *
+ * @param what_list The substrings to search for. 空模式串会被跳过。
  * @param pos The starting position in the string to search from.
  * @param in The string to search in.
- * @return Position where the substring was found, or -1 if not found.
+ * @return Position where any substring was found, or -1 if none was found.
  */
 int search_forwards (array<string> what_list, int pos, string in);
 
@@ -442,15 +449,6 @@ int search_backwards (string what, string in);
  * @return Position where the substring was found, or -1 if not found.
  */
 int search_backwards (string what, int pos, string in);
-
-/**
- * Counts the occurrences of a substring in a string.
- *
- * @param s The substring to count.
- * @param in The string to search in.
- * @return Number of occurrences of the substring.
- */
-int count_occurrences (string what, string in);
 
 /**
  * Checks whether a substring occurs within another string.
@@ -523,11 +521,15 @@ int fuzzy_match_score (string pattern, string target);
 int find_non_alpha (string s, int pos, bool forward);
 
 /**
- * Splits a string into an array of strings based on a separator string.
+ * @brief 将字符串 s 按分隔符 sep 拆分为子串数组
  *
- * @param s The string to split.
- * @param sep The separator string.
- * @return An array of strings split based on the separator.
+ * @param s   原字符串
+ * @param sep 分隔符（非空）
+ * @return    拆分后的子串数组；sep 为空串时返回仅含 s 自身的数组
+ *
+ * @note 扫描时先用首字符快速筛选，仅当 s[i] 与 sep[0] 相同才进入
+ *       test 做完整比较；模式尾部不足以容纳 sep 的区段直接跳过。
+ *       空分隔符原实现会死循环，现按整串唯一 token 处理。
  */
 array<string> tokenize (string s, string sep);
 

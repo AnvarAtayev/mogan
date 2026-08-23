@@ -149,6 +149,48 @@ TEST_CASE ("test_read_word") {
   CHECK_EQ (i, 0);
 }
 
+TEST_CASE ("search_forwards") {
+  // 基本命中
+  CHECK_EQ (search_forwards ("quick", "the quick brown"), 4);
+  CHECK_EQ (search_forwards ("the", "the quick brown"), 0);
+  CHECK_EQ (search_forwards ("brown", "the quick brown"), 10);
+  // 无命中
+  CHECK_EQ (search_forwards ("QUICK", "the quick brown"), -1);
+  // 空模式：返回起始位置
+  CHECK_EQ (search_forwards ("", "abc"), 0);
+  CHECK_EQ (search_forwards ("", 2, "abc"), 2);
+  // 模式长于原串 / 与原串等长
+  CHECK_EQ (search_forwards ("abcdef", "abc"), -1);
+  CHECK_EQ (search_forwards ("abc", "abc"), 0);
+  // 带起始位置
+  CHECK_EQ (search_forwards ("the", 1, "the quick the"), 10);
+  CHECK_EQ (search_forwards ("the", 10, "the quick the"), 10);
+  // 起始位置越过最后一个可能匹配点
+  CHECK_EQ (search_forwards ("the", 11, "the quick the"), -1);
+  // 首字符干扰：首字符大量出现但整体不匹配
+  CHECK_EQ (search_forwards ("totally", "the quick brown"), -1);
+  CHECK_EQ (search_forwards ("at", "that at"), 2);
+  // 尾部命中（验证窗口右边界含最后一个起点）
+  CHECK_EQ (search_forwards ("dog", "the lazy dog"), 9);
+  // 字符串内可含 '\0'
+  CHECK_EQ (search_forwards (string ("b\0d", 3), string ("a\0b\0d", 5)), 2);
+  // array 重载：多模式取最早命中，含首字符干扰与长度过滤
+  array<string> pats= array<string> ("brown", "quick");
+  CHECK_EQ (search_forwards (pats, 0, "the quick brown"), 4);
+  array<string> pats2= array<string> ("zzzzz", "quick");
+  CHECK_EQ (search_forwards (pats2, 0, "the quick brown"), 4);
+  CHECK_EQ (search_forwards (pats, 0, "none here"), -1);
+  // array 重载：pos == N(in) 时不再越界读
+  CHECK_EQ (search_forwards (pats, 15, "the quick brown"), -1);
+  // 大输入冒烟
+  string line= "the quick brown fox jumps over the lazy dog\n";
+  string text;
+  for (int i= 0; i < 2000; i++)
+    text << line;
+  CHECK_EQ (search_forwards ("lazy", text), 35);
+  CHECK_EQ (search_forwards ("LAZY", text), -1);
+}
+
 TEST_CASE ("contains/occurs") {
   CHECK (contains ("abc", "a"));
   CHECK (contains ("abc", "ab"));
@@ -179,12 +221,48 @@ TEST_CASE ("replace") {
   // 空模式守卫：原样返回，不死循环
   CHECK_EQ (replace ("abc", "", "_") == "abc", true);
   CHECK_EQ (replace ("", "", "_") == "", true);
+  // 模式比原串长：尾部不足以容纳模式的区段不匹配
+  CHECK_EQ (replace ("ab", "abc", "x") == "ab", true);
+  CHECK_EQ (replace ("ab-", "ab-", "") == "", true);
+  // 模式首字符出现但整体不匹配
+  CHECK_EQ (replace ("aXbXc", "XY", "Z") == "aXbXc", true);
+  // 命中后模式整体跳过，替换串中再现模式不递归替换
+  CHECK_EQ (replace ("a-b", "-", "--") == "a--b", true);
+}
+
+TEST_CASE ("replace large input") {
+  // 大输入冒烟：等长替换长度不变且模式被完全替换
+  string line= "the quick brown fox jumps over the lazy dog\n";
+  string text;
+  for (int i= 0; i < 2000; i++)
+    text << line;
+  string r= replace (text, "quick", "brisk");
+  CHECK (N (r) == N (text));
+  CHECK_EQ (occurs ("quick", r), false);
 }
 
 TEST_CASE ("tokenize") {
   CHECK_EQ (tokenize ("hello world", " "), array<string> ("hello", "world"));
   CHECK_EQ (tokenize ("zotero://select/library/items/2AIFJFS7", "://"),
             array<string> ("zotero", "select/library/items/2AIFJFS7"));
+  // 分隔符长于原串：整串作为唯一 token
+  array<string> single;
+  single << "ab";
+  CHECK_EQ (tokenize ("ab", "abc"), single);
+  // 尾部不足以容纳分隔符的片段原样保留
+  CHECK_EQ (tokenize ("a::b:", "::"), array<string> ("a", "b:"));
+  // 首字符干扰：首字符相同但整体不匹配，不拆分
+  array<string> whole;
+  whole << "a:b";
+  CHECK_EQ (tokenize ("a:b", "::"), whole);
+  // 空分隔符：整串作为唯一 token（原实现此处会死循环）
+  CHECK_EQ (tokenize ("a:b", ""), whole);
+  // 大输入冒烟
+  string big;
+  for (int i= 0; i < 2000; i++)
+    big << "key=value;";
+  CHECK_EQ (N (tokenize (big, ";")), 2001);
+  string_eq (tokenize (big, ";")[1999], "key=value");
 }
 
 TEST_CASE ("recompose") {

@@ -99,14 +99,17 @@
 
 (define (boot-bench-mark stage)
   (let ((now (texmacs-time)))
-    (debug-message "debug-std"
-      (string-append "bench "
-        stage
-        ": "
-        (number->string (- now boot-bench-last))
-        " ms\n"
-      ) ;string-append
-    ) ;debug-message
+    ;; 不足 10ms 的阶段不打印，避免启动日志被 0ms 级条目刷屏
+    (if (>= (- now boot-bench-last) 10)
+      (debug-message "debug-std"
+        (string-append "bench "
+          stage
+          ": "
+          (number->string (- now boot-bench-last))
+          " ms\n"
+        ) ;string-append
+      ) ;debug-message
+    ) ;if
     (set! boot-bench-last now)
   ) ;let
 ) ;define
@@ -167,9 +170,7 @@
 (lazy-define (utils cas cas-out) cas->stree)
 (lazy-define (utils plugins plugin-cmd) pre-serialize utf8raw-serialize)
 (use-modules (utils library smart-table))
-(use-modules (utils plugins plugin-convert))
 (use-modules (utils misc markup-funcs))
-(use-modules (utils handwriting handwriting))
 (lazy-tmfs-handler (utils automate auto-tmfs) automate)
 (lazy-define (utils automate auto-tmfs) auto-load-help)
 (lazy-define (utils misc gui-keyboard) get-keyboard)
@@ -418,14 +419,8 @@
   sector
   sector-counterclockwise
 ) ;lazy-define
-(define-secure-symbols arrow-with-text
-  arrow-with-text*
-  circle
-  three-points-circle
-  std-arc
-  std-arc-counterclockwise
-  three-points-arc
-  sector
+(define-secure-symbols arrow-with-text arrow-with-text* circle
+  three-points-circle std-arc std-arc-counterclockwise three-points-arc sector
   sector-counterclockwise
 ) ;define-secure-symbols
 
@@ -643,7 +638,7 @@
 ;; (display "Booting autoupdater\n")
 (when (use-plugin-updater?)
   (use-modules (utils misc updater))
-  (delayed (:idle 2000) (updater-initialize))
+  (delayed (:pause 2000) (updater-initialize))
 ) ;when
 (debug-message "debug-std"
   (string-append "time: "

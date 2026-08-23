@@ -51,6 +51,19 @@ template <class T, class U> class hashmap_rep : concrete_struct {
   U                      init; // default entry
   list<hashentry<T, U>>* a;    // the array of entries
 
+  /**
+   * @brief 在桶内按完整哈希码与键裸指针查找节点。
+   * @note 避免句柄遍历带来的每节点两次引用计数增减。
+   */
+  static list_rep<hashentry<T, U>>* find_node (list<hashentry<T, U>>& bucket,
+                                               int hv, T x);
+
+  /**
+   * @brief 以裸指针在桶头挂一个新条目节点(必要时先扩容)。
+   * @note 避免临时句柄的引用计数增减;返回新节点。
+   */
+  list_rep<hashentry<T, U>>* insert_node (int hv, T key, U im);
+
 public:
   /**
    * @brief Constructor for the hashmap_rep class.
@@ -100,9 +113,10 @@ public:
 
   bool contains (T x);
   bool empty ();
-  U    bracket_ro (T x);
-  U&   bracket_rw (T x);
-  U&   bracket_rw_debug (T x);
+
+  U  bracket_ro (T x);
+  U& bracket_rw (T x);
+  U& bracket_rw_debug (T x);
 
   /**
    * @brief Joins another hashmap into the current hashmap.

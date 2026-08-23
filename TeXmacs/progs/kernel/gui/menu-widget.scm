@@ -309,31 +309,10 @@
     (with (w1 w2 w3 wpos h1 h2 h3 hpos)
       global-resize
       (with attrs
-        (list "page-medium"
-          "papyrus"
-          "page-type"
-          "user"
-          "page-width"
-          w2
-          "page-height"
-          h2
-          "page-odd"
-          "4px"
-          "page-even"
-          "4px"
-          "page-right"
-          "4px"
-          "page-top"
-          "2px"
-          "page-bot"
-          "2px"
-          "page-screen-left"
-          "4px"
-          "page-screen-right"
-          "4px"
-          "page-screen-top"
-          "2px"
-          "page-screen-bot"
+        (list "page-medium" "papyrus" "page-type" "user" "page-width" w2
+          "page-height" h2 "page-odd" "4px" "page-even" "4px" "page-right" "4px"
+          "page-top" "2px" "page-bot" "2px" "page-screen-left" "4px"
+          "page-screen-right" "4px" "page-screen-top" "2px" "page-screen-bot"
           "2px"
         ) ;list
         (if (tm-is? t 'with)
@@ -466,53 +445,47 @@
   ) ;if
 ) ;define
 
-(define (search-balloon-help action)
-  (and-with source
-    (promise-source action)
-    (and (pair? source)
-      (or (and-with prop
-            (property (car source) :balloon)
-            (with txt (apply (car prop) (cdr source)) (and (string? txt) txt))
-          ) ;and-with
-        (and-with prop
-          (property (car source) :synopsis)
-          (and (pair? prop)
-            (string? (car prop))
-            (with txt (synopsis-substitute (car prop) source) (and (string? txt) txt))
-          ) ;and
+(define (search-balloon-help source)
+  (and (pair? source)
+    (or (and-with prop
+          (property (car source) :balloon)
+          (with txt (apply (car prop) (cdr source)) (and (string? txt) txt))
         ) ;and-with
-      ) ;or
-    ) ;and
-  ) ;and-with
+      (and-with prop
+        (property (car source) :synopsis)
+        (and (pair? prop)
+          (string? (car prop))
+          (with txt (synopsis-substitute (car prop) source) (and (string? txt) txt))
+        ) ;and
+      ) ;and-with
+    ) ;or
+  ) ;and
 ) ;define
 
-(define (add-menu-entry-balloon but style action)
-  (with txt
-    (search-balloon-help action)
-    (if (not txt)
-      but
-      (with bal
-        (widget-text (translate txt) style (color "black") #t)
-        (widget-balloon but bal)
+(define (make-menu-entry-button attrs bar? action)
+  (with (style check label short balloon-txt)
+    attrs
+    (let* ((command (make-menu-command (if (active? style) (apply action '()))))
+           (l (make-menu-label label style))
+           (pressed? (and bar? (!= check "")))
+           (new-style (logior style (if pressed? widget-style-pressed 0)))
+          ) ;
+      (with but
+        (if bar?
+          (widget-menu-button l command "" "" new-style)
+          (widget-menu-button l command check short style)
+        ) ;if
+        ;; bal? 为真时 menu-entry-attributes 已把气球槽置为 #f，这里无需再判
+        (if (not balloon-txt)
+          but
+          (with bal
+            (widget-text (translate balloon-txt) style (color "black") #t)
+            (widget-balloon but bal)
+          ) ;with
+        ) ;if
       ) ;with
-    ) ;if
+    ) ;let*
   ) ;with
-) ;define
-
-(define (make-menu-entry-button style bar? bal? check label short action)
-  (let* ((command (make-menu-command (if (active? style) (apply action '()))))
-         (l (make-menu-label label style))
-         (pressed? (and bar? (!= check "")))
-         (new-style (logior style (if pressed? widget-style-pressed 0)))
-        ) ;
-    (with but
-      (if bar?
-        (widget-menu-button l command "" "" new-style)
-        (widget-menu-button l command check short style)
-      ) ;if
-      (if bal? but (add-menu-entry-balloon but style action))
-    ) ;with
-  ) ;let*
 ) ;define
 
 (define-public (promise-source action)
@@ -529,14 +502,10 @@
   ) ;and
 ) ;define-public
 
-(define (make-menu-entry-shortcut label action opt-key)
+(define (make-menu-entry-shortcut label source opt-key)
   (cond (opt-key (kbd-system opt-key #t))
         ((pair? label) "")
-        (else (with source
-                (promise-source action)
-                (if source (kbd-find-shortcut source #t) "")
-              ) ;with
-        ) ;else
+        (else (if source (kbd-find-shortcut source #t) ""))
   ) ;cond
 ) ;define
 
@@ -547,21 +516,18 @@
   ) ;cond
 ) ;define
 
-(define (make-menu-entry-check opt-check action)
+(define (make-menu-entry-check opt-check source)
   (if opt-check
     (make-menu-entry-check-sub ((cadr opt-check)) (car opt-check))
-    (with source
-      (promise-source action)
-      (cond ((not (and source (pair? source))) "")
-            (else (with prop
-                    (property (car source) :check-mark)
-                    (make-menu-entry-check-sub (and prop (apply (cadr prop) (cdr source)))
-                      (and prop (car prop))
-                    ) ;make-menu-entry-check-sub
-                  ) ;with
-            ) ;else
-      ) ;cond
-    ) ;with
+    (if (not (and source (pair? source)))
+      ""
+      (with prop
+        (property (car source) :check-mark)
+        (make-menu-entry-check-sub (and prop (apply (cadr prop) (cdr source)))
+          (and prop (car prop))
+        ) ;make-menu-entry-check-sub
+      ) ;with
+    ) ;if
   ) ;if
 ) ;define
 
@@ -577,15 +543,16 @@
   ) ;cond
 ) ;define
 
-(define (make-menu-entry-dots label action)
-  (if (menu-action-interactive? action) (menu-label-add-dots label) label)
+(define (make-menu-entry-dots label interactive?)
+  (if interactive? (menu-label-add-dots label) label)
+) ;define
+
+(define (menu-source-interactive? source)
+  (and source (pair? source) (property (car source) :interactive))
 ) ;define
 
 (define (menu-action-interactive? action)
-  (with source
-    (promise-source action)
-    (and source (pair? source) (property (car source) :interactive))
-  ) ;with
+  (menu-source-interactive? (promise-source action))
 ) ;define
 
 (define (imgui-supported-action? action)
@@ -600,20 +567,17 @@
 ) ;define
 
 
-(define (make-menu-entry-style style action)
-  (with source
-    (promise-source action)
-    (if (not (pair? source))
-      style
-      (with prop
-        (property (car source) :applicable)
-        (if (or (not prop) (apply (car prop) (list)))
-          style
-          (logior style (+ widget-style-inert widget-style-grey))
-        ) ;if
-      ) ;with
-    ) ;if
-  ) ;with
+(define (make-menu-entry-style source style)
+  (if (not (pair? source))
+    style
+    (with prop
+      (property (car source) :applicable)
+      (if (or (not prop) (apply (car prop) (list)))
+        style
+        (logior style (+ widget-style-inert widget-style-grey))
+      ) ;if
+    ) ;with
+  ) ;if
 ) ;define
 
 (define (make-menu-entry-attrs label action opt-key opt-check)
@@ -627,30 +591,32 @@
   ) ;cond
 ) ;define
 
-(define (make-menu-entry-sub p style bar?)
+(define-public (menu-entry-attributes label source style opt-key opt-check bal?)
+  ;; 一次性导出 (new-style check dotted-label shortcut balloon)，
+  ;; 避免每个属性各做一次 promise-source；bal? 为真时气球帮助必然被丢弃，不算
+  (list (make-menu-entry-style source style)
+    (make-menu-entry-check opt-check source)
+    (make-menu-entry-dots label (menu-source-interactive? source))
+    (make-menu-entry-shortcut label source opt-key)
+    (and (not bal?) (search-balloon-help source))
+  ) ;list
+) ;define-public
+
+(define (make-menu-entry-sub p style bar? source)
   (receive (label action opt-key opt-check)
     (make-menu-entry-attrs (car p) (cAr p) #f #f)
-    (make-menu-entry-button (make-menu-entry-style style action)
-      bar?
+    (with bal?
       (tuple? (car p) 'balloon 2)
-      (make-menu-entry-check opt-check action)
-      (make-menu-entry-dots label action)
-      (make-menu-entry-shortcut label action opt-key)
-      action
-    ) ;make-menu-entry-button
+      (make-menu-entry-button (menu-entry-attributes label source style opt-key opt-check bal?)
+        bar?
+        action
+      ) ;make-menu-entry-button
+    ) ;with
   ) ;receive
 ) ;define
 
 (define (make-menu-entry p style bar?)
   "Make @:menu-wide-item menu item."
-
-  (define (retrieve-shortcut p)
-    (let* ((cmd (and (nnull? (cdr p)) (procedure? (cadr p)) (cadr p)))
-           (source (and cmd (promise-source cmd)))
-          ) ;
-      (and source (kbd-find-shortcut source #f))
-    ) ;let*
-  ) ;define
 
   (define (create-text-widget text shortcut style)
     (let* ((txt (if (or (not shortcut) (== shortcut ""))
@@ -664,26 +630,23 @@
     ) ;let*
   ) ;define
 
-  (let ((but (make-menu-entry-sub p style bar?)) (label (car p)))
-    (cond ((tuple? label 'balloon 2)
-           (let* ((text (caddr label))
-                  (shortcut (retrieve-shortcut p))
-                  (twid (create-text-widget text shortcut style))
-                 ) ;
-             (widget-balloon but twid)
-           ) ;let*
-          ) ;
-          ((and (tuple? label 'check 3) (tuple? (cadr label) 'balloon 2))
-           (let* ((text (caddr (cadr label)))
-                  (shortcut (retrieve-shortcut p))
-                  (twid (create-text-widget text shortcut style))
-                 ) ;
-             (widget-balloon but twid)
-           ) ;let*
-          ) ;
-          (else but)
-    ) ;cond
-  ) ;let
+  (with source
+    (promise-source (cAr p))
+    (let ((but (make-menu-entry-sub p style bar? source))
+          (label (car p))
+          ;; 仅气球分支用到快捷键，懒求值避免普通条目做反向键表查找
+          (shortcut (lambda () (and source (kbd-find-shortcut source #f))))
+         ) ;
+      (cond ((tuple? label 'balloon 2)
+             (widget-balloon but (create-text-widget (caddr label) (shortcut) style))
+            ) ;
+            ((and (tuple? label 'check 3) (tuple? (cadr label) 'balloon 2))
+             (widget-balloon but (create-text-widget (caddr (cadr label)) (shortcut) style))
+            ) ;
+            (else but)
+      ) ;cond
+    ) ;let
+  ) ;with
 ) ;define
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1261,24 +1224,11 @@
 (define (static-menu-link? name)
   "Menus whose expanded result never changes at runtime."
   (in? name
-    '(style-menu add-package-menu
-       remove-package-menu
-       toggle-package-menu
-       basic-theme-menu
-       document-page-size-menu
-       document-language-menu
-       document-short-font-menu
-       document-font-base-size-menu
-       page-rendering-menu
-       page-layout-menu
-       document-columns-menu
-       print-menu-inline
-       new-file-menu
-       load-menu
-       save-menu
-       close-menu
-       color-menu
-       document-encryption-menu
+    '(style-menu add-package-menu remove-package-menu toggle-package-menu
+       basic-theme-menu document-page-size-menu document-language-menu
+       document-short-font-menu document-font-base-size-menu page-rendering-menu
+       page-layout-menu document-columns-menu print-menu-inline new-file-menu
+       load-menu save-menu close-menu color-menu document-encryption-menu
        document-columns-menu)
   ) ;in?
 ) ;define
@@ -1420,16 +1370,9 @@
   `(toggle ,(replace-procedures (cadr p)) ,((caddr p)))
 ) ;define
 
-(define menu-expand-count 0)
-
 (define (menu-expand-list l)
   "Expand links and conditional menus in list of menus @l."
-  (map (lambda (item)
-         (set! menu-expand-count (+ menu-expand-count 1))
-         (menu-expand item)
-       ) ;lambda
-    l
-  ) ;map
+  (map menu-expand l)
 ) ;define
 
 (define must-eval-list '(input enum choice filtered-choice toggle))
@@ -1977,14 +1920,8 @@
 
 (tm-define (tool-close pos tool quit . opt-win)
   (if (== pos :any)
-    (for (pos* (list :transient-right
-                 :right
-                 :bottom-right
-                 :transient-left
-                 :left
-                 :bottom-left
-                 :transient-bottom
-                 :bottom
+    (for (pos* (list :transient-right :right :bottom-right :transient-left :left
+                 :bottom-left :transient-bottom :bottom
                ) ;list
          ) ;pos*
       (apply tool-close (cons* pos* tool quit opt-win))
